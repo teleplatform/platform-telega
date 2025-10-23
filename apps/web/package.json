@@ -1,0 +1,10 @@
+{
+  "name": "@telega/web",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "node server.js",
+    "build": "echo \"(placeholder) build web\"",
+    "lint": "echo \"lint ok\""
+  }
+}
