@@ -1,19 +1,16 @@
 import "dotenv/config";
 import Fastify from "fastify";
+import { routeChat } from "../core/router.js";
+import type { ChatRequest } from "../types/chat.js";
 
 const app = Fastify({ logger: true });
 
 app.get("/health", async () => ({ ok: true, service: "tele-gpt", ts: Date.now() }));
 
 app.post("/v1/chat", async (req, reply) => {
-  // пока заглушка: просто эхо
-  const body = (req.body ?? {}) as any;
-  const message = body?.message ?? "";
-  return reply.send({
-    id: "demo",
-    model: body?.model ?? "local-demo",
-    output: `Tele•GPT says: ${message}`,
-  });
+  const body = (req.body ?? {}) as ChatRequest;
+  const res = await routeChat(body);
+  return reply.send(res);
 });
 
 const port = Number(process.env.TELEGPT_PORT ?? 8787);
