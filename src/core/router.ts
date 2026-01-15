@@ -13,6 +13,7 @@ function makeRequestId(req: ChatRequest): string {
 }
 
 export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
+  const t0 = Date.now();
   const modelRaw = req.model ?? "local-demo";
   const model = modelRaw.toLowerCase();
   const request_id = makeRequestId(req);
@@ -44,6 +45,7 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       model_raw: modelRaw,
       model_resolved: resolved_model,
       ts: Date.now(),
+      latency_ms: Date.now() - t0,
     },
   } as ChatResponse;
 }
