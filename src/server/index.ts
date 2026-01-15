@@ -1,15 +1,30 @@
 import "dotenv/config";
 import Fastify from "fastify";
-import { routeChat } from "../core/router.js";
-import type { ChatRequest } from "../types/chat.js";
+import { routeChat } from "../core/router.ts";
+import type { ChatRequest } from "../types/chat.ts";
+import { listModels } from "../core/models.ts";
 
-const app = Fastify({ logger: true });
+const app = Fastify({
+  logger: {
+    transport: process.env.TELEGPT_ENV === "dev"
+      ? { target: "pino-pretty" }
+      : undefined,
+  },
+});
 
-app.get("/health", async () => ({ ok: true, service: "tele-gpt", ts: Date.now() }));
+app.get("/health", async () => ({
+  ok: true,
+  service: "tele-gpt",
+  ts: Date.now(),
+}));
+
+app.get("/v1/models", async (_req, reply) => {
+  return reply.send(listModels());
+});
 
 app.post("/v1/chat", async (req, reply) => {
   const body = (req.body ?? {}) as ChatRequest;
-  const res = await routeChat(body);
+  const res = await routeChat(body, { requestId: (req as any).id });
   return reply.send(res);
 });
 
