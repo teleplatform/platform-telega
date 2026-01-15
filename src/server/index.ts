@@ -1,5 +1,6 @@
 import "dotenv/config";
 import Fastify from "fastify";
+import { randomUUID } from "crypto";
 import { routeChat } from "../core/router.ts";
 import type { ChatRequest } from "../types/chat.ts";
 import { listModels } from "../core/models.ts";
@@ -24,7 +25,8 @@ app.get("/v1/models", async (_req, reply) => {
 
 app.post("/v1/chat", async (req, reply) => {
   const body = (req.body ?? {}) as ChatRequest;
-  const res = await routeChat(body, { requestId: (req as any).id });
+  const requestId = (req as any).id ?? randomUUID();
+  const res = await routeChat(body, { requestId });
   return reply.send(res);
 });
 
