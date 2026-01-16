@@ -6,3 +6,6 @@ dist
 .logs/
 .run/
 server.log
+
+# App workspaces
+apps/**/node_modules/
