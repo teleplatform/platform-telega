@@ -4,6 +4,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "tsx watch src/server/index.ts",
+    "dev:daemon": "tsx src/server/index.ts",
     "start": "node --enable-source-maps dist/server/index.js",
     "build": "tsc -p tsconfig.json"
   },

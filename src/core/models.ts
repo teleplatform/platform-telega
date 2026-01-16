@@ -11,9 +11,13 @@ export const MODELS: ModelItem[] = [
 ];
 
 export function listModels() {
+  const hasOpenAIKey = !!process.env.OPENAI_API_KEY?.trim();
+  const filtered = hasOpenAIKey
+    ? MODELS
+    : MODELS.filter((m) => m.provider !== "openai");
   return {
     object: "list",
-    data: MODELS.map((m) => ({
+    data: filtered.map((m) => ({
       id: m.id,
       object: "model",
       owned_by: m.provider,

@@ -2,8 +2,9 @@ import "dotenv/config";
 import Fastify from "fastify";
 import { randomUUID } from "crypto";
 import { routeChat } from "../core/router.ts";
-import type { ChatRequest } from "../types/chat.ts";
+import type { ChatRequest, ChatResponse } from "../types/chat.ts";
 import { listModels } from "../core/models.ts";
+import { idempoHandle } from "./idempotency.ts";
 
 const app = Fastify({
   logger: {
@@ -12,6 +13,7 @@ const app = Fastify({
       : undefined,
   },
 });
+
 
 app.get("/health", async () => ({
   ok: true,
@@ -25,9 +27,17 @@ app.get("/v1/models", async (_req, reply) => {
 
 app.post("/v1/chat", async (req, reply) => {
   const body = (req.body ?? {}) as ChatRequest;
-  const requestId = (req as any).id ?? randomUUID();
-  const res = await routeChat(body, { requestId });
-  return reply.send(res);
+  const headerId = req.headers["x-request-id"];
+  const requestId =
+    (typeof headerId === "string" && headerId) ||
+    (req as any).id ||
+    randomUUID();
+  const result = await idempoHandle(requestId, async () => {
+    const res = await routeChat(body, { requestId });
+    return { body: res, statusCode: 200 };
+  });
+  reply.header("x-idempotency-cache", result.usedCache ? "hit" : "miss");
+  return reply.code(result.statusCode).send(result.body);
 });
 
 const port = Number(process.env.TELEGPT_PORT ?? 8787);
