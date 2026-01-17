@@ -175,7 +175,8 @@ function App() {
 
   const handleSendMessage = async (
     forcedRequestId?: string,
-    forcedMessage?: string
+    forcedMessage?: string,
+    retryOnce = false
   ) => {
     if (isLoading) return;
     const messageText = forcedMessage ?? userMessage;
@@ -213,6 +214,15 @@ function App() {
         }),
         signal: ac.signal,
       });
+
+      if (response.status === 429 && !retryOnce) {
+        const raMs = Number(response.headers.get("x-retry-after-ms") ?? "0");
+        const raSec = Number(response.headers.get("retry-after") ?? "1");
+        const waitMs = raMs > 0 ? raMs : Math.max(0, raSec) * 1000;
+        showToast("Сервер занят — пробую ещё раз…");
+        await new Promise((r) => setTimeout(r, waitMs));
+        return handleSendMessage(requestId, messageText, true);
+      }
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);

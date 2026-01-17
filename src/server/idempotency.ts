@@ -99,3 +99,13 @@ export async function idempoHandle(
   const done = await p;
   return { body: done.body, statusCode: done.statusCode, usedCache: false };
 }
+
+export function idempoStats() {
+  return {
+    size: store.size,
+    reqCount,
+    hitCount,
+    missCount,
+    logEvery: LOG_EVERY,
+  };
+}
