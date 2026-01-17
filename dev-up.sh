@@ -59,6 +59,19 @@ kill_pid_file "$UI_PID"
 echo "==> Starting Tele•GPT backend (dev) ..."
 cd "$BACK_DIR"
 
+# Build / deploy metadata (dev defaults)
+if [ -z "${TELEGPT_GIT_SHA:-}" ]; then
+  TELEGPT_GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || true)"
+  export TELEGPT_GIT_SHA
+fi
+
+if [ -z "${TELEGPT_BUILD_ID:-}" ]; then
+  TELEGPT_BUILD_ID="dev"
+  export TELEGPT_BUILD_ID
+fi
+
+echo "[tele-gpt] build=$TELEGPT_BUILD_ID sha=$TELEGPT_GIT_SHA"
+
 # Запускаем backend в фоне (важно: </dev/null чтобы не было 'suspended (tty input)')
 nohup sh -c "npm run dev:daemon" </dev/null >>"$BACK_LOG" 2>&1 &
 BACK_PID_VAL="$!"
