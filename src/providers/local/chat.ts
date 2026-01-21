@@ -23,9 +23,15 @@ export async function chat(req: ChatRequest): Promise<ChatResponse> {
   }
 
   const url = `${base}/chat/completions`;
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
+  if (req.system) {
+    messages.push({ role: "system", content: req.system });
+  }
+  messages.push({ role: "user", content: req.message });
+
   const body: OpenAIChatReq = {
     model,
-    messages: [{ role: "user", content: req.message }],
+    messages,
     temperature: 0.2,
   };
 

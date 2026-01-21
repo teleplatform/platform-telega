@@ -1,7 +1,14 @@
 import OpenAI from "openai";
 import type { ChatRequest, ChatResponse } from "../../types/chat.ts";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let client: OpenAI | null = null;
+
+function getClient(): OpenAI {
+  if (!client) {
+    client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return client;
+}
 
 function stripProviderPrefix(model?: string) {
   const m = model ?? "openai:gpt-4o-mini";
@@ -23,7 +30,7 @@ export async function openaiChat(req: ChatRequest): Promise<ChatResponse> {
   if (req.system) messages.push({ role: "system", content: req.system });
   messages.push({ role: "user", content: req.message ?? "" });
 
-  const r = await client.chat.completions.create({ model, messages });
+  const r = await getClient().chat.completions.create({ model, messages });
   const out = r.choices?.[0]?.message?.content ?? "";
   const usage = r.usage
     ? {

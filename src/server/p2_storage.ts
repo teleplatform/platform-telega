@@ -2,8 +2,15 @@ import Fastify from "fastify";
 import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import fs from "node:fs";
 import type { ChatRequest, ChatResponse } from "../types/chat.ts";
 import { routeChat } from "../core/router.ts";
+import { buildAgentSystemPrompt, DEFAULT_SALES_TEMPLATE } from "../core/agent.ts";
+import { detectIntent } from "../core/intent.ts";
+import type { KnowledgePack } from "../types/agent.ts";
+import { pickLane, buildProviderChain, getLaneConfig, type ProviderSpec, type LaneResult } from "../core/policyRouter.ts";
+import { runWithFallback } from "../core/llmFallback.ts";
+import { CircuitBreaker } from "../core/circuitBreaker.ts";
 import { initSqlite } from "./storage/sqlite.ts";
 import { chooseProvider } from "./provider/strategy.ts";
 import { guardCreatorOnlyBaseUrl } from "./env/guard.ts";
@@ -94,6 +101,30 @@ export async function buildServer() {
   const staleMs =
     Number(process.env.TELEGPT_TASK_STALE_MS ?? "90000") || 90000;
 
+  // Load knowledge pack
+  let knowledgePack: KnowledgePack | undefined;
+  const knowledgePath = process.env.TELEGPT_KNOWLEDGE_PATH;
+  if (knowledgePath && fs.existsSync(knowledgePath)) {
+    try {
+      const raw = fs.readFileSync(knowledgePath, "utf-8");
+      knowledgePack = JSON.parse(raw);
+      app.log.info({ path: knowledgePath }, "Loaded knowledge pack");
+    } catch (err) {
+      app.log.warn({ err, path: knowledgePath }, "Failed to load knowledge pack");
+    }
+  }
+
+  const agentEnabled = process.env.TELEGPT_AGENT_MODE === "true";
+  const systemPrompt = agentEnabled
+    ? buildAgentSystemPrompt(DEFAULT_SALES_TEMPLATE, knowledgePack)
+    : undefined;
+
+  const circuitBreaker = new CircuitBreaker({
+    failureThreshold: 5,
+    windowMs: 60000,
+    cooldownMs: 120000,
+  });
+
   app.get("/health", async () => {
     return { ok: true };
   });
@@ -110,6 +141,20 @@ export async function buildServer() {
 
     const start = Date.now();
 
+    // Detect intent if agent mode is enabled
+    const intent = detectIntent(msg);
+    const overrides = knowledgePack?.policy_hints?.intent_overrides;
+    const laneResult: LaneResult = agentEnabled
+      ? pickLane(intent, msg, overrides)
+      : { lane: "smart", source: "default" };
+    const lane = laneResult.lane;
+    const laneSource = laneResult.source;
+    const laneConfig = getLaneConfig(lane);
+
+    if (agentEnabled) {
+      app.log.info({ intent, lane, lane_source: laneSource, message: msg }, "Detected intent and lane");
+    }
+
     const apiKey = process.env.OPENAI_API_KEY?.trim();
     const localBaseRaw = process.env.LOCAL_OPENAI_BASE_URL?.trim();
     const guarded = guardCreatorOnlyBaseUrl({
@@ -122,42 +167,87 @@ export async function buildServer() {
     }
     const localBase = guarded.baseUrl;
     const localModel = process.env.LOCAL_OPENAI_MODEL?.trim();
-    const choice = chooseProvider({
-      requested_model: req.body?.model,
+
+    // Build provider chain based on lane
+    const fullChain = buildProviderChain(lane, {
       has_openai_key: Boolean(apiKey),
       has_local_base_url: Boolean(localBase),
       local_default_model: localModel,
+      cheap_model: process.env.TELEGPT_MODEL_CHEAP,
+      smart_model: process.env.TELEGPT_MODEL_SMART,
+      coding_model: process.env.TELEGPT_MODEL_CODING,
     });
-    const model = choice.model;
 
-    let out: ChatResponse | null = null;
-    let provider: "local" | "openai" = choice.provider;
-    let mode: AskResponse["mode"] = "echo";
+    // Filter out providers with open circuit breakers
+    const chain = fullChain.filter((spec) => {
+      const isOpen = circuitBreaker.isOpen(spec.provider, spec.model);
+      if (isOpen) {
+        app.log.warn({ provider: spec.provider, model: spec.model }, "Circuit breaker open, skipping provider");
+      }
+      return !isOpen || spec.model === "local-demo"; // Always allow local-demo fallback
+    });
+
+    app.log.info({ lane, chain: chain.map(c => `${c.provider}:${c.model}`) }, "Provider chain");
+
+    // Provider caller function with circuit breaker
+    const callProvider = async (spec: ProviderSpec, chatReq: ChatRequest) => {
+      const modelWithPrefix = `${spec.provider}:${spec.model}`;
+      try {
+        const response = await routeChat({
+          ...chatReq,
+          model: modelWithPrefix,
+        });
+        circuitBreaker.recordSuccess(spec.provider, spec.model);
+        return response;
+      } catch (err) {
+        circuitBreaker.recordFailure(spec.provider, spec.model);
+        throw err;
+      }
+    };
+
+    // Run with fallback
     let replyText = "";
+    let provider: "local" | "openai" = "local";
+    let model = "local-demo";
+    let mode: AskResponse["mode"] = "echo";
     let ok: 1 | 0 = 1;
     let error_code: ApiErrorCode | undefined;
     let error_message: string | undefined;
     let tokens_in: number | undefined;
     let tokens_out: number | undefined;
     let cost_usd: number | undefined;
+    let fallback_used = false;
+    let failures_count = 0;
+    let attempt_number = 1;
 
     try {
-      out = await routeChat({
+      const result = await runWithFallback(chain, callProvider, {
         message: msg,
-        model,
         request_id: t,
+        system: systemPrompt,
       } as ChatRequest);
 
-      provider = (out.meta?.provider ?? choice.provider) as "local" | "openai";
+      replyText = result.reply;
+      provider = result.provider as "local" | "openai";
+      model = result.model;
       mode = provider === "openai" ? "openai" : "echo";
-      replyText = out.output ?? "";
-      tokens_in = out.meta?.usage?.tokens_in;
-      tokens_out = out.meta?.usage?.tokens_out;
-      cost_usd = out.meta?.usage?.cost_usd;
+      fallback_used = result.fallback_used;
+      failures_count = result.failures.length;
+      attempt_number = result.attempt_number;
+
+      if (result.meta?.usage) {
+        tokens_in = result.meta.usage.tokens_in;
+        tokens_out = result.meta.usage.tokens_out;
+        cost_usd = result.meta.usage.cost_usd;
+      }
+
+      if (result.failures.length > 0) {
+        app.log.warn({ failures: result.failures, lane }, "Provider fallback occurred");
+      }
     } catch (_err) {
       ok = 0;
       error_code = "UPSTREAM_ERROR";
-      error_message = "upstream error";
+      error_message = "all providers failed";
     }
 
     const duration_ms = Date.now() - start;
@@ -198,6 +288,15 @@ export async function buildServer() {
         provider,
         model,
         duration_ms,
+        lane,
+        lane_source: laneSource,
+        intent: intent.type,
+        intent_confidence: intent.confidence,
+        fallback_used,
+        failures_count,
+        attempt_number,
+        max_tokens: laneConfig.max_tokens,
+        timeout_ms: laneConfig.timeout_ms,
       },
     };
 

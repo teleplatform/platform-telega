@@ -264,12 +264,12 @@ export function initSqlite(dbFile: string) {
     UPDATE build_tasks
     SET
       status = 'blocked',
-      updated_at = ?2,
+      updated_at = ?,
       error_code = 'STALE_HEARTBEAT',
       error_message = 'runner heartbeat expired'
     WHERE status = 'running'
-      AND (?1 IS NULL OR visibility = ?1)
-      AND (heartbeat_at IS NULL OR heartbeat_at < ?3)
+      AND (? IS NULL OR visibility = ?)
+      AND (heartbeat_at IS NULL OR heartbeat_at < ?)
   `);
 
   const TERMINAL = new Set(["done", "partial", "blocked"]);
@@ -429,7 +429,7 @@ export function initSqlite(dbFile: string) {
       cutoff: number;
     }) {
       const vis = input.visibility ?? null;
-      const r = sweepStaleStmt.run(vis, input.now, input.cutoff);
+      const r = sweepStaleStmt.run(input.now, vis, vis, input.cutoff);
       return { marked_blocked: Number(r.changes || 0) };
     },
     setBuildTaskStatus(input: {

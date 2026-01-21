@@ -1,0 +1,57 @@
+{
+  "business_name": "TechShop Pro",
+  "description": "We sell professional tech equipment and accessories with fast shipping and excellent customer service.",
+  "pricing": [
+    {
+      "item": "Wireless Mouse Pro",
+      "price": "$49.99",
+      "details": "Ergonomic design, 12-month warranty"
+    },
+    {
+      "item": "Mechanical Keyboard RGB",
+      "price": "$129.99",
+      "details": "Cherry MX switches, customizable lighting"
+    },
+    {
+      "item": "USB-C Hub 7-in-1",
+      "price": "$39.99",
+      "details": "HDMI, USB 3.0, SD card reader"
+    }
+  ],
+  "faq": [
+    {
+      "question": "What is your shipping policy?",
+      "answer": "We offer free shipping on orders over $50. Standard shipping takes 3-5 business days."
+    },
+    {
+      "question": "Do you accept returns?",
+      "answer": "Yes, we accept returns within 30 days of purchase. Items must be unused and in original packaging."
+    },
+    {
+      "question": "What payment methods do you accept?",
+      "answer": "We accept all major credit cards, PayPal, and Apple Pay."
+    }
+  ],
+  "policies": [
+    {
+      "title": "Warranty",
+      "content": "All products come with a manufacturer's warranty. Extended warranty available for purchase."
+    },
+    {
+      "title": "Price Match",
+      "content": "We match competitor prices on identical products. Just show us the ad."
+    }
+  ],
+  "contacts": {
+    "phone": "1-800-TECH-PRO",
+    "email": "support@techshoppro.com",
+    "hours": "Mon-Fri 9am-6pm EST",
+    "address": "123 Tech Street, Silicon Valley, CA 94000"
+  },
+  "policy_hints": {
+    "intent_overrides": {
+      "booking": "smart",
+      "warranty": "smart"
+    }
+  }
+}
