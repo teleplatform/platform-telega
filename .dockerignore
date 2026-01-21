@@ -1,0 +1,10 @@
+node_modules
+dist
+.logs
+.run
+server.log
+.DS_Store
+apps/**/node_modules
+apps/**/dist
+apps/**/build
+apps/**/.next

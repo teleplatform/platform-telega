@@ -1,0 +1,26 @@
+services:
+  tele-gpt:
+    build:
+      context: .
+      args:
+        TELEGPT_BUILD_ID: ${TELEGPT_BUILD_ID:-dev}
+        TELEGPT_GIT_SHA: ${TELEGPT_GIT_SHA:-}
+    environment:
+      TELEGPT_ENV: prod
+      TELEGPT_HOST: 0.0.0.0
+      TELEGPT_PORT: 8787
+      PORT: 8787
+      TELEGPT_BUILD_ID: dev
+      TELEGPT_GIT_SHA: ""
+      TELEGPT_MAX_CONCURRENCY: 4
+      TELEGPT_MAX_QUEUE: 50
+      TELEGPT_SHUTDOWN_TIMEOUT_MS: 15000
+    ports:
+      - "8787:8787"
+    restart: unless-stopped
+    stop_grace_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

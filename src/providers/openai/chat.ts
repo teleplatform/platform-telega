@@ -25,11 +25,18 @@ export async function openaiChat(req: ChatRequest): Promise<ChatResponse> {
 
   const r = await client.chat.completions.create({ model, messages });
   const out = r.choices?.[0]?.message?.content ?? "";
+  const usage = r.usage
+    ? {
+        tokens_in: r.usage.prompt_tokens,
+        tokens_out: r.usage.completion_tokens,
+      }
+    : undefined;
 
   return {
     id: r.id ?? "openai",
     model: `openai:${model}`,
     output: out,
+    meta: usage ? { provider: "openai", model: `openai:${model}`, usage } : undefined,
     usage: r.usage
       ? {
           inputTokens: r.usage.prompt_tokens,

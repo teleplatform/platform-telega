@@ -1,0 +1,62 @@
+{
+  "type": "build_task",
+  "version": "1.0",
+  "meta": {
+    "task_id": "auto",
+    "created_at": 0,
+    "priority": "normal",
+    "mode": "smart",
+    "persona": "builder",
+    "ecosystem": "telega",
+    "visibility": "creator"
+  },
+  "goal": {
+    "title": "Short goal here",
+    "description": "What exactly must appear in the product."
+  },
+  "user_story": "As a user, I want ... so that ...",
+  "scope": {
+    "must_include": ["..."],
+    "out_of_scope": ["..."]
+  },
+  "uiux": {
+    "screen": "where this lives",
+    "components": ["button", "modal", "form"],
+    "behavior": ["click -> open modal", "submit -> success toast"],
+    "states": {
+      "loading": true,
+      "empty": true,
+      "error": true
+    }
+  },
+  "data_api": {
+    "tables": [],
+    "api_routes": [],
+    "auth": {
+      "required": false,
+      "rls": false
+    },
+    "logging": {
+      "required": true
+    }
+  },
+  "files": {
+    "hint_paths": [],
+    "allow_discovery": true
+  },
+  "acceptance_criteria": [
+    "Criterion 1",
+    "Criterion 2",
+    "Criterion 3"
+  ],
+  "verification": {
+    "commands": ["pnpm lint", "pnpm typecheck", "pnpm build"],
+    "manual": ["Open screen X", "Click Y", "Validate Z"]
+  },
+  "constraints": {
+    "public_creator_split": true,
+    "minimal_patch": true,
+    "no_extra_dependencies": true,
+    "production_ready": true
+  }
+}

@@ -12,3 +12,4 @@ bash dev-up.sh
 ```
 
 Dev notes: see CONTRIBUTING.md
+Deploy notes: see DEPLOYMENT.md

@@ -1,0 +1,29 @@
+changelog:
+  categories:
+    - title: "Features"
+      labels:
+        - "feature"
+        - "feat"
+
+    - title: "Bug Fixes"
+      labels:
+        - "bug"
+        - "fix"
+
+    - title: "Documentation"
+      labels:
+        - "docs"
+
+    - title: "CI / Tooling"
+      labels:
+        - "ci"
+        - "chore"
+
+    - title: "Dependencies"
+      labels:
+        - "dependencies"
+        - "deps"
+
+    - title: "Other"
+      labels:
+        - "*"

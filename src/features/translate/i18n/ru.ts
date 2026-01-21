@@ -1,0 +1,25 @@
+export const ru = {
+  title: "Tele•GPT Translate",
+  placeholder: "Вставь текст для перевода",
+  detect: "Автоопределение",
+  translate: "Перевести",
+  copy: "Копировать",
+  share: "Поделиться",
+  style: "Стиль",
+  source: "Источник",
+  target: "Куда переводим",
+  comingSoon: "Скоро",
+  chars: (n: number) => `${n} символов`,
+  how: [
+    "Добавь текст / голос / фото",
+    "Перевод мгновенно",
+    "Уточняй стиль и смысл",
+  ],
+  audience: [
+    { title: "Для студентов", icon: "🎓" },
+    { title: "Для путешествий", icon: "✈️" },
+    { title: "Для бизнеса и продавцов", icon: "💼" },
+    { title: "Для магазинов MarketBase", icon: "🛍️" },
+    { title: "Для мастеров Services", icon: "🧰" },
+  ],
+};

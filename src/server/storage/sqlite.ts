@@ -40,6 +40,10 @@ export type BuildTaskRow = {
   result_json?: string | null;
   error_code?: string | null;
   error_message?: string | null;
+  runner_id?: string | null;
+  heartbeat_at?: number | null;
+  progress?: number | null;
+  note?: string | null;
 };
 
 function columnExists(db: Database.Database, table: string, column: string): boolean {
@@ -104,6 +108,11 @@ export function initSqlite(dbFile: string) {
     CREATE INDEX IF NOT EXISTS idx_build_tasks_updated
     ON build_tasks (updated_at DESC);
   `);
+
+  addColumnIfMissing(db, "build_tasks", "runner_id", "TEXT");
+  addColumnIfMissing(db, "build_tasks", "heartbeat_at", "INTEGER");
+  addColumnIfMissing(db, "build_tasks", "progress", "INTEGER");
+  addColumnIfMissing(db, "build_tasks", "note", "TEXT");
 
   addColumnIfMissing(db, "ask_traces", "ok", "INTEGER NOT NULL DEFAULT 1");
   addColumnIfMissing(db, "ask_traces", "duration_ms", "INTEGER");
@@ -176,32 +185,94 @@ export function initSqlite(dbFile: string) {
 
   const getTaskStmt = db.prepare(`
     SELECT task_id, status, visibility, title, created_at, updated_at, task_json,
-           result_json, error_code, error_message
+           result_json, error_code, error_message, runner_id, heartbeat_at, progress, note
     FROM build_tasks
     WHERE task_id = ?
   `);
 
   const listTasksStmt = db.prepare(`
-    SELECT task_id, status, visibility, title, created_at, updated_at
+    SELECT task_id, status, visibility, title, created_at, updated_at, heartbeat_at, progress
     FROM build_tasks
     ORDER BY updated_at DESC
     LIMIT ?
   `);
 
+  const listTasksByStatusStmt = db.prepare(`
+    SELECT task_id, status, visibility, title, created_at, updated_at, heartbeat_at, progress
+    FROM build_tasks
+    WHERE status = ?
+    ORDER BY updated_at DESC
+    LIMIT ?
+  `);
+
+  const listTasksByVisibilityStmt = db.prepare(`
+    SELECT task_id, status, visibility, title, created_at, updated_at, heartbeat_at, progress
+    FROM build_tasks
+    WHERE visibility = ?
+    ORDER BY updated_at DESC
+    LIMIT ?
+  `);
+
+  const listTasksByStatusVisibilityStmt = db.prepare(`
+    SELECT task_id, status, visibility, title, created_at, updated_at, heartbeat_at, progress
+    FROM build_tasks
+    WHERE status = ? AND visibility = ?
+    ORDER BY updated_at DESC
+    LIMIT ?
+  `);
+
+  const countsStmt = db.prepare(`
+    SELECT status, COUNT(*) as c
+    FROM build_tasks
+    WHERE (?1 IS NULL OR visibility = ?1)
+    GROUP BY status
+  `);
+
+  const staleRunningStmt = db.prepare(`
+    SELECT COUNT(*) as c
+    FROM build_tasks
+    WHERE status = 'running'
+      AND (?1 IS NULL OR visibility = ?1)
+      AND (
+        heartbeat_at IS NULL OR
+        heartbeat_at < ?2
+      )
+  `);
+
+  const heartbeatStmt = db.prepare(`
+    UPDATE build_tasks
+    SET status = CASE
+        WHEN status IN ('done','partial','blocked') THEN status
+        ELSE 'running'
+      END,
+      runner_id = COALESCE(?, runner_id),
+      heartbeat_at = ?,
+      progress = COALESCE(?, progress),
+      note = COALESCE(?, note),
+      updated_at = ?
+    WHERE task_id = ?
+  `);
+
+  const getHeartbeatStmt = db.prepare(`
+    SELECT task_id, status, heartbeat_at, progress
+    FROM build_tasks
+    WHERE task_id = ?
+  `);
+
   return {
     insertTrace(trace: AskTrace) {
-    insertStmt.run({
-      ...trace,
-      duration_ms: trace.duration_ms ?? null,
-      latency_ms: trace.latency_ms ?? null,
-      request_bytes: trace.request_bytes ?? null,
-      reply_bytes: trace.reply_bytes ?? null,
-      tokens_in: trace.tokens_in ?? null,
-      tokens_out: trace.tokens_out ?? null,
-      cost_usd: trace.cost_usd ?? null,
-      error_code: trace.error_code ?? null,
-      error_message: trace.error_message ?? null,
-    });
+      insertStmt.run({
+        ...trace,
+        duration_ms: trace.duration_ms ?? null,
+        latency_ms: trace.latency_ms ?? null,
+        request_bytes: trace.request_bytes ?? null,
+        reply_bytes: trace.reply_bytes ?? null,
+        tokens_in: trace.tokens_in ?? null,
+        tokens_out: trace.tokens_out ?? null,
+        cost_usd: trace.cost_usd ?? null,
+        error_code: trace.error_code ?? null,
+        error_message: trace.error_message ?? null,
+      });
     },
     getTrace(traceId: string) {
       return getStmt.get(traceId) as AskTrace | undefined;
@@ -245,11 +316,89 @@ export function initSqlite(dbFile: string) {
     getBuildTask(task_id: string) {
       return getTaskStmt.get(task_id) as BuildTaskRow | undefined;
     },
-    listBuildTasks(limit?: number) {
-      const n = Math.min(Math.max(limit ?? 20, 1), 100);
+    listBuildTasks(input: {
+      limit?: number;
+      status?: BuildTaskRow["status"];
+      visibility?: BuildTaskRow["visibility"];
+    }) {
+      const n = Math.min(Math.max(input.limit ?? 20, 1), 100);
+      if (input.status && input.visibility) {
+        return listTasksByStatusVisibilityStmt.all(
+          input.status,
+          input.visibility,
+          n
+        ) as Array<
+          Pick<
+            BuildTaskRow,
+            "task_id" | "status" | "visibility" | "title" | "created_at" | "updated_at" | "heartbeat_at" | "progress"
+          >
+        >;
+      }
+      if (input.status) {
+        return listTasksByStatusStmt.all(input.status, n) as Array<
+          Pick<
+            BuildTaskRow,
+            "task_id" | "status" | "visibility" | "title" | "created_at" | "updated_at" | "heartbeat_at" | "progress"
+          >
+        >;
+      }
+      if (input.visibility) {
+        return listTasksByVisibilityStmt.all(input.visibility, n) as Array<
+          Pick<
+            BuildTaskRow,
+            "task_id" | "status" | "visibility" | "title" | "created_at" | "updated_at" | "heartbeat_at" | "progress"
+          >
+        >;
+      }
       return listTasksStmt.all(n) as Array<
-        Pick<BuildTaskRow, "task_id" | "status" | "visibility" | "title" | "created_at" | "updated_at">
+        Pick<
+          BuildTaskRow,
+          "task_id" | "status" | "visibility" | "title" | "created_at" | "updated_at" | "heartbeat_at" | "progress"
+        >
       >;
+    },
+    getBuildTaskSummary(input: {
+      visibility?: BuildTaskRow["visibility"];
+      now: number;
+      staleMs: number;
+    }) {
+      const vis = input.visibility ?? null;
+      const rows = countsStmt.all(vis) as Array<{ status: string; c: number }>;
+
+      const counts = { queued: 0, running: 0, done: 0, partial: 0, blocked: 0 };
+      for (const r of rows) {
+        if (r.status in counts) {
+          (counts as any)[r.status] = Number(r.c) || 0;
+        }
+      }
+
+      const cutoff = input.now - input.staleMs;
+      const staleRow = staleRunningStmt.get(vis, cutoff) as { c: number } | undefined;
+
+      return {
+        counts,
+        stale_running: Number(staleRow?.c ?? 0) || 0,
+      };
+    },
+    heartbeatBuildTask(input: {
+      task_id: string;
+      runner_id?: string | null;
+      progress?: number | null;
+      note?: string | null;
+      now: number;
+    }) {
+      const r = heartbeatStmt.run(
+        input.runner_id ?? null,
+        input.now,
+        input.progress ?? null,
+        input.note ?? null,
+        input.now,
+        input.task_id
+      );
+      if (r.changes <= 0) return null;
+      return getHeartbeatStmt.get(input.task_id) as
+        | { task_id: string; status: string; heartbeat_at: number | null; progress: number | null }
+        | undefined;
     },
   };
 }

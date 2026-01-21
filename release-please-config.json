@@ -1,0 +1,8 @@
+{
+  "release-type": "node",
+  "package-name": "tele-gpt",
+  "include-v-in-tag": true,
+  "packages": {
+    ".": {}
+  }
+}

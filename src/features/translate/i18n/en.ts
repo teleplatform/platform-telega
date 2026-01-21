@@ -1,0 +1,21 @@
+export const en = {
+  title: "Tele•GPT Translate",
+  placeholder: "Type or paste text to translate",
+  detect: "Detect language",
+  translate: "Translate",
+  copy: "Copy",
+  share: "Share",
+  style: "Style",
+  source: "Source",
+  target: "Target",
+  comingSoon: "Coming soon",
+  chars: (n: number) => `${n} chars`,
+  how: ["Add text / voice / image", "Instant translation", "Refine style and meaning"],
+  audience: [
+    { title: "For students", icon: "🎓" },
+    { title: "For travel", icon: "✈️" },
+    { title: "For business & sellers", icon: "💼" },
+    { title: "For MarketBase stores", icon: "🛍️" },
+    { title: "For Services makers", icon: "🧰" },
+  ],
+};

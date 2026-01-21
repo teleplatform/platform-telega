@@ -6,16 +6,27 @@ import type { ChatRequest, ChatResponse } from "../types/chat.ts";
 import { routeChat } from "../core/router.ts";
 import { initSqlite } from "./storage/sqlite.ts";
 import { chooseProvider } from "./provider/strategy.ts";
+import { guardCreatorOnlyBaseUrl } from "./env/guard.ts";
 import type {
   AskRequest,
   AskResponse,
   ApiErrorCode,
   ApiErrorResponse,
+  BuildTaskSummaryResponse,
+  BuildTaskDetailResponse,
+  BuildTaskListItem,
+  BuildTaskListResponse,
   TraceListResponse,
 } from "../types/api.ts";
 import type { BuildResult, BuildTask } from "../types/telecore.ts";
 
-function traceId() {
+type HeartbeatRequest = {
+  runner_id?: string;
+  progress?: number;
+  note?: string;
+};
+
+function hexId24() {
   return crypto.randomBytes(12).toString("hex");
 }
 
@@ -40,19 +51,55 @@ function clampLimit(limit: number | undefined) {
   return Math.min(Math.max(v, 1), 100);
 }
 
+function parseTaskStatus(v: unknown) {
+  if (typeof v !== "string") return undefined;
+  if (v === "queued" || v === "running" || v === "done" || v === "partial" || v === "blocked") {
+    return v;
+  }
+  return "INVALID";
+}
+
+function parseTaskVisibility(v: unknown) {
+  if (typeof v !== "string") return undefined;
+  if (v === "public" || v === "creator" || v === "core") return v;
+  return "INVALID";
+}
+
+function withStale(
+  row: { status: string; heartbeat_at?: number | null; progress?: number | null },
+  now: number,
+  staleMs: number
+) {
+  const heartbeat_at = row.heartbeat_at ?? null;
+  const heartbeat_age_ms =
+    row.status === "running" && heartbeat_at !== null ? now - heartbeat_at : null;
+  const stale =
+    row.status === "running" &&
+    (heartbeat_at === null || (heartbeat_age_ms !== null && heartbeat_age_ms > staleMs));
+
+  return {
+    heartbeat_at,
+    heartbeat_age_ms,
+    progress: row.progress ?? null,
+    stale,
+  };
+}
+
 export async function buildServer() {
   const app = Fastify({ logger: true });
 
   const dataDir = process.env.TELEGPT_DATA_DIR ?? ".data";
   const dbPath = path.join(dataDir, "tele-gpt.sqlite");
   const store = initSqlite(dbPath);
+  const staleMs =
+    Number(process.env.TELEGPT_TASK_STALE_MS ?? "90000") || 90000;
 
   app.get("/health", async () => {
     return { ok: true };
   });
 
   app.post<{ Body: AskRequest }>("/v1/ask", async (req, reply) => {
-    const t = traceId();
+    const t = hexId24();
     const msg = (req.body?.message ?? "").trim();
     const user_id =
       typeof req.body?.user_id === "string" ? req.body.user_id : undefined;
@@ -64,9 +111,22 @@ export async function buildServer() {
     const start = Date.now();
 
     const apiKey = process.env.OPENAI_API_KEY?.trim();
+    const localBaseRaw = process.env.LOCAL_OPENAI_BASE_URL?.trim();
+    const guarded = guardCreatorOnlyBaseUrl({
+      baseUrlEnvName: "LOCAL_OPENAI_BASE_URL",
+      baseUrlValue: localBaseRaw,
+      logger: app.log,
+    });
+    if (guarded.baseUrl) {
+      process.env.LOCAL_OPENAI_BASE_URL = guarded.baseUrl;
+    }
+    const localBase = guarded.baseUrl;
+    const localModel = process.env.LOCAL_OPENAI_MODEL?.trim();
     const choice = chooseProvider({
       requested_model: req.body?.model,
       has_openai_key: Boolean(apiKey),
+      has_local_base_url: Boolean(localBase),
+      local_default_model: localModel,
     });
     const model = choice.model;
 
@@ -198,7 +258,7 @@ export async function buildServer() {
 
   app.post<{ Body: BuildTask }>("/v1/build/tasks", async (req, reply) => {
     const body = req.body as BuildTask | undefined;
-    const t = traceId();
+    const t = hexId24();
 
     if (!body || body.type !== "build_task" || body.version !== "1.0") {
       return reply
@@ -224,7 +284,7 @@ export async function buildServer() {
     const task_id =
       body.meta?.task_id && body.meta.task_id !== "auto"
         ? body.meta.task_id
-        : traceId();
+        : hexId24();
 
     const now = Date.now();
     const task_json = JSON.stringify({
@@ -248,7 +308,7 @@ export async function buildServer() {
   app.post<{ Params: { task_id: string }; Body: BuildResult }>(
     "/v1/build/tasks/:task_id/result",
     async (req, reply) => {
-      const t = traceId();
+      const t = hexId24();
       const task_id = req.params?.task_id;
       const body = req.body as BuildResult | undefined;
 
@@ -288,11 +348,101 @@ export async function buildServer() {
     }
   );
 
-  app.get<{ Querystring: { limit?: string } }>("/v1/build/tasks", async (req) => {
-    const limitRaw = req.query?.limit;
-    const limit = typeof limitRaw === "string" ? Number(limitRaw) : undefined;
-    return { items: store.listBuildTasks(clampLimit(limit)) };
-  });
+  app.post<{ Params: { task_id: string }; Body: HeartbeatRequest }>(
+    "/v1/build/tasks/:task_id/heartbeat",
+    async (req, reply) => {
+      const task_id = req.params.task_id;
+      const body = req.body ?? {};
+
+      let progress: number | undefined;
+      if (typeof body.progress === "number") {
+        if (!Number.isFinite(body.progress) || body.progress < 0 || body.progress > 100) {
+          return reply
+            .status(400)
+            .send(apiError(task_id, "BAD_REQUEST", "progress must be 0..100"));
+        }
+        progress = Math.round(body.progress);
+      }
+
+      const runner_id =
+        typeof body.runner_id === "string" && body.runner_id.trim()
+          ? body.runner_id.trim()
+          : undefined;
+
+      const note =
+        typeof body.note === "string" && body.note.trim()
+          ? body.note.trim().slice(0, 280)
+          : undefined;
+
+      const row = store.heartbeatBuildTask({
+        task_id,
+        runner_id,
+        progress,
+        note,
+        now: Date.now(),
+      });
+
+      if (!row) {
+        return reply
+          .status(404)
+          .send(apiError(task_id, "NOT_FOUND", "task not found"));
+      }
+
+      return {
+        task_id: row.task_id,
+        status: row.status,
+        heartbeat_at: row.heartbeat_at,
+        progress: row.progress,
+      };
+    }
+  );
+
+  app.get<{ Querystring: { limit?: string; status?: string; visibility?: string } }>(
+    "/v1/build/tasks",
+    async (req, reply) => {
+      const limitRaw = req.query?.limit;
+      const limit = typeof limitRaw === "string" ? Number(limitRaw) : undefined;
+
+      const statusParsed = parseTaskStatus(req.query?.status);
+      if (statusParsed === "INVALID") {
+        return reply
+          .status(400)
+          .send(apiError(hexId24(), "BAD_REQUEST", "invalid status"));
+      }
+
+      const visibilityParsed = parseTaskVisibility(req.query?.visibility);
+      if (visibilityParsed === "INVALID") {
+        return reply
+          .status(400)
+          .send(apiError(hexId24(), "BAD_REQUEST", "invalid visibility"));
+      }
+
+      const now = Date.now();
+      const rows = store.listBuildTasks({
+        limit: clampLimit(limit),
+        status: statusParsed,
+        visibility: visibilityParsed,
+      });
+
+      const items: BuildTaskListItem[] = rows.map((row) => ({
+        task_id: row.task_id,
+        status: row.status,
+        visibility: row.visibility,
+        title: row.title,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        ...withStale(row, now, staleMs),
+      }));
+
+      const hasRunning = items.some((i) => i.status === "running");
+      const res: BuildTaskListResponse = {
+        server_time_ms: now,
+        poll_after_ms: hasRunning ? 1500 : 5000,
+        items,
+      };
+      return res;
+    }
+  );
 
   app.get<{ Params: { task_id: string } }>("/v1/build/tasks/:task_id", async (req, reply) => {
     const row = store.getBuildTask(req.params.task_id);
@@ -305,7 +455,8 @@ export async function buildServer() {
     const task_json = row.task_json ? safeJsonParse(row.task_json) : null;
     const result_json = row.result_json ? safeJsonParse(row.result_json) : null;
 
-    return {
+    const now = Date.now();
+    const details: BuildTaskDetailResponse = {
       task_id: row.task_id,
       status: row.status,
       visibility: row.visibility,
@@ -316,8 +467,44 @@ export async function buildServer() {
       result_json,
       error_code: row.error_code ?? null,
       error_message: row.error_message ?? null,
+      ...withStale(row, now, staleMs),
     };
+    return details;
   });
+
+  app.get<{ Querystring: { visibility?: string } }>(
+    "/v1/build/tasks/summary",
+    async (req, reply) => {
+      const now = Date.now();
+
+      const visibilityParsed = parseTaskVisibility(req.query?.visibility);
+      if (visibilityParsed === "INVALID") {
+        return reply
+          .status(400)
+          .send(apiError(hexId24(), "BAD_REQUEST", "invalid visibility"));
+      }
+
+      const summary = store.getBuildTaskSummary({
+        visibility: visibilityParsed,
+        now,
+        staleMs,
+      });
+
+      const { counts, stale_running } = summary;
+
+      let poll_after_ms = 6000;
+      if (counts.running > 0) poll_after_ms = stale_running > 0 ? 800 : 1200;
+      else if (counts.queued > 0) poll_after_ms = 2500;
+
+      const res: BuildTaskSummaryResponse = {
+        server_time_ms: now,
+        poll_after_ms,
+        stale_running,
+        counts,
+      };
+      return res;
+    }
+  );
 
   return app;
 }

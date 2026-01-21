@@ -1,0 +1,25 @@
+export const uz = {
+  title: "Tele•GPT Tarjimon",
+  placeholder: "Tarjima uchun matn kiriting",
+  detect: "Tilni avtomatik aniqlash",
+  translate: "Tarjima qilish",
+  copy: "Nusxalash",
+  share: "Ulashish",
+  style: "Uslub",
+  source: "Manba",
+  target: "Qaysi tilga",
+  comingSoon: "Tez orada",
+  chars: (n: number) => `${n} belgi`,
+  how: [
+    "Matn / ovoz / rasm qo‘shing",
+    "Tarjima darhol",
+    "Uslub va ma’noni aniqlashtiring",
+  ],
+  audience: [
+    { title: "Talabalar uchun", icon: "🎓" },
+    { title: "Sayohat uchun", icon: "✈️" },
+    { title: "Biznes va sotuvchilar uchun", icon: "💼" },
+    { title: "MarketBase do‘konlari uchun", icon: "🛍️" },
+    { title: "Services ustalari uchun", icon: "🧰" },
+  ],
+};

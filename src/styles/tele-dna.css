@@ -1,0 +1,64 @@
+/* Tele•GPT Style DNA v1 — единый визуальный код */
+
+:root {
+  /* base */
+  --background: 240 10% 4%;
+  --foreground: 0 0% 98%;
+
+  /* surfaces */
+  --card: 240 10% 7%;
+  --card-foreground: 0 0% 98%;
+
+  /* accents */
+  --primary: 268 85% 62%;
+  --primary-foreground: 0 0% 100%;
+  --pink: 330 85% 65%;
+
+  /* muted + borders */
+  --muted: 240 6% 14%;
+  --muted-foreground: 240 5% 65%;
+  --tele-border: 0 0% 100% / 0.12;
+
+  /* glass */
+  --tele-glass: 0 0% 100% / 0.06;
+  --tele-glass-strong: 0 0% 100% / 0.10;
+
+  /* radii */
+  --radius: 1.5rem;        /* panels */
+  --radius-input: 1.25rem; /* inputs */
+  --radius-pill: 9999px;   /* pills */
+
+  /* glow */
+  --tele-glow: 268 85% 62% / 0.35;
+  --tele-glow-2: 330 85% 65% / 0.25;
+}
+
+/* background */
+.tele-bg {
+  background:
+    radial-gradient(1200px 800px at 20% 15%, rgba(168, 85, 247, 0.18), transparent 60%),
+    radial-gradient(900px 700px at 80% 20%, rgba(236, 72, 153, 0.14), transparent 55%),
+    radial-gradient(900px 700px at 50% 90%, rgba(59, 130, 246, 0.08), transparent 60%),
+    hsl(var(--background));
+}
+
+/* glass surfaces */
+.tele-glass {
+  background: hsla(var(--tele-glass));
+  border: 1px solid hsla(var(--tele-border));
+  backdrop-filter: blur(20px);
+}
+
+.tele-glass-strong {
+  background: hsla(var(--tele-glass-strong));
+  border: 1px solid hsla(var(--tele-border));
+  backdrop-filter: blur(24px);
+}
+
+/* glow */
+.tele-glow {
+  box-shadow:
+    0 0 0 1px hsla(var(--tele-border)),
+    0 12px 40px rgba(0,0,0,0.35),
+    0 0 28px hsla(var(--tele-glow));
+}
