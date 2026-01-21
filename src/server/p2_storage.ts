@@ -331,6 +331,21 @@ export async function buildServer() {
           .send(apiError(t, "BAD_REQUEST", "task_id mismatch"));
       }
 
+      const task = store.getBuildTask(task_id);
+      if (!task) {
+        return reply
+          .status(404)
+          .send(apiError(task_id, "NOT_FOUND", "task not found"));
+      }
+
+      // P11: запрет регрессии терминальных статусов
+      const terminal = new Set(["done", "partial", "blocked"]);
+      if (terminal.has(task.status)) {
+        return reply
+          .status(409)
+          .send(apiError(task_id, "STATUS_CONFLICT", `task already ${task.status}`));
+      }
+
       const ok = store.setBuildResult({
         task_id,
         status,
@@ -340,8 +355,8 @@ export async function buildServer() {
 
       if (!ok) {
         return reply
-          .status(404)
-          .send(apiError(task_id, "NOT_FOUND", "task not found"));
+          .status(409)
+          .send(apiError(task_id, "STATUS_CONFLICT", "failed to update status"));
       }
 
       return { task_id, status };

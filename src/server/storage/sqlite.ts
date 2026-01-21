@@ -181,6 +181,7 @@ export function initSqlite(dbFile: string) {
     UPDATE build_tasks
     SET status = ?, result_json = ?, updated_at = ?, error_code = ?, error_message = ?
     WHERE task_id = ?
+      AND status NOT IN ('done','partial','blocked')
   `);
 
   const getTaskStmt = db.prepare(`
@@ -269,6 +270,16 @@ export function initSqlite(dbFile: string) {
     WHERE status = 'running'
       AND (?1 IS NULL OR visibility = ?1)
       AND (heartbeat_at IS NULL OR heartbeat_at < ?3)
+  `);
+
+  const TERMINAL = new Set(["done", "partial", "blocked"]);
+
+  const setStatusStmt = db.prepare(`
+    UPDATE build_tasks
+    SET status = ?2, updated_at = ?3
+    WHERE task_id = ?1
+      AND status = ?4
+      AND status NOT IN ('done','partial','blocked')
   `);
 
   return {
@@ -420,6 +431,15 @@ export function initSqlite(dbFile: string) {
       const vis = input.visibility ?? null;
       const r = sweepStaleStmt.run(vis, input.now, input.cutoff);
       return { marked_blocked: Number(r.changes || 0) };
+    },
+    setBuildTaskStatus(input: {
+      task_id: string;
+      from: "queued" | "running";
+      to: "running" | "done" | "partial" | "blocked";
+      now: number;
+    }) {
+      const r = setStatusStmt.run(input.task_id, input.to, input.now, input.from);
+      return { changed: Number(r.changes || 0) };
     },
   };
 }
