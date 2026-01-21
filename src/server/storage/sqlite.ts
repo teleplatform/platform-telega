@@ -259,6 +259,18 @@ export function initSqlite(dbFile: string) {
     WHERE task_id = ?
   `);
 
+  const sweepStaleStmt = db.prepare(`
+    UPDATE build_tasks
+    SET
+      status = 'blocked',
+      updated_at = ?2,
+      error_code = 'STALE_HEARTBEAT',
+      error_message = 'runner heartbeat expired'
+    WHERE status = 'running'
+      AND (?1 IS NULL OR visibility = ?1)
+      AND (heartbeat_at IS NULL OR heartbeat_at < ?3)
+  `);
+
   return {
     insertTrace(trace: AskTrace) {
       insertStmt.run({
@@ -399,6 +411,15 @@ export function initSqlite(dbFile: string) {
       return getHeartbeatStmt.get(input.task_id) as
         | { task_id: string; status: string; heartbeat_at: number | null; progress: number | null }
         | undefined;
+    },
+    sweepStaleRunning(input: {
+      visibility?: BuildTaskRow["visibility"];
+      now: number;
+      cutoff: number;
+    }) {
+      const vis = input.visibility ?? null;
+      const r = sweepStaleStmt.run(vis, input.now, input.cutoff);
+      return { marked_blocked: Number(r.changes || 0) };
     },
   };
 }

@@ -472,6 +472,23 @@ export async function buildServer() {
     return details;
   });
 
+  app.post<{ Querystring: { visibility?: string } }>(
+    "/v1/build/tasks/sweep-stale",
+    async (req, reply) => {
+      const now = Date.now();
+
+      const visibilityParsed = parseTaskVisibility(req.query?.visibility);
+      if (visibilityParsed === "INVALID") {
+        return reply.status(400).send(apiError(hexId24(), "BAD_REQUEST", "invalid visibility"));
+      }
+
+      const cutoff = now - staleMs;
+      const out = store.sweepStaleRunning({ visibility: visibilityParsed, now, cutoff });
+
+      return { ok: true, now, cutoff, ...out };
+    }
+  );
+
   app.get<{ Querystring: { visibility?: string } }>(
     "/v1/build/tasks/summary",
     async (req, reply) => {

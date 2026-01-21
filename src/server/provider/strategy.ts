@@ -9,6 +9,7 @@ export function chooseProvider(input: {
   has_local_base_url: boolean;
   local_default_model?: string;
 }): ProviderChoice {
+  // Канон: OPENAI_API_KEY → openai, иначе LOCAL_OPENAI_BASE_URL → local
   if (input.has_openai_key) {
     const m = (input.requested_model && input.requested_model.trim())
       ? input.requested_model.trim()
