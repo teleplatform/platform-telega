@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false
+  },
+  "include": [
+    "src/server/**/*.ts",
+    "src/core/**/*.ts",
+    "src/providers/**/*.ts",
+    "src/types/**/*.ts"
+  ],
+  "exclude": [
+    "src/server/translate/translator.ts"
+  ]
+}

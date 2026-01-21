@@ -1,4 +1,4 @@
-import type { ChatRequest, ChatResponse } from "../../types/chat.ts";
+import type { ChatRequest, ChatResponse } from "../../types/chat.js";
 
 type OpenAIChatReq = {
   model: string;
@@ -17,6 +17,8 @@ export async function chat(req: ChatRequest): Promise<ChatResponse> {
 
   if (!base) {
     return {
+      id: "local-demo",
+      model: "local:local-demo",
       output: `local-demo: ${req.message}`,
       meta: { provider: "local", model: "local-demo" },
     };
@@ -62,6 +64,8 @@ export async function chat(req: ChatRequest): Promise<ChatResponse> {
     : undefined;
 
   return {
+    id: "local",
+    model: `local:${model}`,
     output: out,
     meta: {
       provider: "local",

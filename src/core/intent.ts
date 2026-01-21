@@ -1,4 +1,4 @@
-import type { Intent, IntentType } from "../types/agent.ts";
+import type { Intent, IntentType } from "../types/agent.js";
 
 const INTENT_KEYWORDS: Record<IntentType, string[]> = {
   buy: ["buy", "purchase", "order", "want to get", "interested in buying", "cost", "price", "how much"],
@@ -10,7 +10,11 @@ const INTENT_KEYWORDS: Record<IntentType, string[]> = {
   general: [],
 };
 
-export function detectIntent(message: string): Intent {
+export function keywordIntent(message: string): {
+  intent: IntentType;
+  confidence: number;
+  reason: string;
+} {
   const lower = message.toLowerCase();
   const scores: Record<IntentType, number> = {
     buy: 0,
@@ -22,33 +26,56 @@ export function detectIntent(message: string): Intent {
     general: 0,
   };
 
+  const matched: Record<IntentType, string[]> = {
+    buy: [],
+    inquiry: [],
+    booking: [],
+    delivery: [],
+    warranty: [],
+    complaint: [],
+    general: [],
+  };
+
   // Score each intent based on keyword matches
   for (const [intent, keywords] of Object.entries(INTENT_KEYWORDS)) {
     if (intent === "general") continue;
-    
+
     for (const keyword of keywords) {
       if (lower.includes(keyword)) {
         scores[intent as IntentType] += 1;
+        matched[intent as IntentType].push(keyword);
       }
     }
   }
 
   // Find highest scoring intent
   let maxScore = 0;
-  let detectedIntent: IntentType = "general";
+  let detected: IntentType = "general";
 
   for (const [intent, score] of Object.entries(scores)) {
     if (score > maxScore) {
       maxScore = score;
-      detectedIntent = intent as IntentType;
+      detected = intent as IntentType;
     }
   }
 
   // Calculate confidence (simple heuristic)
-  const confidence = maxScore > 0 ? Math.min(0.5 + (maxScore * 0.2), 0.95) : 0.3;
+  const confidence = maxScore > 0
+    ? Math.min(0.5 + (maxScore * 0.2), 0.95)
+    : 0.3;
+
+  const reason = maxScore > 0
+    ? `keyword match: ${matched[detected].slice(0, 3).join(", ")}`
+    : "no_keyword_match";
 
   return {
-    type: detectedIntent,
+    intent: detected,
     confidence,
+    reason: reason.slice(0, 200),
   };
+}
+
+export function detectIntent(message: string): Intent {
+  const r = keywordIntent(message);
+  return { type: r.intent, confidence: r.confidence };
 }

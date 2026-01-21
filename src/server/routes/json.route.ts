@@ -1,5 +1,5 @@
-import { ok, fail } from "../llm/contract.ts";
-import { llmGenerateStrictJSON } from "../json/llmJson.ts";
+import { ok, fail } from "../llm/contract.js";
+import { llmGenerateStrictJSON } from "../json/llmJson.js";
 
 export async function registerJsonRoute(server: any) {
   server.post("/json", async (req: any, reply: any) => {

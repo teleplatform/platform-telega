@@ -6,7 +6,7 @@ RUN apk add --no-cache python3 make g++
 COPY package.json package-lock.json ./
 RUN npm ci
 
-COPY tsconfig.json ./
+COPY tsconfig.json tsconfig.server.json ./
 COPY src ./src
 RUN npm run build
 

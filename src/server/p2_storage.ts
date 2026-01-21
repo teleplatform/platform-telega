@@ -3,17 +3,26 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
-import type { ChatRequest, ChatResponse } from "../types/chat.ts";
-import { routeChat } from "../core/router.ts";
-import { buildAgentSystemPrompt, DEFAULT_SALES_TEMPLATE } from "../core/agent.ts";
-import { detectIntent } from "../core/intent.ts";
-import type { KnowledgePack } from "../types/agent.ts";
-import { pickLane, buildProviderChain, getLaneConfig, type ProviderSpec, type LaneResult } from "../core/policyRouter.ts";
-import { runWithFallback } from "../core/llmFallback.ts";
-import { CircuitBreaker } from "../core/circuitBreaker.ts";
-import { initSqlite } from "./storage/sqlite.ts";
-import { chooseProvider } from "./provider/strategy.ts";
-import { guardCreatorOnlyBaseUrl } from "./env/guard.ts";
+import type { ChatRequest, ChatResponse } from "../types/chat.js";
+import { routeChat } from "../core/router.js";
+import { buildAgentSystemPrompt, DEFAULT_SALES_TEMPLATE } from "../core/agent.js";
+import { keywordIntent } from "../core/intent.js";
+import type { Intent, IntentType, KnowledgePack } from "../types/agent.js";
+import {
+  pickLane,
+  buildProviderChain,
+  getLaneConfig,
+  type ProviderSpec,
+  type LaneResult,
+  type Lane,
+} from "../core/policyRouter.js";
+import { extractTaggedText } from "./llm/extract.js";
+import { runWithFallback } from "../core/llmFallback.js";
+import { CircuitBreaker } from "../core/circuitBreaker.js";
+import { buildForgeSpecFromMessage, toBuildTask } from "../core/g2f.js";
+import { initSqlite } from "./storage/sqlite.js";
+import { chooseProvider } from "./provider/strategy.js";
+import { guardCreatorOnlyBaseUrl } from "./env/guard.js";
 import type {
   AskRequest,
   AskResponse,
@@ -24,8 +33,8 @@ import type {
   BuildTaskListItem,
   BuildTaskListResponse,
   TraceListResponse,
-} from "../types/api.ts";
-import type { BuildResult, BuildTask } from "../types/telecore.ts";
+} from "../types/api.js";
+import type { BuildResult, BuildTask } from "../types/telecore.js";
 
 type HeartbeatRequest = {
   runner_id?: string;
@@ -129,7 +138,116 @@ export async function buildServer() {
     return { ok: true };
   });
 
-  app.post<{ Body: AskRequest }>("/v1/ask", async (req, reply) => {
+  // KB-2: GET knowledge pack
+  app.get<{ Params: { business_id: string } }>(
+    "/v1/knowledge/:business_id",
+    async (req, reply) => {
+      const business_id = req.params.business_id;
+      const pack = store.getKnowledgePack(business_id);
+      if (!pack) {
+        return reply
+          .status(404)
+          .send(apiError(business_id, "NOT_FOUND", "knowledge pack not found"));
+      }
+      return {
+        business_id: pack.business_id,
+        version: pack.version,
+        updated_at: pack.updated_at,
+        payload: safeJsonParse(pack.payload_json),
+        etag: pack.etag,
+      };
+    }
+  );
+
+  // KB-2: PUT knowledge pack (Maker-only, CAS via expected_version)
+  app.put<{ Params: { business_id: string }; Body: { payload: any; expected_version?: number } }>(
+    "/v1/knowledge/:business_id",
+    async (req, reply) => {
+      const mode = process.env.TELEGA_MODE?.trim().toLowerCase();
+      if (mode !== "creator") {
+        return reply
+          .status(403)
+          .send(apiError("auth", "FORBIDDEN", "Maker-only endpoint"));
+      }
+
+      const business_id = req.params.business_id;
+      const payload = req.body?.payload;
+      const expected_version = req.body?.expected_version;
+
+      if (payload === undefined) {
+        return reply
+          .status(400)
+          .send(apiError(business_id, "BAD_REQUEST", "payload field required"));
+      }
+      if (typeof expected_version !== "undefined" && typeof expected_version !== "number") {
+        return reply
+          .status(400)
+          .send(apiError(business_id, "BAD_REQUEST", "expected_version must be a number"));
+      }
+
+      const result = store.putKnowledgePack({
+        business_id,
+        payload_json: JSON.stringify(payload),
+        expected_version,
+      });
+
+      if (!result.ok) {
+        return reply.status(409).send(
+          apiError(
+            business_id,
+            "KNOWLEDGE_CONFLICT",
+            `expected_version=${expected_version}, current_version=${result.current_version}`
+          )
+        );
+      }
+
+      return {
+        business_id: result.business_id,
+        version: result.version,
+        updated_at: result.updated_at,
+        etag: result.etag,
+      };
+    }
+  );
+
+  // G2F-1: Generate BuildTask from a free-form message
+  app.post<{ Body: { message: string; visibility?: string } }>(
+    "/v1/forge/tasks/create",
+    async (req, reply) => {
+      const msg = (req.body?.message || "").trim();
+      const visibilityRaw = (req.body?.visibility || "creator").trim();
+      const visibility =
+        visibilityRaw === "public" || visibilityRaw === "creator" || visibilityRaw === "core"
+          ? visibilityRaw
+          : "creator";
+
+      if (!msg) {
+        return reply.status(400).send(apiError("forge", "BAD_REQUEST", "message is required"));
+      }
+
+      const spec = buildForgeSpecFromMessage(msg);
+      if (!spec) {
+        return reply
+          .status(400)
+          .send(apiError("forge", "BAD_REQUEST", "no actionable spec detected"));
+      }
+
+      const task = toBuildTask(spec, visibility as any);
+
+      // Reuse existing build task endpoint internally
+      const r = await app.inject({
+        method: "POST",
+        url: "/v1/build/tasks",
+        payload: task,
+      });
+
+      reply.code(r.statusCode);
+      reply.headers(r.headers as any);
+      return r.json();
+    }
+  );
+
+  app.post<{ Body: AskRequest; Querystring: { knowledge_business_id?: string } }>("/v1/ask", async (req, reply) => {
     const t = hexId24();
     const msg = (req.body?.message ?? "").trim();
     const user_id =
@@ -141,20 +259,23 @@ export async function buildServer() {
 
     const start = Date.now();
 
-    // Detect intent if agent mode is enabled
-    const intent = detectIntent(msg);
-    const overrides = knowledgePack?.policy_hints?.intent_overrides;
-    const laneResult: LaneResult = agentEnabled
-      ? pickLane(intent, msg, overrides)
-      : { lane: "smart", source: "default" };
-    const lane = laneResult.lane;
-    const laneSource = laneResult.source;
-    const laneConfig = getLaneConfig(lane);
+    // Resolve knowledge pack for this request
+    const business_id = typeof req.query?.knowledge_business_id === "string" && req.query.knowledge_business_id.trim() ? req.query.knowledge_business_id.trim() : "default";
+    let knowledge_source: "db" | "file" | "none" = "none";
+    let knowledge_version: number | undefined;
+    let knowledgeForReq: KnowledgePack | undefined;
 
-    if (agentEnabled) {
-      app.log.info({ intent, lane, lane_source: laneSource, message: msg }, "Detected intent and lane");
+    const dbPack = store.getKnowledgePack(business_id);
+    if (dbPack) {
+      knowledge_source = "db";
+      knowledge_version = dbPack.version;
+      knowledgeForReq = safeJsonParse(dbPack.payload_json) ?? undefined;
+    } else if (knowledgePack) {
+      knowledge_source = "file";
+      knowledgeForReq = knowledgePack;
     }
 
+    // Provider config (needed for INTENT-2 LLM fallback and for final answer)
     const apiKey = process.env.OPENAI_API_KEY?.trim();
     const localBaseRaw = process.env.LOCAL_OPENAI_BASE_URL?.trim();
     const guarded = guardCreatorOnlyBaseUrl({
@@ -168,26 +289,14 @@ export async function buildServer() {
     const localBase = guarded.baseUrl;
     const localModel = process.env.LOCAL_OPENAI_MODEL?.trim();
 
-    // Build provider chain based on lane
-    const fullChain = buildProviderChain(lane, {
+    const envModels = {
       has_openai_key: Boolean(apiKey),
       has_local_base_url: Boolean(localBase),
       local_default_model: localModel,
       cheap_model: process.env.TELEGPT_MODEL_CHEAP,
       smart_model: process.env.TELEGPT_MODEL_SMART,
       coding_model: process.env.TELEGPT_MODEL_CODING,
-    });
-
-    // Filter out providers with open circuit breakers
-    const chain = fullChain.filter((spec) => {
-      const isOpen = circuitBreaker.isOpen(spec.provider, spec.model);
-      if (isOpen) {
-        app.log.warn({ provider: spec.provider, model: spec.model }, "Circuit breaker open, skipping provider");
-      }
-      return !isOpen || spec.model === "local-demo"; // Always allow local-demo fallback
-    });
-
-    app.log.info({ lane, chain: chain.map(c => `${c.provider}:${c.model}`) }, "Provider chain");
+    };
 
     // Provider caller function with circuit breaker
     const callProvider = async (spec: ProviderSpec, chatReq: ChatRequest) => {
@@ -205,6 +314,132 @@ export async function buildServer() {
       }
     };
 
+    // INTENT-2: keyword → (LLM fallback if low confidence)
+    const intentThresholdRaw = Number(process.env.TELEGPT_INTENT_THRESHOLD ?? "0.75");
+    const INTENT_THRESHOLD =
+      Number.isFinite(intentThresholdRaw)
+        ? Math.min(Math.max(intentThresholdRaw, 0), 1)
+        : 0.75;
+
+    const kw = keywordIntent(msg);
+    let intent: Intent = { type: kw.intent, confidence: kw.confidence };
+    let intent_source: "keyword" | "llm" = "keyword";
+    let intent_reason = kw.reason;
+
+    const normalizeIntentType = (v: unknown): IntentType | null => {
+      if (typeof v !== "string") return null;
+      const s = v.trim();
+      if (
+        s === "buy" ||
+        s === "inquiry" ||
+        s === "booking" ||
+        s === "delivery" ||
+        s === "warranty" ||
+        s === "complaint" ||
+        s === "general"
+      ) {
+        return s;
+      }
+      return null;
+    };
+
+    if (kw.confidence < INTENT_THRESHOLD) {
+      const llmLaneRaw = String(process.env.TELEGPT_INTENT_LLM_LANE ?? "cheap")
+        .trim()
+        .toLowerCase();
+      const llmLane: Lane =
+        llmLaneRaw === "smart" || llmLaneRaw === "coding" ? llmLaneRaw : "cheap";
+
+      const classifierSystem = [
+        "You are an intent classifier for Tele•GPT.",
+        "Classify the user message into exactly one intent:",
+        "buy | inquiry | booking | delivery | warranty | complaint | general",
+        "Return ONLY a single XML tag: <json>{...}</json>",
+        "JSON schema: {\"intent\":string,\"confidence\":number,\"reason\":string}",
+        "confidence must be between 0 and 1.",
+        "reason must be short (<=200 chars).",
+      ].join("\n");
+
+      try {
+        const classifierFullChain = buildProviderChain(llmLane, envModels);
+        const classifierChain = classifierFullChain.filter((spec) => {
+          const isOpen = circuitBreaker.isOpen(spec.provider, spec.model);
+          return !isOpen || spec.model === "local-demo";
+        });
+
+        const r = await runWithFallback(classifierChain, callProvider, {
+          message: msg,
+          request_id: `${t}_intent`,
+          system: classifierSystem,
+        } as ChatRequest);
+
+        const jsonText = extractTaggedText(r.reply, "json");
+        const parsed = safeJsonParse(jsonText);
+
+        const parsedIntent = normalizeIntentType(parsed?.intent);
+        const parsedConfidence =
+          typeof parsed?.confidence === "number" && Number.isFinite(parsed.confidence)
+            ? Math.min(Math.max(parsed.confidence, 0), 1)
+            : null;
+        const parsedReason = typeof parsed?.reason === "string" ? parsed.reason : null;
+
+        if (parsedIntent && parsedConfidence !== null) {
+          intent = { type: parsedIntent, confidence: parsedConfidence };
+          intent_source = "llm";
+          intent_reason = (parsedReason ?? "llm_classified").slice(0, 200);
+        }
+      } catch (err) {
+        app.log.warn({ err }, "INTENT-2 llm intent classification failed; falling back to keyword intent");
+      }
+    }
+
+    const overrides = knowledgeForReq?.policy_hints?.intent_overrides;
+
+    const defaultLaneResult: LaneResult | undefined = agentEnabled
+      ? pickLane(intent, msg)
+      : undefined;
+    const laneResult: LaneResult = agentEnabled
+      ? pickLane(intent, msg, overrides)
+      : { lane: "smart", source: "default" };
+
+    const lane = laneResult.lane;
+    const laneSource = laneResult.source;
+    const policy_override_used =
+      Boolean(agentEnabled) &&
+      laneSource === "override" &&
+      Boolean(defaultLaneResult) &&
+      defaultLaneResult!.lane !== lane;
+
+    const laneConfig = getLaneConfig(lane);
+
+    if (agentEnabled) {
+      app.log.info(
+        {
+          intent,
+          intent_source,
+          lane,
+          lane_source: laneSource,
+          policy_override_used,
+          message: msg,
+        },
+        "Detected intent and lane"
+      );
+    }
+
+    // Build provider chain based on lane
+    const fullChain = buildProviderChain(lane, envModels);
+
+    // Filter out providers with open circuit breakers
+    const chain = fullChain.filter((spec) => {
+      const isOpen = circuitBreaker.isOpen(spec.provider, spec.model);
+      if (isOpen) {
+        app.log.warn({ provider: spec.provider, model: spec.model }, "Circuit breaker open, skipping provider");
+      }
+      return !isOpen || spec.model === "local-demo"; // Always allow local-demo fallback
+    });
+
+    app.log.info({ lane, chain: chain.map(c => `${c.provider}:${c.model}`) }, "Provider chain");
+
     // Run with fallback
     let replyText = "";
     let provider: "local" | "openai" = "local";
@@ -220,11 +455,16 @@ export async function buildServer() {
     let failures_count = 0;
     let attempt_number = 1;
 
+    // Build system prompt from request-specific knowledge
+    const requestSystemPrompt = agentEnabled && knowledgeForReq
+      ? buildAgentSystemPrompt(DEFAULT_SALES_TEMPLATE, knowledgeForReq)
+      : systemPrompt;
+
     try {
       const result = await runWithFallback(chain, callProvider, {
         message: msg,
         request_id: t,
-        system: systemPrompt,
+        system: requestSystemPrompt,
       } as ChatRequest);
 
       replyText = result.reply;
@@ -274,10 +514,72 @@ export async function buildServer() {
       cost_usd,
       error_code,
       error_message,
+      knowledge_source,
+      knowledge_business_id: business_id,
+      knowledge_version: knowledge_version ?? null,
     });
 
     if (ok === 0) {
       return reply.status(502).send(apiError(t, "UPSTREAM_ERROR", "upstream error"));
+    }
+
+    // G2F-1: Check if message is actionable and auto-create BuildTask
+    // Guardrail: avoid creating tasks for casual chat.
+    let generatedTaskId: string | undefined;
+    if (agentEnabled) {
+      const spec = buildForgeSpecFromMessage(msg);
+
+      const explicitForge = (() => {
+        const lower = msg.toLowerCase();
+        return (
+          /(^|\s)@forge\b/i.test(msg) ||
+          /(^|\s)\/forge\b/i.test(msg) ||
+          lower.includes("сделай тз") ||
+          lower.includes("собери")
+        );
+      })();
+
+      const minRaw = Number(process.env.TELEGPT_G2F_INTENT_CONFIDENCE_MIN ?? "0.8");
+      const G2F_MIN_CONF =
+        Number.isFinite(minRaw) ? Math.min(Math.max(minRaw, 0), 1) : 0.8;
+
+      const ACTIONABLE_INTENTS: ReadonlySet<IntentType> = new Set(["booking", "buy"]);
+      const intentActionable =
+        ACTIONABLE_INTENTS.has(intent.type) && intent.confidence >= G2F_MIN_CONF;
+
+      const allowed = Boolean(spec) && (explicitForge || intentActionable);
+
+      if (spec && allowed) {
+        try {
+          const task = toBuildTask(spec, "creator");
+          const taskResp = await app.inject({
+            method: "POST",
+            url: "/v1/build/tasks",
+            payload: task,
+          });
+          if (taskResp.statusCode === 200) {
+            const taskData = taskResp.json() as { task_id?: string };
+            generatedTaskId = taskData.task_id;
+            app.log.info(
+              { task_id: generatedTaskId, spec: spec.skill_kind },
+              "Auto-generated BuildTask"
+            );
+          }
+        } catch (err) {
+          app.log.warn({ err, spec }, "Failed to auto-generate BuildTask");
+        }
+      } else if (spec) {
+        app.log.info(
+          {
+            spec: spec.skill_kind,
+            explicitForge,
+            intent: intent.type,
+            intent_confidence: intent.confidence,
+            min_confidence: G2F_MIN_CONF,
+          },
+          "Skipped auto BuildTask (actionability gate)"
+        );
+      }
     }
 
     const res: AskResponse = {
@@ -292,11 +594,18 @@ export async function buildServer() {
         lane_source: laneSource,
         intent: intent.type,
         intent_confidence: intent.confidence,
+        intent_source,
+        intent_reason: intent_reason.slice(0, 200),
         fallback_used,
         failures_count,
         attempt_number,
         max_tokens: laneConfig.max_tokens,
         timeout_ms: laneConfig.timeout_ms,
+        knowledge_source,
+        knowledge_business_id: business_id,
+        knowledge_version: knowledge_version ?? null,
+        policy_override_used,
+        generated_task_id: generatedTaskId,
       },
     };
 

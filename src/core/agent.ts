@@ -1,4 +1,4 @@
-import type { AgentTemplate, KnowledgePack } from "../types/agent.ts";
+import type { AgentTemplate, KnowledgePack } from "../types/agent.js";
 
 export function buildAgentSystemPrompt(
   template: AgentTemplate,

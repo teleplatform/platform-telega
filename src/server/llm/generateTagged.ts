@@ -1,7 +1,7 @@
-import { ollamaGenerate } from "./ollama.ts";
-import { extractTaggedText } from "./extract.ts";
-import { enforceBrands } from "./enforceBrands.ts";
-import type { TeleMode, TeleDebug } from "./contract.ts";
+import { ollamaGenerate } from "./ollama.js";
+import { extractTaggedText } from "./extract.js";
+import { enforceBrands } from "./enforceBrands.js";
+import type { TeleMode, TeleDebug } from "./contract.js";
 
 type GenerateTaggedArgs = {
   model: string;
@@ -26,7 +26,6 @@ export async function llmGenerateTagged(args: GenerateTaggedArgs): Promise<{
     prompt: args.prompt,
     temperature: args.temperature ?? 0,
     timeoutMs: args.timeoutMs ?? 60000,
-    stream: false,
   });
 
   const latency_ms = Date.now() - t0;

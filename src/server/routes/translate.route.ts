@@ -1,5 +1,5 @@
-import { ok, fail } from "../llm/contract.ts";
-import { llmTranslateToEN } from "../translate/llmTranslate.ts";
+import { ok, fail } from "../llm/contract.js";
+import { llmTranslateToEN } from "../translate/llmTranslate.js";
 
 export async function registerTranslateRoute(server: any) {
   server.post("/translate", async (req: any, reply: any) => {

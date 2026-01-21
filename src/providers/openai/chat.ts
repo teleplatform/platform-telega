@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { ChatRequest, ChatResponse } from "../../types/chat.ts";
+import type { ChatRequest, ChatResponse } from "../../types/chat.js";
 
 let client: OpenAI | null = null;
 

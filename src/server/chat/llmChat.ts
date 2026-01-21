@@ -1,6 +1,6 @@
-import { llmGenerateTagged } from "../llm/generateTagged.ts";
-import { BRAND } from "../llm/enforceBrands.ts";
-import { ok, fail } from "../llm/contract.ts";
+import { llmGenerateTagged } from "../llm/generateTagged.js";
+import { BRAND } from "../llm/enforceBrands.js";
+import { ok, fail } from "../llm/contract.js";
 
 export type LlmChatAnswerInput = {
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;

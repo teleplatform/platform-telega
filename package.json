@@ -7,13 +7,14 @@
     "dev:daemon": "tsx src/server/index.ts",
     "dev:p1": "tsx src/server/p1_mvp.ts",
     "dev:p2": "tsx src/server/p2_storage.ts",
+    "smoke:kb2": "tsx scripts/kb2-smoke.ts",
     "commitlint": "commitlint",
     "docker:build": "TELEGPT_BUILD_ID=dev TELEGPT_GIT_SHA=$(git rev-parse --short HEAD) docker compose build",
     "docker:up": "TELEGPT_BUILD_ID=dev TELEGPT_GIT_SHA=$(git rev-parse --short HEAD) docker compose up --build",
     "docker:down": "docker compose down",
     "start:server": "node --enable-source-maps dist/server/index.js",
     "start": "node --enable-source-maps dist/server/index.js",
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.server.json"
   },
   "keywords": [],
   "author": "",
@@ -22,6 +23,7 @@
   "devDependencies": {
     "@commitlint/cli": "^19.0.0",
     "@commitlint/config-conventional": "^19.0.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.0.8",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"

@@ -1,7 +1,8 @@
 import Database from "better-sqlite3";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { ApiErrorCode } from "../../types/api.ts";
+import type { ApiErrorCode } from "../../types/api.js";
 
 export type AskTrace = {
   trace_id: string;
@@ -89,6 +90,37 @@ export function initSqlite(dbFile: string) {
     ON ask_traces (user_id, created_at DESC);
   `);
 
+  // Knowledge packs storage (KB-2)
+  // Canonical column: payload_json (strict JSON string), plus optional etag for caching.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS knowledge_packs (
+      business_id  TEXT PRIMARY KEY,
+      version      INTEGER NOT NULL,
+      payload_json TEXT NOT NULL,
+      updated_at   INTEGER NOT NULL,
+      etag         TEXT
+    );
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_knowledge_packs_updated
+    ON knowledge_packs (updated_at DESC);
+  `);
+
+  // Backwards compat: older installs may have had `json` instead of `payload_json`.
+  addColumnIfMissing(db, "knowledge_packs", "payload_json", "TEXT");
+  addColumnIfMissing(db, "knowledge_packs", "etag", "TEXT");
+  addColumnIfMissing(db, "knowledge_packs", "json", "TEXT");
+
+  // One-time best-effort migration: copy json -> payload_json.
+  try {
+    db.exec(
+      "UPDATE knowledge_packs SET payload_json = json WHERE (payload_json IS NULL OR payload_json = '') AND json IS NOT NULL AND json <> ''"
+    );
+  } catch {
+    // ignore
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS build_tasks (
       task_id     TEXT PRIMARY KEY,
@@ -124,23 +156,29 @@ export function initSqlite(dbFile: string) {
   addColumnIfMissing(db, "ask_traces", "cost_usd", "REAL");
   addColumnIfMissing(db, "ask_traces", "error_code", "TEXT");
   addColumnIfMissing(db, "ask_traces", "error_message", "TEXT");
+  addColumnIfMissing(db, "ask_traces", "knowledge_source", "TEXT");
+  addColumnIfMissing(db, "ask_traces", "knowledge_business_id", "TEXT");
+  addColumnIfMissing(db, "ask_traces", "knowledge_version", "INTEGER");
 
   const insertStmt = db.prepare(`
     INSERT INTO ask_traces (
       trace_id, message, reply, mode, provider, model, user_id, created_at,
       ok, duration_ms, latency_ms, request_bytes, reply_bytes, tokens_in, tokens_out,
-      cost_usd, error_code, error_message
+      cost_usd, error_code, error_message,
+      knowledge_source, knowledge_business_id, knowledge_version
     ) VALUES (
       @trace_id, @message, @reply, @mode, @provider, @model, @user_id, @created_at,
       @ok, @duration_ms, @latency_ms, @request_bytes, @reply_bytes, @tokens_in,
-      @tokens_out, @cost_usd, @error_code, @error_message
+      @tokens_out, @cost_usd, @error_code, @error_message,
+      @knowledge_source, @knowledge_business_id, @knowledge_version
     )
   `);
 
   const getStmt = db.prepare(`
     SELECT trace_id, message, reply, mode, provider, model, user_id, created_at,
            ok, duration_ms, latency_ms, request_bytes, reply_bytes, tokens_in,
-           tokens_out, cost_usd, error_code, error_message
+           tokens_out, cost_usd, error_code, error_message,
+           knowledge_source, knowledge_business_id, knowledge_version
     FROM ask_traces
     WHERE trace_id = ?
   `);
@@ -148,7 +186,8 @@ export function initSqlite(dbFile: string) {
   const listAllStmt = db.prepare(`
     SELECT trace_id, message, reply, mode, provider, model, user_id, created_at,
            ok, duration_ms, latency_ms, request_bytes, reply_bytes, tokens_in,
-           tokens_out, cost_usd, error_code, error_message
+           tokens_out, cost_usd, error_code, error_message,
+           knowledge_source, knowledge_business_id, knowledge_version
     FROM ask_traces
     ORDER BY created_at DESC
     LIMIT ?
@@ -157,7 +196,8 @@ export function initSqlite(dbFile: string) {
   const listUserStmt = db.prepare(`
     SELECT trace_id, message, reply, mode, provider, model, user_id, created_at,
            ok, duration_ms, latency_ms, request_bytes, reply_bytes, tokens_in,
-           tokens_out, cost_usd, error_code, error_message
+           tokens_out, cost_usd, error_code, error_message,
+           knowledge_source, knowledge_business_id, knowledge_version
     FROM ask_traces
     WHERE user_id = ?
     ORDER BY created_at DESC
@@ -282,8 +322,34 @@ export function initSqlite(dbFile: string) {
       AND status NOT IN ('done','partial','blocked')
   `);
 
+  // Knowledge pack statements (KB-2)
+  const getKnowledgeStmt = db.prepare(`
+    SELECT business_id, version,
+           COALESCE(payload_json, json) AS payload_json,
+           etag,
+           updated_at
+    FROM knowledge_packs
+    WHERE business_id = ?
+  `);
+
+  const getKnowledgeVersionStmt = db.prepare(`
+    SELECT version
+    FROM knowledge_packs
+    WHERE business_id = ?
+  `);
+
+  const upsertKnowledgeStmt = db.prepare(`
+    INSERT INTO knowledge_packs (business_id, version, payload_json, updated_at, etag)
+    VALUES (@business_id, @version, @payload_json, @updated_at, @etag)
+    ON CONFLICT(business_id) DO UPDATE SET
+      version = excluded.version,
+      payload_json = excluded.payload_json,
+      updated_at = excluded.updated_at,
+      etag = excluded.etag
+  `);
+
   return {
-    insertTrace(trace: AskTrace) {
+    insertTrace(trace: AskTrace & { knowledge_source?: string | null; knowledge_business_id?: string | null; knowledge_version?: number | null }) {
       insertStmt.run({
         ...trace,
         duration_ms: trace.duration_ms ?? null,
@@ -335,6 +401,60 @@ export function initSqlite(dbFile: string) {
         input.task_id
       );
       return r.changes > 0;
+    },
+    getKnowledgePack(business_id: string) {
+      return getKnowledgeStmt.get(business_id) as
+        | {
+            business_id: string;
+            version: number;
+            payload_json: string;
+            etag: string | null;
+            updated_at: number;
+          }
+        | undefined;
+    },
+
+    putKnowledgePack(input: {
+      business_id: string;
+      payload_json: string;
+      expected_version?: number;
+    }):
+      | { ok: true; business_id: string; version: number; updated_at: number; etag: string }
+      | { ok: false; current_version: number } {
+      const now = Date.now();
+      const etag = crypto.createHash("sha256").update(input.payload_json).digest("hex");
+
+      const tx = db.transaction(() => {
+        const curRow = getKnowledgeVersionStmt.get(input.business_id) as
+          | { version: number }
+          | undefined;
+        const currentVersion = curRow?.version ?? 0;
+
+        if (typeof input.expected_version === "number") {
+          if (input.expected_version !== currentVersion) {
+            return { ok: false as const, current_version: currentVersion };
+          }
+        }
+
+        const nextVersion = currentVersion + 1;
+        upsertKnowledgeStmt.run({
+          business_id: input.business_id,
+          version: nextVersion,
+          payload_json: input.payload_json,
+          updated_at: now,
+          etag,
+        });
+
+        return {
+          ok: true as const,
+          business_id: input.business_id,
+          version: nextVersion,
+          updated_at: now,
+          etag,
+        };
+      });
+
+      return tx();
     },
     getBuildTask(task_id: string) {
       return getTaskStmt.get(task_id) as BuildTaskRow | undefined;

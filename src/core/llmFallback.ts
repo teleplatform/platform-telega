@@ -1,5 +1,5 @@
-import type { ProviderSpec } from "./policyRouter.ts";
-import type { ChatRequest, ChatResponse } from "../types/chat.ts";
+import type { ProviderSpec } from "./policyRouter.js";
+import type { ChatRequest, ChatResponse } from "../types/chat.js";
 
 export type ProviderFailure = {
   provider: string;

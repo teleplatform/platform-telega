@@ -1,4 +1,4 @@
-import type { Intent, IntentType } from "../types/agent.ts";
+import type { Intent, IntentType } from "../types/agent.js";
 
 export type Lane = "cheap" | "smart" | "coding";
 

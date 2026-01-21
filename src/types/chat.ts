@@ -3,6 +3,9 @@ export type ChatRequest = {
   model?: string;        // "local-demo" | "openai:gpt-4.1-mini" и т.д.
   system?: string;       // необязательная системная подсказка
   meta?: Record<string, any>;
+
+  // Optional request correlation id (propagated through router)
+  request_id?: string;
 };
 
 export type ChatUsage = {
@@ -23,4 +26,8 @@ export type ChatResponse = {
   output: string;
   usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
   meta?: ChatMeta;
+
+  // Router annotations
+  request_id?: string;
+  latency_ms?: number;
 };

@@ -1,4 +1,4 @@
-import { llmGenerateTagged } from "../llm/generateTagged.ts";
+import { llmGenerateTagged } from "../llm/generateTagged.js";
 
 export async function llmTranslateToEN(opts: {
   sourceText: string;

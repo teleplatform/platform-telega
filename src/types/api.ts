@@ -1,6 +1,12 @@
+import type { IntentType } from "./agent.js";
+import type { Lane } from "../core/policyRouter.js";
+
 export type ApiErrorCode =
   | "BAD_REQUEST"
   | "NOT_FOUND"
+  | "FORBIDDEN"
+  | "STATUS_CONFLICT"
+  | "KNOWLEDGE_CONFLICT"
   | "UPSTREAM_ERROR"
   | "INTERNAL_ERROR";
 
@@ -28,6 +34,32 @@ export type AskResponse = {
     provider: "local" | "openai";
     model?: string;
     duration_ms: number;
+
+    // Policy/router
+    lane?: Lane;
+    lane_source?: "override" | "default";
+    policy_override_used?: boolean;
+
+    // Intent
+    intent?: IntentType;
+    intent_confidence?: number;
+    intent_source?: "keyword" | "llm";
+    intent_reason?: string;
+
+    // LLM fallback accounting
+    fallback_used?: boolean;
+    failures_count?: number;
+    attempt_number?: number;
+    max_tokens?: number;
+    timeout_ms?: number;
+
+    // KB-2
+    knowledge_source?: "db" | "file" | "none";
+    knowledge_business_id?: string;
+    knowledge_version?: number | null;
+
+    // G2F
+    generated_task_id?: string;
   };
 };
 
@@ -50,6 +82,11 @@ export type TraceRecord = {
   cost_usd?: number;
   error_code?: ApiErrorCode;
   error_message?: string;
+
+  // KB-2 (stored on traces)
+  knowledge_source?: "db" | "file" | "none" | null;
+  knowledge_business_id?: string | null;
+  knowledge_version?: number | null;
 };
 
 export type TraceListResponse = {

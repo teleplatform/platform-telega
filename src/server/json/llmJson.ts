@@ -1,7 +1,7 @@
-import { llmGenerateTagged } from "../llm/generateTagged.ts";
-import { ok, fail } from "../llm/contract.ts";
-import type { TeleMode } from "../llm/contract.ts";
-import { enforceBrands } from "../llm/enforceBrands.ts";
+import { llmGenerateTagged } from "../llm/generateTagged.js";
+import { ok, fail } from "../llm/contract.js";
+import type { TeleMode } from "../llm/contract.js";
+import { enforceBrands } from "../llm/enforceBrands.js";
 
 type JsonMode = "strict" | "repair";
 
@@ -60,13 +60,13 @@ export async function llmGenerateStrictJSON(opts: {
   const parsed = safeParseJson(rawJson);
 
   if (parsed.ok) {
+    const addWarn = (d: typeof gen.debug, w: string) =>
+      d ? { ...d, warnings: [...(d.warnings ?? []), w] } : d;
+
     let debug = gen.debug;
 
     if (opts.mode === "maker" && isEmptyObject(parsed.value)) {
-      debug = {
-        ...debug,
-        warnings: [...(debug?.warnings ?? []), "empty_object_returned"],
-      };
+      debug = addWarn(debug, "empty_object_returned");
     }
 
     return ok(
@@ -82,20 +82,18 @@ export async function llmGenerateStrictJSON(opts: {
     const parsed2 = safeParseJson(repaired);
 
     if (parsed2.ok) {
+      // TeleDebug is present only in maker mode from llmGenerateTagged; guard before spreading.
+      const addWarn = (d: any, w: string) =>
+        d ? { ...d, warnings: [...(d.warnings ?? []), w] } : d;
+
       let debug = gen.debug;
 
       if (opts.mode === "maker") {
-        debug = {
-          ...debug,
-          warnings: [...(debug?.warnings ?? []), "json_repaired"],
-        };
+        debug = addWarn(debug, "json_repaired");
       }
 
       if (opts.mode === "maker" && isEmptyObject(parsed2.value)) {
-        debug = {
-          ...debug,
-          warnings: [...(debug?.warnings ?? []), "empty_object_returned"],
-        };
+        debug = addWarn(debug, "empty_object_returned");
       }
 
       return ok(

@@ -1,4 +1,4 @@
-import type { BuildTask } from "../types/telecore.ts";
+import type { BuildTask } from "../types/telecore.js";
 
 export type ForgeSpec = {
   skill_kind: "sales_followup" | "support_ticket" | "kb_update" | "code_change";

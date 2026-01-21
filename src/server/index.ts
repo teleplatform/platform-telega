@@ -2,16 +2,16 @@ import "dotenv/config";
 import Fastify from "fastify";
 import { randomUUID } from "crypto";
 import type { Socket } from "node:net";
-import { routeChat } from "../core/router.ts";
-import type { ChatRequest, ChatResponse } from "../types/chat.ts";
-import { listModels } from "../core/models.ts";
-import { idempoHandle, idempoStats } from "./idempotency.ts";
-import { createSemaphore } from "./semaphore.ts";
-import { normalizeError } from "./errors.ts";
-import { registerTranslateRoute } from "./routes/translate.route.ts";
-import { registerModelsRoute } from "./routes/models.route.ts";
-import { registerJsonRoute } from "./routes/json.route.ts";
-import { registerChatRoute } from "./routes/chat.route.ts";
+import { routeChat } from "../core/router.js";
+import type { ChatRequest, ChatResponse } from "../types/chat.js";
+import { listModels } from "../core/models.js";
+import { idempoHandle, idempoStats } from "./idempotency.js";
+import { createSemaphore } from "./semaphore.js";
+import { normalizeError } from "./errors.js";
+import { registerTranslateRoute } from "./routes/translate.route.js";
+import { registerModelsRoute } from "./routes/models.route.js";
+import { registerJsonRoute } from "./routes/json.route.js";
+import { registerChatRoute } from "./routes/chat.route.js";
 import {
   guardrails429Total,
   errorsTotal,
@@ -22,7 +22,7 @@ import {
   normalizeProviderLabel,
   normalizeCodeLabel,
   normalizeKindLabel,
-} from "./prom.ts";
+} from "./prom.js";
 
 type ReqLogCtx = {
   requestId: string;
@@ -382,7 +382,7 @@ app.post("/v1/chat", async (req, reply) => {
               (err as any).code = "ETIMEDOUT";
               reject(err);
             }, REQUEST_TIMEOUT_MS);
-            routeChat(body, { requestId })
+            routeChat({ ...body, request_id: requestId })
               .then((value) => {
                 clearTimeout(timer);
                 resolve(value);
@@ -392,7 +392,7 @@ app.post("/v1/chat", async (req, reply) => {
                 reject(err);
               });
           })
-        : routeChat(body, { requestId }));
+        : routeChat({ ...body, request_id: requestId }));
       return { body: res, statusCode: 200 };
     } catch (e) {
       const providerHint =
@@ -476,7 +476,7 @@ async function shutdown(signal: string) {
   try {
     await app.close();
   } catch (e) {
-    app.log.warn("[shutdown] fastify.close error:", e);
+    app.log.warn({ err: e }, "[shutdown] fastify.close error");
   } finally {
     for (const s of sockets) {
       try {

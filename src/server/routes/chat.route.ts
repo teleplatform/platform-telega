@@ -1,5 +1,5 @@
-import { llmChatAnswer } from "../chat/llmChat.ts";
-import { fail } from "../llm/contract.ts";
+import { llmChatAnswer } from "../chat/llmChat.js";
+import { fail } from "../llm/contract.js";
 
 export async function registerChatRoute(server: any) {
   server.post("/chat", async (req: any, reply: any) => {

@@ -1,5 +1,5 @@
-import { listModels } from "../../core/models.ts";
-import { ok, fail } from "../llm/contract.ts";
+import { listModels } from "../../core/models.js";
+import { ok, fail } from "../llm/contract.js";
 
 const ASSIGNED = {
   translate: "translategemma:en",

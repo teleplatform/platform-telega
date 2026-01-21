@@ -1,7 +1,7 @@
-import type { ChatRequest, ChatResponse } from "../types/chat.ts";
-import { localDemo } from "../providers/local/demo.ts";
-import { chat as localChat } from "../providers/local/chat.ts";
-import { openaiChat } from "../providers/openai/chat.ts";
+import type { ChatRequest, ChatResponse } from "../types/chat.js";
+import { localDemo } from "../providers/local/demo.js";
+import { chat as localChat } from "../providers/local/chat.js";
+import { openaiChat } from "../providers/openai/chat.js";
 
 function makeRequestId(req: ChatRequest): string {
   const anyReq = req as any;
