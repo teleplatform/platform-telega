@@ -73,12 +73,28 @@ async function main() {
     const task1 = (create1.json() as any).task_id as string;
     assert.ok(task1);
 
+    // queued
+    const getQueued = await app.inject({
+      method: "GET",
+      url: `/v1/build/tasks/${task1}`,
+    });
+    assert.equal(getQueued.statusCode, 200);
+    assert.equal((getQueued.json() as any).status, "queued");
+
+    // running
     const hb1 = await app.inject({
       method: "POST",
       url: `/v1/build/tasks/${task1}/heartbeat`,
       payload: { runner_id: "smoke", progress: 1 },
     });
     assert.equal(hb1.statusCode, 200);
+
+    const getRunning = await app.inject({
+      method: "GET",
+      url: `/v1/build/tasks/${task1}`,
+    });
+    assert.equal(getRunning.statusCode, 200);
+    assert.equal((getRunning.json() as any).status, "running");
 
     const sweepFresh = await app.inject({
       method: "POST",
@@ -118,12 +134,23 @@ async function main() {
     const task2 = (create2.json() as any).task_id as string;
     assert.ok(task2);
 
+    // done + artifact exists
     const resDone = await app.inject({
       method: "POST",
       url: `/v1/build/tasks/${task2}/result`,
       payload: buildResultPayload(task2, "done"),
     });
     assert.equal(resDone.statusCode, 200);
+
+    const getDone = await app.inject({
+      method: "GET",
+      url: `/v1/build/tasks/${task2}`,
+    });
+    assert.equal(getDone.statusCode, 200);
+    const getDoneJson = getDone.json() as any;
+    assert.equal(getDoneJson.status, "done");
+    assert.ok(getDoneJson.result_json, "expected result_json artifact to be present");
+    assert.equal(getDoneJson.result_json?.summary?.status, "done");
 
     // Attempt to change terminal status -> 409 STATUS_CONFLICT
     const resAgain = await app.inject({
