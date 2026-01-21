@@ -1,4 +1,4 @@
-# Release v0.2.0-canon
+# Release v0.2.1-canon
 
 This release locks Tele•GPT core runtime as a reproducible, server-first build.
 
