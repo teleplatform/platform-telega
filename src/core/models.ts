@@ -12,9 +12,25 @@ export const MODELS: ModelItem[] = [
 
 export function listModels() {
   const hasOpenAIKey = !!process.env.OPENAI_API_KEY?.trim();
-  const filtered = hasOpenAIKey
-    ? MODELS
-    : MODELS.filter((m) => m.provider !== "openai");
+  const hasLocal =
+    !!process.env.LOCAL_OPENAI_BASE_URL?.trim() &&
+    !!process.env.LOCAL_OPENAI_MODEL?.trim();
+
+  const dynamic: ModelItem[] = [
+    { id: "local:local-demo", provider: "local", title: "Local demo (echo)" },
+  ];
+  if (hasOpenAIKey) {
+    dynamic.push(
+      { id: "openai:gpt-4o-mini", provider: "openai", title: "OpenAI GPT-4o mini" },
+      { id: "openai:gpt-4.1-mini", provider: "openai", title: "OpenAI GPT-4.1 mini" }
+    );
+  }
+  if (hasLocal) {
+    const localModel = process.env.LOCAL_OPENAI_MODEL!.trim();
+    dynamic.push({ id: `local:${localModel}`, provider: "local" });
+  }
+
+  const filtered = dynamic;
   return {
     object: "list",
     data: filtered.map((m) => ({
