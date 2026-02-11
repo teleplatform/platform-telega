@@ -12,6 +12,7 @@ import { registerTranslateRoute } from "./routes/translate.route.js";
 import { registerModelsRoute } from "./routes/models.route.js";
 import { registerJsonRoute } from "./routes/json.route.js";
 import { registerChatRoute } from "./routes/chat.route.js";
+import { startTelegramBotIfEnabled } from "../telegram/bot.js";
 import {
   guardrails429Total,
   errorsTotal,
@@ -56,6 +57,8 @@ const app = Fastify({
   ),
   trustProxy: process.env.TELEGPT_TRUST_PROXY === "1",
 });
+
+await startTelegramBotIfEnabled();
 
 await registerTranslateRoute(app);
 await registerModelsRoute(app);
@@ -248,19 +251,24 @@ app.addHook("onSend", async (_req, reply, payload) => {
   return payload;
 });
 
-app.get("/health", async (_req, reply) => {
+app.get("/health", (_req, reply) => {
+  reply.header("content-type", "application/json");
   if (isClosing) {
     return reply.code(503).send({
       ok: false,
+      service: "tele-gpt",
       closing: true,
-      version: { buildId: BUILD_ID, gitSha: GIT_SHA },
+      env: process.env.TELEGPT_ENV ?? process.env.NODE_ENV ?? "dev",
+      uptime_s: Math.round(process.uptime()),
+      ts: new Date().toISOString(),
     });
   }
-  return reply.send({
+  reply.send({
     ok: true,
     service: "tele-gpt",
-    ts: Date.now(),
-    version: { buildId: BUILD_ID, gitSha: GIT_SHA },
+    env: process.env.TELEGPT_ENV ?? process.env.NODE_ENV ?? "dev",
+    uptime_s: Math.round(process.uptime()),
+    ts: new Date().toISOString(),
   });
 });
 
