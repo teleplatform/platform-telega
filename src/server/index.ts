@@ -299,22 +299,21 @@ app.get("/metrics.prom", async (_req, reply) => {
   return reply.send(await promMetricsText());
 });
 
-app.get("/ready", async (_req, reply) => {
+app.get("/ready", (_req, reply) => {
   if (isClosing) {
-    reply.header("Connection", "close");
     return reply.code(503).send({
-      ok: false,
       ready: false,
+      service: "tele-gpt",
       closing: true,
-      version: { buildId: BUILD_ID, gitSha: GIT_SHA },
+      env: process.env.TELEGPT_ENV ?? process.env.NODE_ENV ?? "dev",
+      ts: new Date().toISOString(),
     });
   }
-  const st = sem.stats();
   return reply.send({
-    ok: true,
     ready: true,
-    version: { buildId: BUILD_ID, gitSha: GIT_SHA },
-    concurrency: st,
+    service: "tele-gpt",
+    env: process.env.TELEGPT_ENV ?? process.env.NODE_ENV ?? "dev",
+    ts: new Date().toISOString(),
   });
 });
 
