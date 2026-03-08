@@ -156,7 +156,7 @@ workspace/
 
 This prevents uncontrolled filesystem access.
 
-Future canon:
+Primary canon:
 
 WORKSPACE_ENGINE_CANON_v1.md
 
@@ -227,7 +227,7 @@ code tasks → code model
 research tasks → reasoning model  
 creative tasks → creative model  
 
-Future canon:
+Primary canon:
 
 MODEL_ROUTER_CANON_v1.md
 
@@ -247,7 +247,7 @@ Types:
 
 Memory integrates with RAG systems.
 
-Future canon:
+Primary canon:
 
 MEMORY_SYSTEM_CANON_v1.md
 
@@ -273,7 +273,7 @@ Purpose:
 - compliance
 - deterministic replay
 
-Future canon:
+Primary canon:
 
 EVIDENCE_BUNDLE_CANON_v1.md
 
@@ -293,7 +293,7 @@ Examples:
 
 Agents coordinate through the runtime.
 
-Future canon:
+Primary canon:
 
 MULTI_AGENT_ORCHESTRATION_CANON_v1.md
 
