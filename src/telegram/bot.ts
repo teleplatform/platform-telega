@@ -858,6 +858,67 @@ console.error("[creator-control] /patch_rollback failed", e?.message || e);
     }
   });
 
+  bot.command("me", async (ctx) => {
+    try {
+      const { getOrCreateUser, formatUserProfile } = await import("../providers/creator/user-layer.js");
+      const userId = userIdOf(ctx);
+      const telegramRole = getTelegramRole(userId);
+      const role: "owner" | "creator" | "public" = telegramRole === "owner" ? "owner" : telegramRole === "partner" ? "creator" : "public";
+      const user = await getOrCreateUser(String(userId), role);
+      await ctx.reply(formatUserProfile(user));
+    } catch (e: any) {
+      console.error("[creator-control] /me failed", e?.message || e);
+    }
+  });
+
+  bot.command("plan", async (ctx) => {
+    try {
+      const { getOrCreateUser, formatPlanInfo } = await import("../providers/creator/user-layer.js");
+      const userId = userIdOf(ctx);
+      const telegramRole = getTelegramRole(userId);
+      const role: "owner" | "creator" | "public" = telegramRole === "owner" ? "owner" : telegramRole === "partner" ? "creator" : "public";
+      const user = await getOrCreateUser(String(userId), role);
+      await ctx.reply(formatPlanInfo(user.plan));
+    } catch (e: any) {
+      console.error("[creator-control] /plan failed", e?.message || e);
+    }
+  });
+
+  bot.command("limits", async (ctx) => {
+    try {
+      const { getOrCreateUser, checkUserLimits, formatUserProfile } = await import("../providers/creator/user-layer.js");
+      const userId = userIdOf(ctx);
+      const telegramRole = getTelegramRole(userId);
+      const role: "owner" | "creator" | "public" = telegramRole === "owner" ? "owner" : telegramRole === "partner" ? "creator" : "public";
+      const user = await getOrCreateUser(String(userId), role);
+      const check = checkUserLimits(user);
+      const lines = [
+        `📊 Limits Status`,
+        `Allowed: ${check.allowed ? "✅" : "❌"}`,
+        check.reason ? `Reason: ${check.reason}` : "",
+        `\nActive jobs: ${user.usage.activeJobs}/${user.limits.maxActiveJobs}`,
+        `Pending jobs: ${user.usage.pendingJobs}/${user.limits.maxPendingJobs}`,
+        `Daily requests: ${user.usage.dailyRequests}/${user.limits.dailyRequests}`,
+      ];
+      await ctx.reply(lines.filter(Boolean).join("\n"));
+    } catch (e: any) {
+      console.error("[creator-control] /limits failed", e?.message || e);
+    }
+  });
+
+  bot.command("upgrade", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role === "owner") {
+        await ctx.reply("✅ You have full creator plan!");
+      } else {
+        await ctx.reply("📦 Upgrade plans available:\n\nfree: 2 jobs, basic providers\npro: 5 jobs, tools, patch plan\ncreator: unlimited, full access\n\nContact @owner for upgrade.");
+      }
+    } catch (e: any) {
+      console.error("[creator-control] /upgrade failed", e?.message || e);
+    }
+  });
+
   bot.hears("▦ Menu", async (ctx) => {
     try {
       console.log("[telegram-menu] menu_open_requested", { user_id: userIdOf(ctx), role: getTelegramRole(userIdOf(ctx)) });

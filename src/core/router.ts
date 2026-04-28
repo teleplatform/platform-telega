@@ -135,6 +135,42 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
   const taskType = req.task?.type || "chat";
   const effectiveSystem = [STRICT_CONTROL_SYSTEM_PROMPT, req.system].filter(Boolean).join("\n\n");
   console.log(`[router] routeChat start request_id=${request_id} model="${rawModel}" selectedProvider="${requestedProvider || ""}" taskType=${taskType}`);
+  
+  // 1. Check user limits (if user_id provided in meta)
+  if (req.meta?.user_id) {
+    try {
+      const { getOrCreateUser, checkUserLimits, canUseProvider, ROLE_PROVIDERS } = await import("../providers/creator/user-layer.js");
+      const role: "owner" | "creator" | "public" = req.meta.role || "public";
+      const user = await getOrCreateUser(req.meta.user_id, role);
+      const limitCheck = checkUserLimits(user);
+      if (!limitCheck.allowed) {
+        return {
+          id: request_id,
+          model: rawModel,
+          output: `❌ Limit reached: ${limitCheck.reason}`,
+          meta: { provider: "creator" as any, error: limitCheck.reason },
+          request_id,
+          latency_ms: Date.now() - t0,
+        };
+      }
+      // Check provider access
+      if (requestedProvider && requestedProvider !== "auto") {
+        if (!canUseProvider(user, requestedProvider)) {
+          return {
+            id: request_id,
+            model: rawModel,
+            output: `❌ Provider ${requestedProvider} not available on your plan (${user.plan})`,
+            meta: { provider: "creator" as any, error: "provider_not_allowed", plan: user.plan },
+            request_id,
+            latency_ms: Date.now() - t0,
+          };
+        }
+      }
+    } catch (e) {
+      console.error("[router] user limit check failed", e);
+    }
+  }
+  
   let provider: "local" | "openai" | "deepseek_api" | "qwen_api" | "openrouter_kimi";
   let resolved_model: string;
   let base: ChatResponse;

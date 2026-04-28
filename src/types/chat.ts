@@ -31,6 +31,8 @@ export type ChatMeta = {
   agents?: number;
   execution_mode?: "single" | "multi" | "debate" | "research";
   strategy_reasoning?: string;
+  plan?: string;
+  error?: string;
 };
 
 export type ChatResponse = {
