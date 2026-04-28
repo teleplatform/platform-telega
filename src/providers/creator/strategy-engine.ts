@@ -2,6 +2,11 @@ import type { SessionProviderId } from "./session/session-registry.js";
 
 export type ExecutionMode = "single" | "multi_agent" | "debate" | "research";
 
+const KNOWN_PROVIDERS: SessionProviderId[] = [
+  "chatgpt_web", "qwen_web", "deepseek_web", "grok_web", "kimi_web",
+  "perplexity_web", "claude_web", "gemini_web", "poe_web"
+];
+
 export interface ExecutionStep {
   step: number;
   action: "execute" | "analyze" | "refine" | "synthesize";
@@ -18,11 +23,132 @@ export interface ExecutionStrategy {
   reasoning: string;
 }
 
+export interface StrategyValidation {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
 export interface StrategyDecision {
   selectedStrategy: ExecutionStrategy;
   timestamp: number;
   requestId: string;
   messageLength: number;
+}
+
+export interface StrategyEvidence {
+  strategy_mode: string;
+  selected_providers: string[];
+  validation_status: string;
+  fallback_used: boolean;
+  planner_latency_ms: number;
+}
+
+export function validateStrategy(strategy: unknown): StrategyValidation {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  
+  if (!strategy || typeof strategy !== "object") {
+    return { valid: false, errors: ["Invalid strategy object"], warnings: [] };
+  }
+  
+  const s = strategy as Record<string, unknown>;
+  
+  if (!s.mode || !["single", "multi_agent", "debate", "research"].includes(s.mode as string)) {
+    errors.push(`Invalid mode: ${s.mode}`);
+  }
+  
+  if (!Array.isArray(s.providers) || s.providers.length === 0) {
+    errors.push("Missing providers");
+  } else {
+    for (const p of s.providers) {
+      if (!KNOWN_PROVIDERS.includes(p as SessionProviderId)) {
+        errors.push(`Unknown provider: ${p}`);
+      }
+    }
+  }
+  
+  if (!Array.isArray(s.steps) || s.steps.length === 0) {
+    errors.push("Missing steps");
+  } else if (s.steps.length > 5) {
+    errors.push("Too many steps (max 5)");
+  }
+  
+  if (!s.expectedOutput || typeof s.expectedOutput !== "string") {
+    warnings.push("Missing expectedOutput");
+  }
+  
+  if (!s.reasoning || typeof s.reasoning !== "string") {
+    warnings.push("Missing reasoning");
+  }
+  
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+  };
+}
+
+export async function buildStrategyWithGuardrails(
+  message: string,
+  requestId: string
+): Promise<{
+  strategy: ExecutionStrategy;
+  evidence: StrategyEvidence;
+  usedFallback: boolean;
+}> {
+  const startTime = Date.now();
+  
+  try {
+    const strategy = await buildStrategy(message, requestId);
+    const validation = validateStrategy(strategy);
+    
+    if (!validation.valid) {
+      console.log("[strategy-guardrails] Invalid strategy, using fallback", {
+        errors: validation.errors,
+      });
+      
+      const fallback = createFallbackStrategy(message);
+      return {
+        strategy: fallback,
+        evidence: {
+          strategy_mode: fallback.mode,
+          selected_providers: fallback.providers,
+          validation_status: `invalid:${validation.errors.join(",")}`,
+          fallback_used: true,
+          planner_latency_ms: Date.now() - startTime,
+        },
+        usedFallback: true,
+      };
+    }
+    
+    return {
+      strategy,
+      evidence: {
+        strategy_mode: strategy.mode,
+        selected_providers: strategy.providers,
+        validation_status: "valid",
+        fallback_used: false,
+        planner_latency_ms: Date.now() - startTime,
+      },
+      usedFallback: false,
+    };
+  } catch (e: any) {
+    console.error("[strategy-guardrails] Build failed, using fallback", e?.message);
+    
+    const fallback = createFallbackStrategy(message);
+    return {
+      strategy: fallback,
+      evidence: {
+        strategy_mode: fallback.mode,
+        selected_providers: fallback.providers,
+        validation_status: `error:${e.message}`,
+        fallback_used: true,
+        planner_latency_ms: Date.now() - startTime,
+      },
+      usedFallback: true,
+    };
+  }
 }
 
 const STRATEGY_PROMPT = `You are an execution strategy planner. Analyze the user's task and choose the best execution strategy.

@@ -292,14 +292,14 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       console.log("[router] Using Strategy Engine for complex task");
       
       try {
-        const { buildStrategy, executeStrategy, formatStrategySummary } = await import("../providers/creator/strategy-engine.js");
+        const { buildStrategyWithGuardrails, executeStrategy, formatStrategySummary } = await import("../providers/creator/strategy-engine.js");
         
-        const strategy = await buildStrategy(req.message, request_id);
-        console.log("[router] Strategy built:", formatStrategySummary(strategy));
+        const { strategy, evidence, usedFallback } = await buildStrategyWithGuardrails(req.message, request_id);
+        console.log("[router] Strategy:", formatStrategySummary(strategy), { evidence });
         
         const strategyResult = await executeStrategy(strategy, req.message);
         
-        console.log("[router] Strategy executed:", strategyResult.provider);
+        console.log("[router] Strategy executed:", strategyResult.provider, { fallback: usedFallback });
         
         provider = strategyResult.provider as any;
         base = {

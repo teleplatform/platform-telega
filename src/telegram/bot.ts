@@ -425,12 +425,37 @@ export async function startPantheonTelegramBot() {
         await ctx.reply("Usage: /bridge_strategy <your question>\nExample: /bridge_strategy What is the latest AI news?");
         return;
       }
-      const { buildStrategy, formatStrategySummary } = await import("../providers/creator/strategy-engine.js");
+      const { buildStrategyWithGuardrails, formatStrategySummary } = await import("../providers/creator/strategy-engine.js");
       await ctx.reply("🧠 Analyzing...");
-      const strategy = await buildStrategy(message, `tg-${Date.now()}`);
-      await ctx.reply(formatStrategySummary(strategy));
+      const { strategy, evidence, usedFallback } = await buildStrategyWithGuardrails(message, `tg-${Date.now()}`);
+      const summary = formatStrategySummary(strategy);
+      const verbose = `${summary}\n\n📋 Evidence:\n${JSON.stringify(evidence, null, 2)}`;
+      await ctx.reply(usedFallback ? `⚠️ Fallback used\n\n${verbose}` : summary);
     } catch (e: any) {
       console.error("[creator-control] /bridge_strategy failed", e?.message || e);
+    }
+  });
+
+  bot.command("bridge_strategy_verbose", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const message = args.join(" ");
+      if (!message) {
+        await ctx.reply("Usage: /bridge_strategy_verbose <your question>");
+        return;
+      }
+      const { buildStrategyWithGuardrails, formatStrategySummary } = await import("../providers/creator/strategy-engine.js");
+      await ctx.reply("🧠 Analyzing with guardrails...");
+      const { strategy, evidence, usedFallback } = await buildStrategyWithGuardrails(message, `tg-${Date.now()}`);
+      await ctx.reply(formatStrategySummary(strategy));
+      await ctx.reply(`📋 Evidence:\n\`\`\`\n${JSON.stringify(evidence, null, 2)}\n\`\`\``);
+    } catch (e: any) {
+      console.error("[creator-control] /bridge_strategy_verbose failed", e?.message || e);
     }
   });
 
