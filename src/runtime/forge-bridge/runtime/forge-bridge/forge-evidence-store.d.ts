@@ -1,0 +1,11 @@
+import type { ForgeEvidenceStoreConfig, ForgeEvidenceQuery } from "./forge-evidence-export.types.js";
+import type { ForgeInvocationEvidenceRecord } from "./forge-invocation-evidence.types.js";
+export declare function initEvidenceStore(config: ForgeEvidenceStoreConfig): void;
+export declare function getEvidenceStoreConfig(): ForgeEvidenceStoreConfig;
+export declare function appendEvidenceToStore(record: ForgeInvocationEvidenceRecord): Promise<void>;
+export declare function updateEvidenceInStore(invocationId: string, patch: Partial<ForgeInvocationEvidenceRecord>): Promise<ForgeInvocationEvidenceRecord | null>;
+export declare function listEvidenceFromStore(query?: ForgeEvidenceQuery): Promise<ForgeInvocationEvidenceRecord[]>;
+export declare function getEvidenceByInvocationId(invocationId: string): Promise<ForgeInvocationEvidenceRecord | null>;
+export declare function getEvidenceByTaskId(taskId: string): Promise<ForgeInvocationEvidenceRecord | null>;
+export declare function getEvidenceCount(): Promise<number>;
+export declare function syncMemoryToStore(): Promise<number>;

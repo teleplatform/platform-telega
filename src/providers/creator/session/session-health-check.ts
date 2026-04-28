@@ -302,7 +302,7 @@ export async function checkAllSessions(
 
 export function getHealthySession(
   registry: SessionRegistry,
-  preferredOrder: SessionProviderId[] = ["chatgpt_web", "qwen_web", "deepseek_web"]
+  preferredOrder: SessionProviderId[] = ["chatgpt_web", "qwen_web", "deepseek_web", "grok_web"]
 ): SessionProviderId | null {
   for (const providerId of preferredOrder) {
     if (registry.isAvailable(providerId)) {

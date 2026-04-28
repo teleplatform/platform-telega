@@ -5,6 +5,7 @@ import { TelePrimaryButton } from "@/components/tele/TelePrimaryButton";
 import { TeleSecondaryButton } from "@/components/tele/TeleSecondaryButton";
 import type { Lang, StyleId } from "../types";
 import { useMemo } from "react";
+import { copyWithToast } from "@/ui/copy";
 
 export default function ResultCard(props: {
   strings: any;
@@ -26,7 +27,7 @@ export default function ResultCard(props: {
   async function copy() {
     const text = result?.translatedText ?? "";
     if (!text) return;
-    await navigator.clipboard.writeText(text);
+    await copyWithToast(text);
   }
 
   if (status === "idle" || status === "typing") {

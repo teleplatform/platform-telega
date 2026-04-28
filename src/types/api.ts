@@ -57,6 +57,7 @@ export type AskResponse = {
     knowledge_source?: "db" | "file" | "none";
     knowledge_business_id?: string;
     knowledge_version?: number | null;
+    knowledge_etag?: string;
 
     // G2F
     generated_task_id?: string;
@@ -68,7 +69,7 @@ export type TraceRecord = {
   message: string;
   reply: string;
   mode: "echo" | "openai";
-  provider: "local" | "openai";
+  provider: "local" | "openai" | "core";
   model?: string;
   user_id?: string;
   created_at: number;
@@ -82,11 +83,47 @@ export type TraceRecord = {
   cost_usd?: number;
   error_code?: ApiErrorCode;
   error_message?: string;
+  lane?: string | null;
+  intent?: string | null;
+  intent_source?: string | null;
+  intent_reason?: string | null;
+  intent_confidence?: number | null;
+  fallback_used?: number | null;
+  failures_count?: number | null;
+  timeouts?: number | null;
+  max_tokens?: number | null;
 
   // KB-2 (stored on traces)
   knowledge_source?: "db" | "file" | "none" | null;
   knowledge_business_id?: string | null;
-  knowledge_version?: number | null;
+  knowledge_version?: number | string | null;
+  knowledge_etag?: string | null;
+
+  // G2F
+  generated_task_id?: string | null;
+  actionability_score?: number | null;
+  gate_reason?: string | null;
+  artifacts_count?: number | null;
+
+  // Skills
+  skill_id?: string | null;
+  skill_stage?: string | null;
+  issues_count?: number | null;
+  patch_bytes?: number | null;
+  maker_mode?: number | null;
+  duration_sec?: number | null;
+  validators_mp4_exists?: number | null;
+  validators_duration_ok?: number | null;
+  validators_aspect_9x16?: number | null;
+  validators_audio_present?: number | null;
+  lrl_event_type?: string | null;
+  lrl_event_id?: string | null;
+  award_teleton?: number | null;
+  award_bonus?: number | null;
+  wallet_teleton_delta_applied?: number | null;
+  wallet_bonus_delta_applied?: number | null;
+  fraud_flags_count?: number | null;
+  action_map_id?: string | null;
 };
 
 export type TraceListResponse = {

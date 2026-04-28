@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { copyWithToast } from "@/ui/copy";
 
 type Mode = "public" | "maker";
 type Format = "plain" | "ui_strings" | "json";
@@ -14,7 +15,9 @@ export function useTranslate() {
 
   const [styleId, setStyleId] = useState("natural");
 
-  const [sourceText, setSourceText] = useState("");
+  const [sourceText, setSourceTextState] = useState("");
+  const [inputVersion, setInputVersion] = useState(0);
+  const sourceTextRef = useRef("");
   const [result, setResult] = useState<string>("");
 
   const [state, setState] = useState<"idle" | "loading" | "success" | "error">("idle");
@@ -22,9 +25,11 @@ export function useTranslate() {
   const canTranslate = useMemo(() => sourceText.trim().length > 0 && state !== "loading", [sourceText, state]);
 
   const clear = useCallback(() => {
-    setSourceText("");
+    setSourceTextState("");
     setResult("");
     setState("idle");
+    sourceTextRef.current = "";
+    setInputVersion((v) => v + 1);
   }, []);
 
   const swapLangs = useCallback(() => {
@@ -39,13 +44,18 @@ export function useTranslate() {
     setTargetLang(a);
   }, [sourceLang, targetLang]);
 
-  const translate = useCallback(async () => {
+  const translate = useCallback(async (overrideText?: string) => {
     setState("loading");
     try {
+      const input = (overrideText ?? sourceText).trim();
+      if (!input) {
+        setState("idle");
+        return;
+      }
       const res = await fetch("/api/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: sourceText }),
+        body: JSON.stringify({ text: input }),
       });
 
       if (!res.ok) {
@@ -62,13 +72,14 @@ export function useTranslate() {
     }
   }, [sourceText]);
 
+  const setSourceText = useCallback((v: string) => {
+    sourceTextRef.current = v;
+    setSourceTextState(v);
+  }, []);
+
   const copyResult = useCallback(async () => {
     if (!result) return;
-    try {
-      await navigator.clipboard.writeText(result);
-    } catch {
-      // игнор
-    }
+    await copyWithToast(result);
   }, [result]);
 
   const shareResult = useCallback(async () => {
@@ -102,6 +113,8 @@ export function useTranslate() {
 
     sourceText,
     setSourceText,
+    sourceTextRef,
+    inputVersion,
     result,
 
     state,

@@ -49,7 +49,7 @@ export async function checkExtensionSessionHealth(
 
 export function getHealthyExtensionProvider(
   _registry: SessionRegistry,
-  preferredOrder: SessionProviderId[] = ["chatgpt_web", "qwen_web", "deepseek_web", "kimi_web"]
+  preferredOrder: SessionProviderId[] = ["chatgpt_web", "qwen_web", "deepseek_web", "grok_web", "kimi_web"]
 ): SessionProviderId | null {
   return preferredOrder[0] || null;
 }

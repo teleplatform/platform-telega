@@ -1,15 +1,16 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   TeleGlassPanel,
   TeleHeaderBar,
-  TeleInputBar,
   TeleChip,
   TelePrimaryButton,
   TeleSecondaryButton,
 } from "@/components/tele";
 import { useTranslate } from "./state/useTranslate";
+import FastTextArea, { type FastTextAreaHandle } from "@/ui/FastTextArea";
+import { jumpTopActive } from "@/ui/activeSurface";
 
 const LANGS = [
   { code: "auto", label: "Автоопределение" },
@@ -30,6 +31,16 @@ const STYLES = [
 
 export default function TranslateScreen() {
   const t = useTranslate();
+  const inputRef = useRef<FastTextAreaHandle | null>(null);
+  const [showJump, setShowJump] = useState(false);
+
+  useEffect(() => {
+    const onFocus = () => {
+      window.setTimeout(() => inputRef.current?.focus(), 0);
+    };
+    window.addEventListener("telegpt:translate:focus" as any, onFocus);
+    return () => window.removeEventListener("telegpt:translate:focus" as any, onFocus);
+  }, []);
 
   const sourceLabel = useMemo(
     () => LANGS.find((l) => l.code === t.sourceLang)?.label ?? "Автоопределение",
@@ -111,10 +122,25 @@ export default function TranslateScreen() {
         {/* Input */}
         <TeleGlassPanel className="p-4 space-y-3">
           <div className="text-sm text-white/70">Текст</div>
-          <TeleInputBar
-            value={t.sourceText}
-            onChange={t.setSourceText}
+          {showJump && (
+            <button
+              type="button"
+              className="text-xs opacity-80 hover:opacity-100"
+              onClick={() => jumpTopActive({ preferId: "translate-input", sourceId: "JumpButton:translate" })}
+            >
+              ↑ к началу
+            </button>
+          )}
+          <FastTextArea
+            key={t.inputVersion}
+            defaultValue={t.sourceText}
+            ref={inputRef}
+            onChangeDebounced={t.setSourceText}
+            onScrollStateChange={(top) => setShowJump(top > 120)}
             placeholder="Вставь текст для перевода"
+            surfaceId="translate-input"
+            rememberScroll
+            className="telegpt-fasttext tele-glass w-full min-h-[220px] max-h-[220px] rounded-[var(--radius-input)] p-3 text-[15px] leading-6 text-foreground placeholder:text-white/35"
           />
           <div className="flex items-center justify-between text-xs text-white/50">
             <span>{t.sourceText.length} символов</span>
@@ -122,13 +148,13 @@ export default function TranslateScreen() {
               <TeleSecondaryButton onClick={t.clear} className="px-4">
                 Очистить
               </TeleSecondaryButton>
-              <TelePrimaryButton
-                disabled={!t.canTranslate}
-                onClick={t.translate}
-                className="px-5"
-              >
-                Перевести
-              </TelePrimaryButton>
+                <TelePrimaryButton
+                  disabled={!t.canTranslate}
+                  onClick={() => t.translate(inputRef.current?.getText() ?? t.sourceText)}
+                  className="px-5"
+                >
+                  Перевести
+                </TelePrimaryButton>
             </div>
           </div>
         </TeleGlassPanel>

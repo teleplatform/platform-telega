@@ -45,6 +45,29 @@ function isPrivate(ctx: any): boolean {
   return String(ctx?.chat?.type || "") === "private";
 }
 
+type TelegramRole = "owner" | "partner" | "public";
+type TelegramProvider =
+  | "auto"
+  | "openai_web"
+  | "qwen_web"
+  | "deepseek_web"
+  | "kimi_web"
+  | "ollama_local";
+
+type UserRuntimeSettings = {
+  provider?: TelegramProvider;
+  model?: string;
+  bridgeEnabled?: boolean;
+  creatorMode?: boolean;
+};
+
+function getTelegramRole(userId: string | number | undefined): TelegramRole {
+  const id = String(userId || "");
+  if (id === "267246987" || id === "1166943180") return "owner";
+  if (id === "591948691") return "partner";
+  return "public";
+}
+
 export async function startPantheonTelegramBot() {
   console.log("[pantheon-tg] boot check", {
     polling: process.env.PANTHEON_TG_POLLING,
@@ -66,6 +89,15 @@ export async function startPantheonTelegramBot() {
   const telegaRoot = getTelegaRoot();
   const bot = new Telegraf(token);
   const PAGE_SIZE = 10;
+  const userRuntimeSettings = new Map<string, UserRuntimeSettings>();
+  const PROVIDERS: Array<{ id: TelegramProvider; label: string }> = [
+    { id: "auto", label: "Auto" },
+    { id: "openai_web", label: "OpenAI Web" },
+    { id: "qwen_web", label: "Qwen Web" },
+    { id: "deepseek_web", label: "DeepSeek Web" },
+    { id: "kimi_web", label: "Kimi Web" },
+    { id: "ollama_local", label: "Local/Ollama" },
+  ];
   type PendingSearch = {
     kind: "build_results_search";
     created_at: number;
@@ -85,6 +117,134 @@ export async function startPantheonTelegramBot() {
     const uid = String(ctx?.from?.id || "");
     const chatId = String(ctx?.chat?.id || "");
     return `${chatId}:${uid}`;
+  }
+
+  function userIdOf(ctx: any): string {
+    return String(ctx?.from?.id || "");
+  }
+
+  function settingsOf(ctx: any): UserRuntimeSettings {
+    const uid = userIdOf(ctx);
+    const current = userRuntimeSettings.get(uid);
+    if (current) return current;
+    const next: UserRuntimeSettings = {
+      provider: "auto",
+      model: providerToModel("auto"),
+      bridgeEnabled: false,
+      creatorMode: false,
+    };
+    userRuntimeSettings.set(uid, next);
+    return next;
+  }
+
+  function providerToModel(provider: TelegramProvider | undefined): string {
+    switch (provider || "auto") {
+      case "openai_web":
+        return "openai_web:gpt-4o-mini";
+      case "qwen_web":
+        return "qwen_web:qwen-plus";
+      case "deepseek_web":
+        return "deepseek_web:deepseek-r1";
+      case "kimi_web":
+        return "kimi_web:kimi-k2.5";
+      case "ollama_local":
+        return "qwen2.5:7b-instruct";
+      case "auto":
+      default:
+        return "openai:gpt-4o-mini";
+    }
+  }
+
+  function providerLabel(provider: TelegramProvider | undefined): string {
+    return PROVIDERS.find((p) => p.id === provider)?.label || "Auto";
+  }
+
+  function compactMenuKeyboard(role: TelegramRole) {
+    if (role === "owner") {
+      return Markup.inlineKeyboard([
+        [Markup.button.callback("🤖 Chat", "menu:chat"), Markup.button.callback("🧠 Providers", "menu:providers")],
+        [Markup.button.callback("🌉 Creator Bridge", "menu:bridge")],
+        [Markup.button.callback("⚙️ Settings", "menu:settings")],
+        [Markup.button.callback("❌ Collapse", "menu:collapse")],
+      ]);
+    }
+    if (role === "partner") {
+      return Markup.inlineKeyboard([
+        [Markup.button.callback("🤖 Chat", "menu:chat"), Markup.button.callback("🧠 Providers", "menu:providers")],
+        [Markup.button.callback("⚙️ Settings", "menu:settings")],
+        [Markup.button.callback("❌ Collapse", "menu:collapse")],
+      ]);
+    }
+    return Markup.inlineKeyboard([
+      [Markup.button.callback("🤖 Chat", "menu:chat")],
+      [Markup.button.callback("❓ Help", "menu:help"), Markup.button.callback("⚙️ Settings", "menu:settings")],
+      [Markup.button.callback("❌ Collapse", "menu:collapse")],
+    ]);
+  }
+
+  function menuButtonKeyboard() {
+    return Markup.inlineKeyboard([[Markup.button.callback("▦ Menu", "menu:main")]]);
+  }
+
+  function providerKeyboard(ctx: any) {
+    const settings = settingsOf(ctx);
+    const role = getTelegramRole(userIdOf(ctx));
+    const rows = PROVIDERS.map((provider) => {
+      const selected = (settings.provider || "auto") === provider.id ? "✅ " : "";
+      const callback =
+        role === "public"
+          ? "provider:view"
+          : `provider:set:${provider.id}`;
+      return [Markup.button.callback(`${selected}${provider.label}`, callback)];
+    });
+    rows.push([Markup.button.callback("⬅️ Back", "menu:main")]);
+    return Markup.inlineKeyboard(rows);
+  }
+
+  function bridgeKeyboard(ctx: any) {
+    const settings = settingsOf(ctx);
+    return Markup.inlineKeyboard([
+      [
+        Markup.button.callback(
+          `Bridge ${settings.bridgeEnabled ? "ON" : "OFF"}`,
+          "bridge:toggle"
+        ),
+      ],
+      [
+        Markup.button.callback(
+          `Creator Mode ${settings.creatorMode ? "ON" : "OFF"}`,
+          "creator:toggle"
+        ),
+      ],
+      [Markup.button.callback(`Current provider: ${providerLabel(settings.provider)}`, "menu:providers")],
+      [Markup.button.callback("Health check", "bridge:health")],
+      [Markup.button.callback("⬅️ Back", "menu:main")],
+    ]);
+  }
+
+  async function showCompactMenu(ctx: any) {
+    const role = getTelegramRole(userIdOf(ctx));
+    const settings = settingsOf(ctx);
+    const text =
+      `Tele•GPT\n` +
+      `Role: ${role}\n` +
+      `Provider: ${providerLabel(settings.provider)}\n` +
+      `Model: ${settings.model || providerToModel(settings.provider)}\n` +
+      `Bridge: ${settings.bridgeEnabled ? "ON" : "OFF"}\n` +
+      `Creator Mode: ${settings.creatorMode ? "ON" : "OFF"}`;
+    await editOrReply(ctx, text, compactMenuKeyboard(role));
+  }
+
+  async function editOrReply(ctx: any, text: string, extra?: any) {
+    try {
+      if (ctx.callbackQuery?.message) {
+        await ctx.editMessageText(text, extra);
+        return;
+      }
+    } catch {
+      // fall back to reply
+    }
+    await ctx.reply(text, extra);
   }
 
   function gcPending() {
@@ -138,6 +298,245 @@ export async function startPantheonTelegramBot() {
     const text = `📚 Результаты (страница ${p}, последние ${PAGE_SIZE})\n${lines.join("\n")}\n\nНажми кнопку чтобы открыть результат:`;
     return { text, keyboard: Markup.inlineKeyboard(rows) };
   }
+
+  bot.command("start", async (ctx) => {
+    try {
+      console.log("[telegram-menu] menu_open_requested", { user_id: userIdOf(ctx), role: getTelegramRole(userIdOf(ctx)) });
+      console.log("[creator-control] /start", { user_id: userIdOf(ctx), role: getTelegramRole(userIdOf(ctx)) });
+      await ctx.reply("Tele•GPT ready. Open compact menu:", menuButtonKeyboard());
+    } catch (e: any) {
+      console.error("[creator-control] /start failed", e?.message || e);
+    }
+  });
+
+  bot.command("menu", async (ctx) => {
+    try {
+      console.log("[telegram-menu] menu_open_requested", { user_id: userIdOf(ctx), role: getTelegramRole(userIdOf(ctx)) });
+      console.log("[creator-control] /menu", { user_id: userIdOf(ctx), role: getTelegramRole(userIdOf(ctx)) });
+      await ctx.reply("Tele•GPT compact menu:", menuButtonKeyboard());
+    } catch (e: any) {
+      console.error("[creator-control] /menu failed", e?.message || e);
+    }
+  });
+
+  bot.hears("▦ Menu", async (ctx) => {
+    try {
+      console.log("[telegram-menu] menu_open_requested", { user_id: userIdOf(ctx), role: getTelegramRole(userIdOf(ctx)) });
+      await showCompactMenu(ctx);
+      console.log("[telegram-menu] menu_rendered", { user_id: userIdOf(ctx), role: getTelegramRole(userIdOf(ctx)) });
+    } catch (e: any) {
+      console.error("[telegram-menu] hears:▦ Menu failed", e?.message || e);
+    }
+  });
+
+  bot.action("menu:main", async (ctx) => {
+    try {
+      console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "menu:main" });
+      await ctx.answerCbQuery("Menu");
+      await showCompactMenu(ctx);
+      console.log("[telegram-menu] menu_rendered", { user_id: userIdOf(ctx), role: getTelegramRole(userIdOf(ctx)) });
+    } catch (e: any) {
+      console.error("[creator-control] menu:main failed", e?.message || e);
+    }
+  });
+
+  bot.action("menu:collapse", async (ctx) => {
+    try {
+      console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "menu:collapse" });
+      await ctx.answerCbQuery("Collapsed");
+      await editOrReply(ctx, "Menu collapsed. Tap ▦ Menu to open.", menuButtonKeyboard());
+    } catch (e: any) {
+      console.error("[creator-control] menu:collapse failed", e?.message || e);
+    }
+  });
+
+  bot.action("menu:chat", async (ctx) => {
+    try {
+      console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "menu:chat" });
+      await ctx.answerCbQuery("Chat");
+      await editOrReply(ctx, "Chat mode. Send a message.", menuButtonKeyboard());
+    } catch (e: any) {
+      console.error("[creator-control] menu:chat failed", e?.message || e);
+    }
+  });
+
+  bot.action("menu:help", async (ctx) => {
+    try {
+      console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "menu:help" });
+      await ctx.answerCbQuery("Help");
+      await editOrReply(ctx, "Help: use /start, open ▦ Menu, choose Providers, then send a message.", menuButtonKeyboard());
+    } catch (e: any) {
+      console.error("[creator-control] menu:help failed", e?.message || e);
+    }
+  });
+
+  bot.action("menu:settings", async (ctx) => {
+    try {
+      console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "menu:settings" });
+      await ctx.answerCbQuery("Settings");
+      const settings = settingsOf(ctx);
+      await editOrReply(
+        ctx,
+        `Settings\nProvider: ${providerLabel(settings.provider)}\nBridge: ${settings.bridgeEnabled ? "ON" : "OFF"}\nCreator Mode: ${settings.creatorMode ? "ON" : "OFF"}`,
+        Markup.inlineKeyboard([[Markup.button.callback("⬅️ Back", "menu:main")]])
+      );
+    } catch (e: any) {
+      console.error("[creator-control] menu:settings failed", e?.message || e);
+    }
+  });
+
+  bot.action("menu:providers", async (ctx) => {
+    try {
+      console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "menu:providers" });
+      await ctx.answerCbQuery("Providers");
+      const role = getTelegramRole(userIdOf(ctx));
+      const settings = settingsOf(ctx);
+      const mode = role === "public" ? "view only" : "select provider";
+      await editOrReply(
+        ctx,
+        `Providers (${mode})\nCurrent: ${providerLabel(settings.provider)}`,
+        providerKeyboard(ctx)
+      );
+    } catch (e: any) {
+      console.error("[creator-control] menu:providers failed", e?.message || e);
+    }
+  });
+
+  bot.action("provider:view", async (ctx) => {
+    try {
+      await ctx.answerCbQuery("Provider switching is limited", { show_alert: true });
+    } catch (e: any) {
+      console.error("[creator-control] provider:view failed", e?.message || e);
+    }
+  });
+
+  bot.action(/^provider:set:(auto|openai_web|qwen_web|deepseek_web|kimi_web|ollama_local)$/i, async (ctx) => {
+    try {
+      console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "provider:set" });
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role === "public") {
+        await ctx.answerCbQuery("Not allowed", { show_alert: true });
+        return;
+      }
+      const provider = String((ctx as any)?.match?.[1] || "auto") as TelegramProvider;
+      const settings = settingsOf(ctx);
+      settings.provider = provider;
+      settings.model = providerToModel(provider);
+      const bridgeProvider = provider.endsWith("_web");
+      settings.bridgeEnabled = bridgeProvider;
+      settings.creatorMode = bridgeProvider;
+      userRuntimeSettings.set(userIdOf(ctx), settings);
+      console.log("[creator-control] provider selected", {
+        user_id: userIdOf(ctx),
+        role,
+        provider,
+        model: settings.model,
+      });
+      console.log("[telegram-menu] provider_selected", { user_id: userIdOf(ctx), provider });
+      await ctx.answerCbQuery(`Provider: ${providerLabel(provider)}`);
+      await editOrReply(
+        ctx,
+        `Providers\nCurrent: ${providerLabel(provider)}\nModel: ${settings.model}`,
+        providerKeyboard(ctx)
+      );
+    } catch (e: any) {
+      console.error("[creator-control] provider:set failed", e?.message || e);
+    }
+  });
+
+  bot.action("menu:bridge", async (ctx) => {
+    try {
+      console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "menu:bridge" });
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.answerCbQuery("Creator Bridge is owner-only", { show_alert: true });
+        return;
+      }
+      const settings = settingsOf(ctx);
+      await ctx.answerCbQuery("Creator Bridge");
+      await editOrReply(
+        ctx,
+        `Creator Bridge\nBridge: ${settings.bridgeEnabled ? "ON" : "OFF"}\nCreator Mode: ${settings.creatorMode ? "ON" : "OFF"}\nCurrent provider: ${providerLabel(settings.provider)}`,
+        bridgeKeyboard(ctx)
+      );
+    } catch (e: any) {
+      console.error("[creator-control] menu:bridge failed", e?.message || e);
+    }
+  });
+
+  bot.action("bridge:toggle", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.answerCbQuery("Owner-only", { show_alert: true });
+        return;
+      }
+      const settings = settingsOf(ctx);
+      settings.bridgeEnabled = !settings.bridgeEnabled;
+      userRuntimeSettings.set(userIdOf(ctx), settings);
+      console.log("[creator-control] bridge toggled", {
+        user_id: userIdOf(ctx),
+        bridgeEnabled: settings.bridgeEnabled,
+      });
+      await ctx.answerCbQuery(`Bridge ${settings.bridgeEnabled ? "ON" : "OFF"}`);
+      await editOrReply(
+        ctx,
+        `Creator Bridge\nBridge: ${settings.bridgeEnabled ? "ON" : "OFF"}\nCreator Mode: ${settings.creatorMode ? "ON" : "OFF"}\nCurrent provider: ${providerLabel(settings.provider)}`,
+        bridgeKeyboard(ctx)
+      );
+    } catch (e: any) {
+      console.error("[creator-control] bridge:toggle failed", e?.message || e);
+    }
+  });
+
+  bot.action("creator:toggle", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.answerCbQuery("Owner-only", { show_alert: true });
+        return;
+      }
+      const settings = settingsOf(ctx);
+      settings.creatorMode = !settings.creatorMode;
+      userRuntimeSettings.set(userIdOf(ctx), settings);
+      console.log("[creator-control] creator mode toggled", {
+        user_id: userIdOf(ctx),
+        creatorMode: settings.creatorMode,
+      });
+      await ctx.answerCbQuery(`Creator Mode ${settings.creatorMode ? "ON" : "OFF"}`);
+      await editOrReply(
+        ctx,
+        `Creator Bridge\nBridge: ${settings.bridgeEnabled ? "ON" : "OFF"}\nCreator Mode: ${settings.creatorMode ? "ON" : "OFF"}\nCurrent provider: ${providerLabel(settings.provider)}`,
+        bridgeKeyboard(ctx)
+      );
+    } catch (e: any) {
+      console.error("[creator-control] creator:toggle failed", e?.message || e);
+    }
+  });
+
+  bot.action("bridge:health", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.answerCbQuery("Owner-only", { show_alert: true });
+        return;
+      }
+      const settings = settingsOf(ctx);
+      const res = await fetch("http://127.0.0.1:8787/ready");
+      const ok = res.ok;
+      await ctx.answerCbQuery(ok ? "Healthy" : "Unhealthy");
+      await editOrReply(
+        ctx,
+        `Creator Bridge Health\nAPI: ${ok ? "OK" : `HTTP ${res.status}`}\nProvider: ${providerLabel(settings.provider)}\nBridge: ${settings.bridgeEnabled ? "ON" : "OFF"}\nCreator Mode: ${settings.creatorMode ? "ON" : "OFF"}`,
+        bridgeKeyboard(ctx)
+      );
+    } catch (e: any) {
+      console.error("[creator-control] bridge:health failed", e?.message || e);
+      try {
+        await ctx.answerCbQuery("Health check failed", { show_alert: true });
+      } catch {}
+    }
+  });
 
   bot.command("intel_on", async (ctx) => {
     setIntelEnabled(true);
@@ -983,36 +1382,85 @@ export async function startPantheonTelegramBot() {
     } catch {
       // ignore
     }
-    if (!isIntelEnabled()) return;
-
-    const allowed = isChatAllowed(chatId(ctx), isPrivate(ctx));
-    if (!allowed) return;
-
     const text = String((ctx as any)?.message?.text || "").trim();
     if (!text) return;
     if (text.startsWith("/")) return;
-    if (text.length < 20) return;
 
     try {
-      const card = buildIntelCard({
-        text,
-        message_id: (ctx as any)?.message?.message_id,
+      const userId = userIdOf(ctx);
+      const settings = settingsOf(ctx);
+      console.log("[telegram] active settings", {
+        user_id: userId,
+        provider: settings.provider,
+        bridgeEnabled: settings.bridgeEnabled,
+        creatorMode: settings.creatorMode
+      });
+      const selectedProvider = settings.provider || "auto";
+      const model = settings.model || providerToModel(selectedProvider);
+      console.log("[pantheon-tg] routing text to /v1/chat", {
         chat_id: chatId(ctx),
-        from: String((ctx as any)?.from?.id || ""),
+        telegram_user_id: userId,
+        selected_provider: selectedProvider,
+        model,
+        message_id: (ctx as any)?.message?.message_id,
       });
 
-      const saved = saveIntelCard(telegaRoot, card);
+      const webProviderTimeout = (selectedProvider || "").endsWith("_web") ? 180000 : 65000;
+      const res = await fetch("http://127.0.0.1:8787/v1/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: AbortSignal.timeout(webProviderTimeout),
+        body: JSON.stringify({
+          message: text,
+          model,
+          task: { type: "chat" },
+          meta: {
+            source: "telegram",
+            telegram_user_id: userIdOf(ctx),
+            selected_provider: selectedProvider,
+            bridge_enabled: settings.bridgeEnabled === true,
+            creator_mode: settings.creatorMode === true,
+            chat_id: chatId(ctx),
+            from: String((ctx as any)?.from?.id || ""),
+            message_id: (ctx as any)?.message?.message_id,
+          },
+        }),
+      });
 
-      await ctx.reply(
-        `🧠 Intel saved\n` +
-          `• ${card.title}\n` +
-          `• pack: ${card.proposed_pack}\n` +
-          `• conf: ${card.confidence.toFixed(2)}\n` +
-          `• файл: ${saved.jsonFile}` +
-          (saved.deduped ? `\n• deduped: true` : "")
-      );
+      const data = (await res.json().catch(() => ({}))) as any;
+      if (!res.ok) {
+        const message = String(
+          data?.error?.message ||
+            data?.message ||
+            data?.error ||
+            `HTTP ${res.status}`
+        );
+        if (selectedProvider !== "auto") {
+          await ctx.reply(message);
+          return;
+        }
+        throw new Error(data?.error?.message || data?.message || `HTTP ${res.status}`);
+      }
+
+      const output = String(data?.output || data?.reply || data?.answer || "").trim();
+      if (!output) throw new Error("Empty /v1/chat response");
+
+      await ctx.reply(output);
     } catch (e: any) {
-      await ctx.reply(`❌ Intel save failed: ${e?.message || String(e)}`);
+      const errMsg = e?.message || String(e);
+      const activeSettings = settingsOf(ctx);
+      let replyMsg = "❌ Chat failed. Please try again.";
+      
+      if (errMsg.includes("abort") || errMsg.includes("timeout") || errMsg.includes("AbortSignal")) {
+        if ((activeSettings.provider || "").endsWith("_web")) {
+          replyMsg = `Creator Bridge ${activeSettings.provider} timed out while waiting for response.`;
+        } else {
+          replyMsg = "Chat timed out. Please try again.";
+        }
+      }
+      
+      console.error("[pantheon-tg] /v1/chat text handler failed", errMsg);
+      await ctx.reply(replyMsg);
     }
   });
 

@@ -9,7 +9,7 @@ export type AskTrace = {
   message: string;
   reply: string;
   mode: "echo" | "openai";
-  provider: "local" | "openai";
+  provider: "local" | "openai" | "core";
   model?: string;
   user_id?: string;
   created_at: number;
@@ -23,6 +23,41 @@ export type AskTrace = {
   cost_usd?: number;
   error_code?: ApiErrorCode;
   error_message?: string;
+  lane?: string | null;
+  intent?: string | null;
+  intent_source?: string | null;
+  intent_reason?: string | null;
+  fallback_used?: number | null;
+  failures_count?: number | null;
+  timeouts?: number | null;
+  max_tokens?: number | null;
+  knowledge_source?: string | null;
+  knowledge_business_id?: string | null;
+  knowledge_version?: number | string | null;
+  knowledge_etag?: string | null;
+  intent_confidence?: number | null;
+  generated_task_id?: string | null;
+  actionability_score?: number | null;
+  gate_reason?: string | null;
+  artifacts_count?: number | null;
+  skill_id?: string | null;
+  skill_stage?: string | null;
+  issues_count?: number | null;
+  patch_bytes?: number | null;
+  maker_mode?: number | null;
+  duration_sec?: number | null;
+  validators_mp4_exists?: number | null;
+  validators_duration_ok?: number | null;
+  validators_aspect_9x16?: number | null;
+  validators_audio_present?: number | null;
+  lrl_event_type?: string | null;
+  lrl_event_id?: string | null;
+  award_teleton?: number | null;
+  award_bonus?: number | null;
+  wallet_teleton_delta_applied?: number | null;
+  wallet_bonus_delta_applied?: number | null;
+  fraud_flags_count?: number | null;
+  action_map_id?: string | null;
 };
 
 export type HistoryQuery = {
@@ -41,10 +76,32 @@ export type BuildTaskRow = {
   result_json?: string | null;
   error_code?: string | null;
   error_message?: string | null;
+  blocked_reason?: string | null;
   runner_id?: string | null;
   heartbeat_at?: number | null;
   progress?: number | null;
   note?: string | null;
+  version?: number;
+  source_trace_id?: string | null;
+};
+
+export type KbEntryRow = {
+  key: string;
+  payload_json: string;
+  version: number;
+  etag: string;
+  updated_at: string;
+  created_at: string;
+};
+
+export type TaskArtifactRow = {
+  id: string;
+  task_id: string;
+  name: string;
+  mime: string;
+  path: string;
+  bytes: number;
+  created_at: number;
 };
 
 function columnExists(db: Database.Database, table: string, column: string): boolean {
@@ -63,6 +120,13 @@ function addColumnIfMissing(
   if (!columnExists(db, table, column)) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${sqlType}`);
   }
+}
+
+function tableExists(db: Database.Database, table: string): boolean {
+  const row = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?")
+    .get(table) as { name?: string } | undefined;
+  return Boolean(row?.name);
 }
 
 export function initSqlite(dbFile: string) {
@@ -90,10 +154,21 @@ export function initSqlite(dbFile: string) {
     ON ask_traces (user_id, created_at DESC);
   `);
 
-  // Knowledge packs storage (KB-2)
-  // Canonical column: payload_json (strict JSON string), plus optional etag for caching.
+  // --- KB-2 storage (legacy: business_id/version/payload_json)
+  // We need canonical names knowledge_packs/knowledge_docs for product knowledge.
+  // If an older DB has KB-2 in knowledge_packs, migrate it to knowledge_packs_kb2.
+  try {
+    const isLegacyKb2 =
+      tableExists(db, "knowledge_packs") && columnExists(db, "knowledge_packs", "business_id");
+    if (isLegacyKb2 && !tableExists(db, "knowledge_packs_kb2")) {
+      db.exec("ALTER TABLE knowledge_packs RENAME TO knowledge_packs_kb2");
+    }
+  } catch {
+    // ignore (best-effort)
+  }
+
   db.exec(`
-    CREATE TABLE IF NOT EXISTS knowledge_packs (
+    CREATE TABLE IF NOT EXISTS knowledge_packs_kb2 (
       business_id  TEXT PRIMARY KEY,
       version      INTEGER NOT NULL,
       payload_json TEXT NOT NULL,
@@ -103,23 +178,92 @@ export function initSqlite(dbFile: string) {
   `);
 
   db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_knowledge_packs_updated
-    ON knowledge_packs (updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_packs_kb2_updated
+    ON knowledge_packs_kb2 (updated_at DESC);
   `);
 
   // Backwards compat: older installs may have had `json` instead of `payload_json`.
-  addColumnIfMissing(db, "knowledge_packs", "payload_json", "TEXT");
-  addColumnIfMissing(db, "knowledge_packs", "etag", "TEXT");
-  addColumnIfMissing(db, "knowledge_packs", "json", "TEXT");
+  addColumnIfMissing(db, "knowledge_packs_kb2", "payload_json", "TEXT");
+  addColumnIfMissing(db, "knowledge_packs_kb2", "etag", "TEXT");
+  addColumnIfMissing(db, "knowledge_packs_kb2", "json", "TEXT");
 
   // One-time best-effort migration: copy json -> payload_json.
   try {
     db.exec(
-      "UPDATE knowledge_packs SET payload_json = json WHERE (payload_json IS NULL OR payload_json = '') AND json IS NOT NULL AND json <> ''"
+      "UPDATE knowledge_packs_kb2 SET payload_json = json WHERE (payload_json IS NULL OR payload_json = '') AND json IS NOT NULL AND json <> ''"
     );
   } catch {
     // ignore
   }
+
+  // --- Product knowledge (packs/docs/versions)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS knowledge_packs (
+      id         TEXT PRIMARY KEY,
+      title      TEXT NOT NULL,
+      scope      TEXT NOT NULL,
+      owner_id   TEXT NOT NULL,
+      is_active  INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL
+    );
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_knowledge_packs_active_scope
+    ON knowledge_packs (is_active, scope, created_at DESC);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS knowledge_docs (
+      id         TEXT PRIMARY KEY,
+      pack_id    TEXT NOT NULL,
+      kind       TEXT NOT NULL,
+      title      TEXT NOT NULL,
+      body_md    TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY(pack_id) REFERENCES knowledge_packs(id) ON DELETE CASCADE
+    );
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_knowledge_docs_pack_updated
+    ON knowledge_docs (pack_id, updated_at DESC);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS knowledge_doc_versions (
+      id         TEXT PRIMARY KEY,
+      doc_id     TEXT NOT NULL,
+      body_md    TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY(doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE
+    );
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_knowledge_doc_versions_doc_created
+    ON knowledge_doc_versions (doc_id, created_at DESC);
+  `);
+
+  // Agent traces (Sales/Support Agent)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agent_traces (
+      trace_id     TEXT PRIMARY KEY,
+      mode         TEXT NOT NULL,
+      message      TEXT NOT NULL,
+      decision_json TEXT NOT NULL,
+      citations_json TEXT,
+      provider     TEXT,
+      model        TEXT,
+      created_at   INTEGER NOT NULL,
+      ok           INTEGER NOT NULL
+    );
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_agent_traces_created
+    ON agent_traces (created_at DESC);
+  `);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS build_tasks (
@@ -137,6 +281,113 @@ export function initSqlite(dbFile: string) {
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS kb_entries (
+      key TEXT PRIMARY KEY,
+      payload_json TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      etag TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS wallets (
+      user_id TEXT PRIMARY KEY,
+      teleton_balance INTEGER NOT NULL DEFAULT 0,
+      bonus_points_balance INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS wallet_ledger (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      asset TEXT NOT NULL,
+      delta INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_ledger_event
+    ON wallet_ledger (user_id, asset, event_id);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS lrl_events (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      payload_hash TEXT NOT NULL,
+      status TEXT NOT NULL,
+      blocked_reason TEXT,
+      created_at TEXT NOT NULL,
+      processed_at TEXT
+    );
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_lrl_events_status
+    ON lrl_events (status, created_at DESC);
+  `);
+
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_lrl_events_hash
+    ON lrl_events (type, user_id, payload_hash);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS lrl_rules (
+      id TEXT PRIMARY KEY,
+      version INTEGER NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      event_type TEXT NOT NULL,
+      award_teleton INTEGER NOT NULL DEFAULT 0,
+      award_bonus INTEGER NOT NULL DEFAULT 0,
+      daily_cap_teleton INTEGER NOT NULL DEFAULT 0,
+      daily_cap_bonus INTEGER NOT NULL DEFAULT 0,
+      conditions_json TEXT NOT NULL DEFAULT "{}",
+      updated_at TEXT NOT NULL
+    );
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_lrl_rules_type
+    ON lrl_rules (event_type);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS review_gate (
+      review_id TEXT PRIMARY KEY,
+      stars INTEGER NOT NULL,
+      visibility TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS task_artifacts (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      mime TEXT NOT NULL,
+      path TEXT NOT NULL,
+      bytes INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_task_artifacts_task
+    ON task_artifacts (task_id, created_at DESC);
+  `);
+
+  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_build_tasks_updated
     ON build_tasks (updated_at DESC);
   `);
@@ -145,6 +396,9 @@ export function initSqlite(dbFile: string) {
   addColumnIfMissing(db, "build_tasks", "heartbeat_at", "INTEGER");
   addColumnIfMissing(db, "build_tasks", "progress", "INTEGER");
   addColumnIfMissing(db, "build_tasks", "note", "TEXT");
+  addColumnIfMissing(db, "build_tasks", "blocked_reason", "TEXT");
+  addColumnIfMissing(db, "build_tasks", "version", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(db, "build_tasks", "source_trace_id", "TEXT");
 
   addColumnIfMissing(db, "ask_traces", "ok", "INTEGER NOT NULL DEFAULT 1");
   addColumnIfMissing(db, "ask_traces", "duration_ms", "INTEGER");
@@ -156,21 +410,67 @@ export function initSqlite(dbFile: string) {
   addColumnIfMissing(db, "ask_traces", "cost_usd", "REAL");
   addColumnIfMissing(db, "ask_traces", "error_code", "TEXT");
   addColumnIfMissing(db, "ask_traces", "error_message", "TEXT");
+  addColumnIfMissing(db, "ask_traces", "lane", "TEXT");
+  addColumnIfMissing(db, "ask_traces", "intent", "TEXT");
+  addColumnIfMissing(db, "ask_traces", "intent_source", "TEXT");
+  addColumnIfMissing(db, "ask_traces", "intent_reason", "TEXT");
+  addColumnIfMissing(db, "ask_traces", "intent_confidence", "REAL");
+  addColumnIfMissing(db, "ask_traces", "fallback_used", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "failures_count", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "timeouts", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "max_tokens", "INTEGER");
   addColumnIfMissing(db, "ask_traces", "knowledge_source", "TEXT");
   addColumnIfMissing(db, "ask_traces", "knowledge_business_id", "TEXT");
   addColumnIfMissing(db, "ask_traces", "knowledge_version", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "knowledge_etag", "TEXT");
+  addColumnIfMissing(db, "ask_traces", "generated_task_id", "TEXT");
+  addColumnIfMissing(db, "ask_traces", "actionability_score", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "gate_reason", "TEXT");
+  addColumnIfMissing(db, "ask_traces", "artifacts_count", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "skill_id", "TEXT");
+  addColumnIfMissing(db, "ask_traces", "skill_stage", "TEXT");
+  addColumnIfMissing(db, "ask_traces", "issues_count", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "patch_bytes", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "maker_mode", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "duration_sec", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "validators_mp4_exists", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "validators_duration_ok", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "validators_aspect_9x16", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "validators_audio_present", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "lrl_event_type", "TEXT");
+  addColumnIfMissing(db, "ask_traces", "lrl_event_id", "TEXT");
+  addColumnIfMissing(db, "ask_traces", "award_teleton", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "award_bonus", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "wallet_teleton_delta_applied", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "wallet_bonus_delta_applied", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "fraud_flags_count", "INTEGER");
+  addColumnIfMissing(db, "ask_traces", "action_map_id", "TEXT");
 
   const insertStmt = db.prepare(`
     INSERT INTO ask_traces (
       trace_id, message, reply, mode, provider, model, user_id, created_at,
       ok, duration_ms, latency_ms, request_bytes, reply_bytes, tokens_in, tokens_out,
       cost_usd, error_code, error_message,
-      knowledge_source, knowledge_business_id, knowledge_version
+      lane, intent, intent_source, intent_reason, fallback_used, failures_count, timeouts, max_tokens,
+      knowledge_source, knowledge_business_id, knowledge_version, knowledge_etag,
+      intent_confidence,
+      generated_task_id, actionability_score, gate_reason, artifacts_count,
+      skill_id, skill_stage, issues_count, patch_bytes, maker_mode,
+      duration_sec, validators_mp4_exists, validators_duration_ok, validators_aspect_9x16, validators_audio_present,
+      lrl_event_type, lrl_event_id, award_teleton, award_bonus, wallet_teleton_delta_applied,
+      wallet_bonus_delta_applied, fraud_flags_count, action_map_id
     ) VALUES (
       @trace_id, @message, @reply, @mode, @provider, @model, @user_id, @created_at,
       @ok, @duration_ms, @latency_ms, @request_bytes, @reply_bytes, @tokens_in,
       @tokens_out, @cost_usd, @error_code, @error_message,
-      @knowledge_source, @knowledge_business_id, @knowledge_version
+      @lane, @intent, @intent_source, @intent_reason, @fallback_used, @failures_count, @timeouts, @max_tokens,
+      @knowledge_source, @knowledge_business_id, @knowledge_version, @knowledge_etag,
+      @intent_confidence,
+      @generated_task_id, @actionability_score, @gate_reason, @artifacts_count,
+      @skill_id, @skill_stage, @issues_count, @patch_bytes, @maker_mode,
+      @duration_sec, @validators_mp4_exists, @validators_duration_ok, @validators_aspect_9x16, @validators_audio_present,
+      @lrl_event_type, @lrl_event_id, @award_teleton, @award_bonus, @wallet_teleton_delta_applied,
+      @wallet_bonus_delta_applied, @fraud_flags_count, @action_map_id
     )
   `);
 
@@ -178,7 +478,14 @@ export function initSqlite(dbFile: string) {
     SELECT trace_id, message, reply, mode, provider, model, user_id, created_at,
            ok, duration_ms, latency_ms, request_bytes, reply_bytes, tokens_in,
            tokens_out, cost_usd, error_code, error_message,
-           knowledge_source, knowledge_business_id, knowledge_version
+           lane, intent, intent_source, intent_reason, fallback_used, failures_count, timeouts, max_tokens,
+           knowledge_source, knowledge_business_id, knowledge_version, knowledge_etag,
+           intent_confidence,
+           generated_task_id, actionability_score, gate_reason, artifacts_count,
+           skill_id, skill_stage, issues_count, patch_bytes, maker_mode,
+           duration_sec, validators_mp4_exists, validators_duration_ok, validators_aspect_9x16, validators_audio_present,
+           lrl_event_type, lrl_event_id, award_teleton, award_bonus, wallet_teleton_delta_applied,
+           wallet_bonus_delta_applied, fraud_flags_count, action_map_id
     FROM ask_traces
     WHERE trace_id = ?
   `);
@@ -187,17 +494,36 @@ export function initSqlite(dbFile: string) {
     SELECT trace_id, message, reply, mode, provider, model, user_id, created_at,
            ok, duration_ms, latency_ms, request_bytes, reply_bytes, tokens_in,
            tokens_out, cost_usd, error_code, error_message,
-           knowledge_source, knowledge_business_id, knowledge_version
+           lane, intent, intent_source, intent_reason, fallback_used, failures_count, timeouts, max_tokens,
+           knowledge_source, knowledge_business_id, knowledge_version, knowledge_etag,
+           intent_confidence,
+           generated_task_id, actionability_score, gate_reason, artifacts_count,
+           skill_id, skill_stage, issues_count, patch_bytes, maker_mode,
+           duration_sec, validators_mp4_exists, validators_duration_ok, validators_aspect_9x16, validators_audio_present,
+           lrl_event_type, lrl_event_id, award_teleton, award_bonus, wallet_teleton_delta_applied,
+           wallet_bonus_delta_applied, fraud_flags_count, action_map_id
     FROM ask_traces
     ORDER BY created_at DESC
     LIMIT ?
+  `);
+
+  const deleteTracesBeforeStmt = db.prepare(`
+    DELETE FROM ask_traces
+    WHERE created_at < ?
   `);
 
   const listUserStmt = db.prepare(`
     SELECT trace_id, message, reply, mode, provider, model, user_id, created_at,
            ok, duration_ms, latency_ms, request_bytes, reply_bytes, tokens_in,
            tokens_out, cost_usd, error_code, error_message,
-           knowledge_source, knowledge_business_id, knowledge_version
+           lane, intent, intent_source, intent_reason, fallback_used, failures_count, timeouts, max_tokens,
+           knowledge_source, knowledge_business_id, knowledge_version, knowledge_etag,
+           intent_confidence,
+           generated_task_id, actionability_score, gate_reason, artifacts_count,
+           skill_id, skill_stage, issues_count, patch_bytes, maker_mode,
+           duration_sec, validators_mp4_exists, validators_duration_ok, validators_aspect_9x16, validators_audio_present,
+           lrl_event_type, lrl_event_id, award_teleton, award_bonus, wallet_teleton_delta_applied,
+           wallet_bonus_delta_applied, fraud_flags_count, action_map_id
     FROM ask_traces
     WHERE user_id = ?
     ORDER BY created_at DESC
@@ -224,9 +550,146 @@ export function initSqlite(dbFile: string) {
       AND status NOT IN ('done','partial','blocked')
   `);
 
+  const insertArtifactStmt = db.prepare(`
+    INSERT INTO task_artifacts (
+      id, task_id, name, mime, path, bytes, created_at
+    ) VALUES (
+      @id, @task_id, @name, @mime, @path, @bytes, @created_at
+    )
+  `);
+
+  const listArtifactsStmt = db.prepare(`
+    SELECT id, task_id, name, mime, path, bytes, created_at
+    FROM task_artifacts
+    WHERE task_id = ?
+    ORDER BY created_at DESC
+  `);
+
+  const getArtifactStmt = db.prepare(`
+    SELECT id, task_id, name, mime, path, bytes, created_at
+    FROM task_artifacts
+    WHERE id = ?
+  `);
+
+  const getKbEntryStmt = db.prepare(`
+    SELECT key, payload_json, version, etag, updated_at, created_at
+    FROM kb_entries
+    WHERE key = ?
+  `);
+
+  const insertKbEntryStmt = db.prepare(`
+    INSERT INTO kb_entries (key, payload_json, version, etag, updated_at, created_at)
+    VALUES (@key, @payload_json, @version, @etag, @updated_at, @created_at)
+  `);
+
+  const updateKbEntryStmt = db.prepare(`
+    UPDATE kb_entries
+    SET payload_json = @payload_json,
+        version = @version,
+        etag = @etag,
+        updated_at = @updated_at
+    WHERE key = @key
+  `);
+
+  const getWalletStmt = db.prepare(`
+    SELECT user_id, teleton_balance, bonus_points_balance, updated_at
+    FROM wallets
+    WHERE user_id = ?
+  `);
+
+  const upsertWalletStmt = db.prepare(`
+    INSERT INTO wallets (user_id, teleton_balance, bonus_points_balance, updated_at)
+    VALUES (@user_id, @teleton_balance, @bonus_points_balance, @updated_at)
+    ON CONFLICT(user_id) DO UPDATE SET
+      teleton_balance = excluded.teleton_balance,
+      bonus_points_balance = excluded.bonus_points_balance,
+      updated_at = excluded.updated_at
+  `);
+
+  const insertLedgerStmt = db.prepare(`
+    INSERT INTO wallet_ledger (id, user_id, asset, delta, reason, event_id, created_at)
+    VALUES (@id, @user_id, @asset, @delta, @reason, @event_id, @created_at)
+  `);
+
+  const listLedgerStmt = db.prepare(`
+    SELECT id, user_id, asset, delta, reason, event_id, created_at
+    FROM wallet_ledger
+    WHERE user_id = ?
+    ORDER BY created_at DESC
+    LIMIT ?
+  `);
+
+  const sumLedgerDayStmt = db.prepare(`
+    SELECT COALESCE(SUM(delta),0) as total
+    FROM wallet_ledger
+    WHERE user_id = ?
+      AND asset = ?
+      AND date(created_at) = date(?)
+  `);
+
+  const insertLrlEventStmt = db.prepare(`
+    INSERT INTO lrl_events (id, type, user_id, payload_json, payload_hash, status, blocked_reason, created_at)
+    VALUES (@id, @type, @user_id, @payload_json, @payload_hash, @status, @blocked_reason, @created_at)
+  `);
+
+  const listQueuedEventsStmt = db.prepare(`
+    SELECT id, type, user_id, payload_json, payload_hash, status, blocked_reason, created_at
+    FROM lrl_events
+    WHERE status = 'queued'
+    ORDER BY created_at ASC
+    LIMIT ?
+  `);
+
+  const updateEventStatusStmt = db.prepare(`
+    UPDATE lrl_events
+    SET status = @status, blocked_reason = @blocked_reason, processed_at = @processed_at
+    WHERE id = @id
+  `);
+
+  const insertRuleStmt = db.prepare(`
+    INSERT INTO lrl_rules (
+      id, version, enabled, event_type,
+      award_teleton, award_bonus, daily_cap_teleton, daily_cap_bonus,
+      conditions_json, updated_at
+    ) VALUES (
+      @id, @version, @enabled, @event_type,
+      @award_teleton, @award_bonus, @daily_cap_teleton, @daily_cap_bonus,
+      @conditions_json, @updated_at
+    )
+  `);
+
+  const listRulesStmt = db.prepare(`
+    SELECT id, version, enabled, event_type, award_teleton, award_bonus,
+           daily_cap_teleton, daily_cap_bonus, conditions_json, updated_at
+    FROM lrl_rules
+    ORDER BY event_type ASC
+  `);
+
+  const listRulesByTypeStmt = db.prepare(`
+    SELECT id, version, enabled, event_type, award_teleton, award_bonus,
+           daily_cap_teleton, daily_cap_bonus, conditions_json, updated_at
+    FROM lrl_rules
+    WHERE event_type = ?
+      AND enabled = 1
+    ORDER BY version DESC
+  `);
+
+  const insertReviewGateStmt = db.prepare(`
+    INSERT INTO review_gate (review_id, stars, visibility, created_at)
+    VALUES (@review_id, @stars, @visibility, @created_at)
+    ON CONFLICT(review_id) DO NOTHING
+  `);
+
+  const getLrlEventStmt = db.prepare(`
+    SELECT id, type, user_id, payload_json, payload_hash, status, blocked_reason, created_at, processed_at
+    FROM lrl_events
+    WHERE id = ?
+  `);
+
   const getTaskStmt = db.prepare(`
     SELECT task_id, status, visibility, title, created_at, updated_at, task_json,
-           result_json, error_code, error_message, runner_id, heartbeat_at, progress, note
+           result_json, error_code, error_message, blocked_reason, source_trace_id,
+           runner_id, heartbeat_at, progress, note, version
     FROM build_tasks
     WHERE task_id = ?
   `);
@@ -312,6 +775,38 @@ export function initSqlite(dbFile: string) {
       AND (heartbeat_at IS NULL OR heartbeat_at < ?)
   `);
 
+  const listStaleRunningTasksStmt = db.prepare(`
+    SELECT task_id, status, heartbeat_at, version
+    FROM build_tasks
+    WHERE status = 'running'
+      AND (heartbeat_at IS NULL OR heartbeat_at < ?)
+  `);
+
+  const updateTaskCasStmt = db.prepare(`
+    UPDATE build_tasks
+    SET
+      status = COALESCE(@status, status),
+      runner_id = COALESCE(@runner_id, runner_id),
+      heartbeat_at = COALESCE(@heartbeat_at, heartbeat_at),
+      blocked_reason = COALESCE(@blocked_reason, blocked_reason),
+      version = version + 1,
+      updated_at = @updated_at
+    WHERE task_id = @task_id
+      AND version = @expected_version
+  `);
+
+  const updateTaskSourceTraceStmt = db.prepare(`
+    UPDATE build_tasks
+    SET source_trace_id = ?
+    WHERE task_id = ?
+  `);
+
+  const setHeartbeatStaleStmt = db.prepare(`
+    UPDATE build_tasks
+    SET heartbeat_at = ?, updated_at = ?, version = version + 1
+    WHERE task_id = ? AND status = 'running'
+  `);
+
   const TERMINAL = new Set(["done", "partial", "blocked"]);
 
   const setStatusStmt = db.prepare(`
@@ -322,24 +817,24 @@ export function initSqlite(dbFile: string) {
       AND status NOT IN ('done','partial','blocked')
   `);
 
-  // Knowledge pack statements (KB-2)
-  const getKnowledgeStmt = db.prepare(`
+  // KB-2 statements (business_id/version/payload_json)
+  const getKb2Stmt = db.prepare(`
     SELECT business_id, version,
            COALESCE(payload_json, json) AS payload_json,
            etag,
            updated_at
-    FROM knowledge_packs
+    FROM knowledge_packs_kb2
     WHERE business_id = ?
   `);
 
-  const getKnowledgeVersionStmt = db.prepare(`
+  const getKb2VersionStmt = db.prepare(`
     SELECT version
-    FROM knowledge_packs
+    FROM knowledge_packs_kb2
     WHERE business_id = ?
   `);
 
-  const upsertKnowledgeStmt = db.prepare(`
-    INSERT INTO knowledge_packs (business_id, version, payload_json, updated_at, etag)
+  const upsertKb2Stmt = db.prepare(`
+    INSERT INTO knowledge_packs_kb2 (business_id, version, payload_json, updated_at, etag)
     VALUES (@business_id, @version, @payload_json, @updated_at, @etag)
     ON CONFLICT(business_id) DO UPDATE SET
       version = excluded.version,
@@ -348,8 +843,84 @@ export function initSqlite(dbFile: string) {
       etag = excluded.etag
   `);
 
+  // Product knowledge statements
+  const listPacksStmt = db.prepare(`
+    SELECT id, title, scope, owner_id, is_active, created_at
+    FROM knowledge_packs
+    ORDER BY created_at DESC
+    LIMIT ?
+  `);
+
+  const listActivePacksByScopeStmt = db.prepare(`
+    SELECT id, title, scope, owner_id, is_active, created_at
+    FROM knowledge_packs
+    WHERE is_active = 1 AND scope = ?
+    ORDER BY created_at DESC
+    LIMIT ?
+  `);
+
+  const insertPackStmt = db.prepare(`
+    INSERT INTO knowledge_packs (id, title, scope, owner_id, is_active, created_at)
+    VALUES (@id, @title, @scope, @owner_id, @is_active, @created_at)
+  `);
+
+  const setPackActiveStmt = db.prepare(`
+    UPDATE knowledge_packs
+    SET is_active = ?2
+    WHERE id = ?1
+  `);
+
+  const listDocsByPackStmt = db.prepare(`
+    SELECT id, pack_id, kind, title, body_md, updated_at
+    FROM knowledge_docs
+    WHERE pack_id = ?
+    ORDER BY updated_at DESC
+    LIMIT ?
+  `);
+
+  const getDocStmt = db.prepare(`
+    SELECT id, pack_id, kind, title, body_md, updated_at
+    FROM knowledge_docs
+    WHERE id = ?
+  `);
+
+  const insertDocStmt = db.prepare(`
+    INSERT INTO knowledge_docs (id, pack_id, kind, title, body_md, updated_at)
+    VALUES (@id, @pack_id, @kind, @title, @body_md, @updated_at)
+  `);
+
+  const updateDocStmt = db.prepare(`
+    UPDATE knowledge_docs
+    SET kind = COALESCE(@kind, kind),
+        title = COALESCE(@title, title),
+        body_md = COALESCE(@body_md, body_md),
+        updated_at = @updated_at
+    WHERE id = @id
+  `);
+
+  const insertDocVersionStmt = db.prepare(`
+    INSERT INTO knowledge_doc_versions (id, doc_id, body_md, created_at)
+    VALUES (@id, @doc_id, @body_md, @created_at)
+  `);
+
+  // Agent traces
+  const insertAgentTraceStmt = db.prepare(`
+    INSERT INTO agent_traces (
+      trace_id, mode, message, decision_json, citations_json,
+      provider, model, created_at, ok
+    ) VALUES (
+      @trace_id, @mode, @message, @decision_json, @citations_json,
+      @provider, @model, @created_at, @ok
+    )
+  `);
+
+  function makeEtag(payload: string, version: number) {
+    const hash = crypto.createHash("sha256").update(payload).digest("hex").slice(0, 16);
+    return `${hash}:${version}`;
+  }
+
   return {
-    insertTrace(trace: AskTrace & { knowledge_source?: string | null; knowledge_business_id?: string | null; knowledge_version?: number | null }) {
+    insertTrace(trace: AskTrace) {
       insertStmt.run({
         ...trace,
         duration_ms: trace.duration_ms ?? null,
@@ -361,6 +932,41 @@ export function initSqlite(dbFile: string) {
         cost_usd: trace.cost_usd ?? null,
         error_code: trace.error_code ?? null,
         error_message: trace.error_message ?? null,
+        lane: trace.lane ?? null,
+        intent: trace.intent ?? null,
+        intent_source: trace.intent_source ?? null,
+        intent_reason: trace.intent_reason ?? null,
+        intent_confidence: typeof trace.intent_confidence === "number" ? trace.intent_confidence : null,
+        fallback_used: trace.fallback_used ?? null,
+        failures_count: trace.failures_count ?? null,
+        timeouts: trace.timeouts ?? null,
+        max_tokens: trace.max_tokens ?? null,
+        knowledge_source: trace.knowledge_source ?? null,
+        knowledge_business_id: trace.knowledge_business_id ?? null,
+        knowledge_version: trace.knowledge_version ?? null,
+        knowledge_etag: trace.knowledge_etag ?? null,
+        generated_task_id: trace.generated_task_id ?? null,
+        actionability_score: trace.actionability_score ?? null,
+        gate_reason: trace.gate_reason ?? null,
+        artifacts_count: trace.artifacts_count ?? null,
+        skill_id: trace.skill_id ?? null,
+        skill_stage: trace.skill_stage ?? null,
+        issues_count: trace.issues_count ?? null,
+        patch_bytes: trace.patch_bytes ?? null,
+        maker_mode: trace.maker_mode ?? null,
+        duration_sec: trace.duration_sec ?? null,
+        validators_mp4_exists: trace.validators_mp4_exists ?? null,
+        validators_duration_ok: trace.validators_duration_ok ?? null,
+        validators_aspect_9x16: trace.validators_aspect_9x16 ?? null,
+        validators_audio_present: trace.validators_audio_present ?? null,
+        lrl_event_type: trace.lrl_event_type ?? null,
+        lrl_event_id: trace.lrl_event_id ?? null,
+        award_teleton: trace.award_teleton ?? null,
+        award_bonus: trace.award_bonus ?? null,
+        wallet_teleton_delta_applied: trace.wallet_teleton_delta_applied ?? null,
+        wallet_bonus_delta_applied: trace.wallet_bonus_delta_applied ?? null,
+        fraud_flags_count: trace.fraud_flags_count ?? null,
+        action_map_id: trace.action_map_id ?? null,
       });
     },
     getTrace(traceId: string) {
@@ -372,6 +978,10 @@ export function initSqlite(dbFile: string) {
         return listUserStmt.all(query.user_id, limit) as AskTrace[];
       }
       return listAllStmt.all(limit) as AskTrace[];
+    },
+    deleteTracesBefore(cutoffMs: number) {
+      const r = deleteTracesBeforeStmt.run(cutoffMs);
+      return { changed: Number(r.changes || 0) };
     },
     upsertBuildTask(input: {
       task_id: string;
@@ -402,8 +1012,205 @@ export function initSqlite(dbFile: string) {
       );
       return r.changes > 0;
     },
-    getKnowledgePack(business_id: string) {
-      return getKnowledgeStmt.get(business_id) as
+    insertTaskArtifact(input: TaskArtifactRow) {
+      insertArtifactStmt.run(input);
+    },
+    listTaskArtifacts(task_id: string) {
+      return listArtifactsStmt.all(task_id) as TaskArtifactRow[];
+    },
+    getTaskArtifact(id: string) {
+      return getArtifactStmt.get(id) as TaskArtifactRow | undefined;
+    },
+    setBuildTaskSourceTrace(input: { task_id: string; source_trace_id: string }) {
+      updateTaskSourceTraceStmt.run(input.source_trace_id, input.task_id);
+    },
+    getKbEntry(key: string) {
+      return getKbEntryStmt.get(key) as KbEntryRow | undefined;
+    },
+    putKbEntryCas(input: {
+      key: string;
+      payload_json: string;
+      if_match_etag?: string;
+      now: string;
+    }):
+      | { ok: true; entry: KbEntryRow }
+      | { ok: false; current: KbEntryRow | null } {
+      const tx = db.transaction(() => {
+        const current = getKbEntryStmt.get(input.key) as KbEntryRow | undefined;
+        if (!current) {
+          if (input.if_match_etag) {
+            return { ok: false as const, current: null };
+          }
+          const version = 1;
+          const etag = makeEtag(input.payload_json, version);
+          const entry: KbEntryRow = {
+            key: input.key,
+            payload_json: input.payload_json,
+            version,
+            etag,
+            updated_at: input.now,
+            created_at: input.now,
+          };
+          insertKbEntryStmt.run(entry);
+          return { ok: true as const, entry };
+        }
+
+        if (input.if_match_etag && input.if_match_etag !== current.etag) {
+          return { ok: false as const, current };
+        }
+
+        const version = current.version + 1;
+        const etag = makeEtag(input.payload_json, version);
+        const entry: KbEntryRow = {
+          key: input.key,
+          payload_json: input.payload_json,
+          version,
+          etag,
+          updated_at: input.now,
+          created_at: current.created_at,
+        };
+        updateKbEntryStmt.run(entry);
+        return { ok: true as const, entry };
+      });
+
+      return tx();
+    },
+    getWallet(user_id: string) {
+      return getWalletStmt.get(user_id) as
+        | { user_id: string; teleton_balance: number; bonus_points_balance: number; updated_at: string }
+        | undefined;
+    },
+    upsertWallet(input: { user_id: string; teleton_balance: number; bonus_points_balance: number; updated_at: string }) {
+      upsertWalletStmt.run(input);
+    },
+    insertLedger(input: {
+      id: string;
+      user_id: string;
+      asset: string;
+      delta: number;
+      reason: string;
+      event_id: string;
+      created_at: string;
+    }) {
+      insertLedgerStmt.run(input);
+    },
+    listLedger(input: { user_id: string; limit: number }) {
+      return listLedgerStmt.all(input.user_id, input.limit) as Array<{
+        id: string;
+        user_id: string;
+        asset: string;
+        delta: number;
+        reason: string;
+        event_id: string;
+        created_at: string;
+      }>;
+    },
+    sumLedgerForDay(input: { user_id: string; asset: string; dayIso: string }) {
+      const row = sumLedgerDayStmt.get(input.user_id, input.asset, input.dayIso) as { total: number } | undefined;
+      return Number(row?.total ?? 0);
+    },
+    insertLrlEvent(input: {
+      id: string;
+      type: string;
+      user_id: string;
+      payload_json: string;
+      payload_hash: string;
+      status: string;
+      blocked_reason?: string | null;
+      created_at: string;
+    }) {
+      insertLrlEventStmt.run({
+        ...input,
+        blocked_reason: input.blocked_reason ?? null,
+      });
+    },
+    listQueuedLrlEvents(limit: number) {
+      return listQueuedEventsStmt.all(limit) as Array<{
+        id: string;
+        type: string;
+        user_id: string;
+        payload_json: string;
+        payload_hash: string;
+        status: string;
+        blocked_reason?: string | null;
+        created_at: string;
+      }>;
+    },
+    updateLrlEventStatus(input: {
+      id: string;
+      status: string;
+      blocked_reason?: string | null;
+      processed_at?: string | null;
+    }) {
+      updateEventStatusStmt.run({
+        id: input.id,
+        status: input.status,
+        blocked_reason: input.blocked_reason ?? null,
+        processed_at: input.processed_at ?? null,
+      });
+    },
+    insertLrlRule(input: {
+      id: string;
+      version: number;
+      enabled: number;
+      event_type: string;
+      award_teleton: number;
+      award_bonus: number;
+      daily_cap_teleton: number;
+      daily_cap_bonus: number;
+      conditions_json: string;
+      updated_at: string;
+    }) {
+      insertRuleStmt.run(input);
+    },
+    listLrlRules() {
+      return listRulesStmt.all() as Array<{
+        id: string;
+        version: number;
+        enabled: number;
+        event_type: string;
+        award_teleton: number;
+        award_bonus: number;
+        daily_cap_teleton: number;
+        daily_cap_bonus: number;
+        conditions_json: string;
+        updated_at: string;
+      }>;
+    },
+    listLrlRulesByType(event_type: string) {
+      return listRulesByTypeStmt.all(event_type) as Array<{
+        id: string;
+        version: number;
+        enabled: number;
+        event_type: string;
+        award_teleton: number;
+        award_bonus: number;
+        daily_cap_teleton: number;
+        daily_cap_bonus: number;
+        conditions_json: string;
+        updated_at: string;
+      }>;
+    },
+    insertReviewGate(input: { review_id: string; stars: number; visibility: string; created_at: string }) {
+      insertReviewGateStmt.run(input);
+    },
+    getLrlEvent(id: string) {
+      return getLrlEventStmt.get(id) as
+        | {
+            id: string;
+            type: string;
+            user_id: string;
+            payload_json: string;
+            payload_hash: string;
+            status: string;
+            blocked_reason?: string | null;
+            created_at: string;
+            processed_at?: string | null;
+          }
+        | undefined;
+    },
+    getKb2KnowledgePack(business_id: string) {
+      return getKb2Stmt.get(business_id) as
         | {
             business_id: string;
             version: number;
@@ -414,7 +1221,7 @@ export function initSqlite(dbFile: string) {
         | undefined;
     },
 
-    putKnowledgePack(input: {
+    putKb2KnowledgePack(input: {
       business_id: string;
       payload_json: string;
       expected_version?: number;
@@ -425,7 +1232,7 @@ export function initSqlite(dbFile: string) {
       const etag = crypto.createHash("sha256").update(input.payload_json).digest("hex");
 
       const tx = db.transaction(() => {
-        const curRow = getKnowledgeVersionStmt.get(input.business_id) as
+        const curRow = getKb2VersionStmt.get(input.business_id) as
           | { version: number }
           | undefined;
         const currentVersion = curRow?.version ?? 0;
@@ -437,7 +1244,7 @@ export function initSqlite(dbFile: string) {
         }
 
         const nextVersion = currentVersion + 1;
-        upsertKnowledgeStmt.run({
+        upsertKb2Stmt.run({
           business_id: input.business_id,
           version: nextVersion,
           payload_json: input.payload_json,
@@ -455,6 +1262,135 @@ export function initSqlite(dbFile: string) {
       });
 
       return tx();
+    },
+
+    listKnowledgePacks(input?: { limit?: number }) {
+      const limit = Math.min(Math.max(input?.limit ?? 200, 1), 500);
+      return listPacksStmt.all(limit) as Array<{
+        id: string;
+        title: string;
+        scope: string;
+        owner_id: string;
+        is_active: number;
+        created_at: number;
+      }>;
+    },
+
+    listActiveKnowledgePacksByScope(input: { scope: string; limit?: number }) {
+      const limit = Math.min(Math.max(input.limit ?? 200, 1), 500);
+      return listActivePacksByScopeStmt.all(input.scope, limit) as Array<{
+        id: string;
+        title: string;
+        scope: string;
+        owner_id: string;
+        is_active: number;
+        created_at: number;
+      }>;
+    },
+
+    createKnowledgePack(input: {
+      id: string;
+      title: string;
+      scope: "global" | "store" | "service";
+      owner_id: string;
+      is_active: boolean;
+      created_at: number;
+    }) {
+      insertPackStmt.run({
+        id: input.id,
+        title: input.title,
+        scope: input.scope,
+        owner_id: input.owner_id,
+        is_active: input.is_active ? 1 : 0,
+        created_at: input.created_at,
+      });
+      return { id: input.id };
+    },
+
+    setKnowledgePackActive(input: { id: string; is_active: boolean }) {
+      const r = setPackActiveStmt.run(input.id, input.is_active ? 1 : 0);
+      return { changed: Number(r.changes || 0) };
+    },
+
+    listKnowledgeDocs(input: { pack_id: string; limit?: number }) {
+      const limit = Math.min(Math.max(input.limit ?? 500, 1), 1000);
+      return listDocsByPackStmt.all(input.pack_id, limit) as Array<{
+        id: string;
+        pack_id: string;
+        kind: string;
+        title: string;
+        body_md: string;
+        updated_at: number;
+      }>;
+    },
+
+    getKnowledgeDoc(input: { id: string }) {
+      return getDocStmt.get(input.id) as
+        | {
+            id: string;
+            pack_id: string;
+            kind: string;
+            title: string;
+            body_md: string;
+            updated_at: number;
+          }
+        | undefined;
+    },
+
+    createKnowledgeDoc(input: {
+      id: string;
+      pack_id: string;
+      kind: string;
+      title: string;
+      body_md: string;
+      updated_at: number;
+    }) {
+      insertDocStmt.run(input);
+      return { id: input.id };
+    },
+
+    updateKnowledgeDoc(input: {
+      id: string;
+      kind?: string | null;
+      title?: string | null;
+      body_md?: string | null;
+      updated_at: number;
+    }) {
+      const r = updateDocStmt.run(input);
+      return { changed: Number(r.changes || 0) };
+    },
+
+    publishKnowledgeDoc(input: { doc_id: string; version_id: string; created_at: number }) {
+      const doc = getDocStmt.get(input.doc_id) as
+        | { id: string; body_md: string }
+        | undefined;
+      if (!doc) return { ok: false as const };
+      insertDocVersionStmt.run({
+        id: input.version_id,
+        doc_id: input.doc_id,
+        body_md: doc.body_md,
+        created_at: input.created_at,
+      });
+      return { ok: true as const, id: input.version_id };
+    },
+
+    insertAgentTrace(input: {
+      trace_id: string;
+      mode: string;
+      message: string;
+      decision_json: string;
+      citations_json?: string | null;
+      provider?: string | null;
+      model?: string | null;
+      created_at: number;
+      ok: 1 | 0;
+    }) {
+      insertAgentTraceStmt.run({
+        ...input,
+        citations_json: input.citations_json ?? null,
+        provider: input.provider ?? null,
+        model: input.model ?? null,
+      });
     },
     getBuildTask(task_id: string) {
       return getTaskStmt.get(task_id) as BuildTaskRow | undefined;
@@ -551,6 +1487,40 @@ export function initSqlite(dbFile: string) {
       const vis = input.visibility ?? null;
       const r = sweepStaleStmt.run(input.now, vis, vis, input.cutoff);
       return { marked_blocked: Number(r.changes || 0) };
+    },
+    listStaleRunningTasks(input: { cutoff: number }) {
+      return listStaleRunningTasksStmt.all(input.cutoff) as Array<{
+        task_id: string;
+        status: string;
+        heartbeat_at: number | null;
+        version: number;
+      }>;
+    },
+    updateBuildTaskCAS(input: {
+      task_id: string;
+      expected_version: number;
+      patch: {
+        status?: BuildTaskRow["status"];
+        runner_id?: string | null;
+        heartbeat_at?: number | null;
+        blocked_reason?: string | null;
+      };
+      now: number;
+    }) {
+      const r = updateTaskCasStmt.run({
+        task_id: input.task_id,
+        expected_version: input.expected_version,
+        status: input.patch.status ?? null,
+        runner_id: input.patch.runner_id ?? null,
+        heartbeat_at: input.patch.heartbeat_at ?? null,
+        blocked_reason: input.patch.blocked_reason ?? null,
+        updated_at: input.now,
+      });
+      return { changed: Number(r.changes || 0) };
+    },
+    setHeartbeatStale(input: { task_id: string; at: number; now: number }) {
+      const r = setHeartbeatStaleStmt.run(input.at, input.now, input.task_id);
+      return { changed: Number(r.changes || 0) };
     },
     setBuildTaskStatus(input: {
       task_id: string;

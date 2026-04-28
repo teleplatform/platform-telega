@@ -62,3 +62,220 @@
     0 12px 40px rgba(0,0,0,0.35),
     0 0 28px hsla(var(--tele-glow));
 }
+
+/* ============================
+   Tele•GPT Intro / Splash v1
+   ============================ */
+
+:root {
+  --telegpt-grad: linear-gradient(90deg, #7c3aed 0%, #a855f7 35%, #f97316 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .telegpt-intro * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* full-screen overlay */
+.telegpt-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+/* subtle background haze */
+.telegpt-intro::before {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  background:
+    radial-gradient(closest-side, rgba(124, 58, 237, 0.18), transparent 60%),
+    radial-gradient(closest-side, rgba(249, 115, 22, 0.14), transparent 55%);
+  filter: blur(40px);
+  opacity: 0.9;
+  transform: translateZ(0);
+}
+
+/* main stack */
+.telegpt-intro__stack {
+  position: relative;
+  display: grid;
+  place-items: center;
+  gap: 18px;
+  padding: 24px;
+}
+
+/* logo container */
+.telegpt-intro__logoWrap {
+  position: relative;
+  width: min(320px, 76vw);
+  aspect-ratio: 1 / 1;
+  display: grid;
+  place-items: center;
+  animation: telegpt-in 320ms ease-out forwards;
+  transform: scale(0.98);
+  opacity: 0;
+}
+
+/* logo image transitions: mono -> color */
+.telegpt-intro__logo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+  filter: grayscale(1) brightness(0.92) contrast(1.05);
+  transition: filter 420ms ease;
+}
+
+/* make it colored near the end */
+.telegpt-intro__logo.isColor {
+  filter: grayscale(0) brightness(1) contrast(1);
+}
+
+/* lamp glow overlays (no extra images) */
+.telegpt-intro__lamp {
+  position: absolute;
+  border-radius: 999px;
+  pointer-events: none;
+  opacity: 0;
+  filter: blur(10px);
+  box-shadow:
+    0 0 24px rgba(249, 115, 22, 0.85),
+    0 0 48px rgba(124, 58, 237, 0.35);
+}
+
+/* approximate positions on your logo (tweak if needed) */
+.telegpt-intro__lamp--head {
+  width: 46px;
+  height: 46px;
+  left: 50%;
+  top: 8%;
+  transform: translateX(-50%);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.92) 0%, rgba(249, 115, 22, 0.9) 35%, rgba(249, 115, 22, 0) 70%);
+}
+.telegpt-intro__lamp--chest {
+  width: 64px;
+  height: 64px;
+  left: 50%;
+  top: 62%;
+  transform: translateX(-50%);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.92) 0%, rgba(249, 115, 22, 0.95) 28%, rgba(124, 58, 237, 0.25) 48%, rgba(249, 115, 22, 0) 72%);
+}
+
+/* 2 bright pulses */
+.telegpt-intro__lamp.pulse2 {
+  animation: telegpt-pulse2 560ms ease-in-out forwards;
+}
+
+/* title */
+.telegpt-intro__title {
+  position: relative;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  font-size: clamp(28px, 7vw, 44px);
+  line-height: 1.05;
+  margin: 0;
+  opacity: 0;
+  transform: translateY(10px);
+  animation: telegpt-title-in 360ms ease-out 300ms forwards;
+}
+
+/* base (mono) text */
+.telegpt-intro__titleBase {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+/* shimmer gradient text layer */
+.telegpt-intro__titleShimmer {
+  position: absolute;
+  inset: 0;
+  color: transparent;
+  background: var(--telegpt-grad);
+  background-size: 220% 100%;
+  background-position: 110% 50%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  opacity: 0;
+}
+
+/* “вжик” shimmer pass */
+.telegpt-intro__titleShimmer.run {
+  opacity: 1;
+  animation: telegpt-shimmer 650ms ease-in-out 600ms forwards;
+}
+
+/* fade-out whole intro */
+.telegpt-intro.isExit {
+  animation: telegpt-out 280ms ease-in forwards;
+}
+
+@keyframes telegpt-in {
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes telegpt-title-in {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes telegpt-shimmer {
+  0%   { background-position: 110% 50%; filter: saturate(1.0); }
+  55%  { background-position: 0% 50%;   filter: saturate(1.15); }
+  100% { background-position: -35% 50%; filter: saturate(1.05); }
+}
+
+@keyframes telegpt-pulse2 {
+  0%   { opacity: 0; transform: translateX(-50%) scale(0.95); }
+  18%  { opacity: 1; transform: translateX(-50%) scale(1.06); }
+  36%  { opacity: 0; transform: translateX(-50%) scale(0.98); }
+  62%  { opacity: 1; transform: translateX(-50%) scale(1.08); }
+  82%  { opacity: 0; transform: translateX(-50%) scale(1.0); }
+  100% { opacity: 0; }
+}
+
+@keyframes telegpt-out {
+  to { opacity: 0; transform: translateY(-4px); }
+}
+
+/* ============================
+   Tele•GPT Studio Onboarding v1
+   ============================ */
+
+.telegpt-onboard {
+  background: rgba(0,0,0,0.92);
+}
+
+.telegpt-onboard::before {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  background:
+    radial-gradient(closest-side, rgba(124, 58, 237, 0.14), transparent 62%),
+    radial-gradient(closest-side, rgba(249, 115, 22, 0.12), transparent 58%);
+  filter: blur(50px);
+  opacity: 0.9;
+  pointer-events: none;
+  transform: translateZ(0);
+}
+
+/* ============================
+   Tele•GPT Studio Home Empty v1
+   ============================ */
+
+.telegpt-home {
+  backdrop-filter: blur(14px);
+}
+
+/* Fast scroll feel for big text blocks */
+.telegpt-fasttext {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: auto;
+  touch-action: pan-y;
+}

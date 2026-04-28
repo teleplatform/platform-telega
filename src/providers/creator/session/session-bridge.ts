@@ -11,7 +11,7 @@ export interface SessionBridgeConfig {
   maxRetries?: number;
 }
 
-const DEFAULT_PREFERRED_PROVIDERS: SessionProviderId[] = ["chatgpt_web", "qwen_web", "deepseek_web"];
+const DEFAULT_PREFERRED_PROVIDERS: SessionProviderId[] = ["chatgpt_web", "qwen_web", "deepseek_web", "grok_web"];
 
 export class CreatorSessionBridge {
   private registry: SessionRegistry;
@@ -33,7 +33,7 @@ export class CreatorSessionBridge {
   }
 
 private initializeProviders(): void {
-    const providers: SessionProviderId[] = ["chatgpt_web", "qwen_web", "deepseek_web", "kimi_web"];
+    const providers: SessionProviderId[] = ["chatgpt_web", "qwen_web", "deepseek_web", "grok_web", "kimi_web"];
     for (const provider of providers) {
       this.registry.enable(provider);
     }
@@ -56,7 +56,7 @@ private initializeProviders(): void {
     console.log("[creator-bridge] skipping health check (direct execution mode)");
     
     // Enable all providers for direct execution
-    const providers: SessionProviderId[] = ["chatgpt_web", "qwen_web", "deepseek_web", "kimi_web"];
+    const providers: SessionProviderId[] = ["chatgpt_web", "qwen_web", "deepseek_web", "grok_web", "kimi_web"];
     for (const provider of providers) {
       if (this.registry.isAvailable(provider)) {
         console.log("[creator-bridge] provider_available:", provider);

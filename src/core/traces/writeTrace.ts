@@ -1,0 +1,97 @@
+import { db } from "../db.ts";
+
+export async function writeTrace(trace: {
+  ok: boolean;
+  route: string;
+  provider: string;
+  lane?: string;
+  model?: string;
+  latency_ms?: number;
+  tokens_in?: number;
+  tokens_out?: number;
+  tokens_total?: number;
+  error?: string;
+  intent?: string;
+  intent_source?: string;
+  intent_reason?: string;
+  fallback_used?: boolean;
+  failures_count?: number;
+  timeouts?: number;
+  max_tokens?: number;
+  intent_confidence?: number;
+  knowledge_source?: string;
+  knowledge_version?: number | string;
+  knowledge_etag?: string;
+  knowledge_pack_id?: string;
+  generated_task_id?: string;
+  actionability_score?: number;
+  gate_reason?: string;
+  artifacts_count?: number;
+  skill_id?: string;
+  skill_stage?: string;
+  issues_count?: number;
+  patch_bytes?: number;
+  maker_mode?: boolean;
+  duration_sec?: number;
+  validators_mp4_exists?: boolean;
+  validators_duration_ok?: boolean;
+  validators_aspect_9x16?: boolean;
+  validators_audio_present?: boolean;
+  lrl_event_type?: string;
+  lrl_event_id?: string;
+  award_teleton?: number;
+  award_bonus?: number;
+  wallet_teleton_delta_applied?: number;
+  wallet_bonus_delta_applied?: number;
+  fraud_flags_count?: number;
+  action_map_id?: string;
+  meta?: Record<string, any>;
+}) {
+  return db.traces.insert({
+    ok: trace.ok,
+    route: trace.route,
+    provider: trace.provider,
+    lane: trace.lane,
+    model: trace.model,
+    latency_ms: trace.latency_ms,
+    tokens_in: trace.tokens_in,
+    tokens_out: trace.tokens_out,
+    tokens_total: trace.tokens_total,
+    error: trace.error,
+    intent: trace.intent,
+    intent_source: trace.intent_source,
+    intent_reason: trace.intent_reason,
+    fallback_used: trace.fallback_used,
+    failures_count: trace.failures_count,
+    timeouts: trace.timeouts,
+    max_tokens: trace.max_tokens,
+    intent_confidence: trace.intent_confidence,
+    knowledge_source: trace.knowledge_source,
+    knowledge_version: trace.knowledge_version,
+    knowledge_etag: trace.knowledge_etag,
+    knowledge_pack_id: trace.knowledge_pack_id,
+    generated_task_id: trace.generated_task_id,
+    actionability_score: trace.actionability_score,
+    gate_reason: trace.gate_reason,
+    artifacts_count: trace.artifacts_count,
+    skill_id: trace.skill_id,
+    skill_stage: trace.skill_stage,
+    issues_count: trace.issues_count,
+    patch_bytes: trace.patch_bytes,
+    maker_mode: trace.maker_mode,
+    duration_sec: trace.duration_sec,
+    validators_mp4_exists: trace.validators_mp4_exists,
+    validators_duration_ok: trace.validators_duration_ok,
+    validators_aspect_9x16: trace.validators_aspect_9x16,
+    validators_audio_present: trace.validators_audio_present,
+    lrl_event_type: trace.lrl_event_type,
+    lrl_event_id: trace.lrl_event_id,
+    award_teleton: trace.award_teleton,
+    award_bonus: trace.award_bonus,
+    wallet_teleton_delta_applied: trace.wallet_teleton_delta_applied,
+    wallet_bonus_delta_applied: trace.wallet_bonus_delta_applied,
+    fraud_flags_count: trace.fraud_flags_count,
+    action_map_id: trace.action_map_id,
+    meta: trace.meta,
+  });
+}

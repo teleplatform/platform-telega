@@ -1,11 +1,12 @@
 import type { Page } from "playwright";
 import type { WebAdapter } from "./browser-runtime.js";
 
-export type SessionProviderId = "chatgpt_web" | "qwen_web" | "deepseek_web" | "kimi_web";
+export type SessionProviderId = "chatgpt_web" | "qwen_web" | "deepseek_web" | "grok_web" | "kimi_web";
 
 const OPENAI_WEB_URL = "https://chatgpt.com";
 const QWEN_WEB_URL = "https://qianwen.aliyun.com";
 const DEEPSEEK_WEB_URL = "https://chat.deepseek.com";
+const GROK_WEB_URL = "https://grok.com";
 const KIMI_WEB_URL = "https://kimi.moonshot.cn";
 
 export class OpenAIWebAdapter implements WebAdapter {
@@ -302,6 +303,22 @@ export function getWebAdapter(providerId: SessionProviderId): WebAdapter {
       return new QwenWebAdapter();
     case "deepseek_web":
       return new DeepSeekWebAdapter();
+    case "grok_web":
+      // CDP execution is used directly - adapter is stub
+      return {
+        providerId: "grok_web",
+        loginUrl: GROK_WEB_URL,
+        inputSelector: "textarea",
+        submitSelector: "button",
+        outputSelector: "[class*='message']",
+        loadingSelector: "[class*='loading']",
+        maxRetries: 3,
+        navigate: async () => {},
+        fillPrompt: async () => {},
+        submit: async () => {},
+        waitForResponse: async () => "",
+        isLoggedIn: async () => true,
+      };
     case "kimi_web":
       return new KimiWebAdapter();
     default:

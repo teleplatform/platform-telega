@@ -138,12 +138,467 @@ export async function buildServer() {
     return { ok: true };
   });
 
+  app.get("/ready", async () => {
+    return { ok: true, ready: true };
+  });
+
+  const requireCreator = (reply: any) => {
+    const mode = process.env.TELEGA_MODE?.trim().toLowerCase();
+    if (mode !== "creator") {
+      reply.status(403);
+      return apiError("auth", "FORBIDDEN", "Maker-only endpoint");
+    }
+    return null;
+  };
+
+  const toIso = (ms: number) => new Date(ms).toISOString();
+
+  // --- Product Knowledge: packs/docs/versions (Maker CRUD)
+  // Static routes are registered before KB-2 /v1/knowledge/:business_id to avoid ambiguity.
+
+  app.get("/v1/knowledge/packs", async (req, reply) => {
+    const denied = requireCreator(reply);
+    if (denied) return denied;
+
+    const limitRaw = (req.query as any)?.limit;
+    const limit = typeof limitRaw === "string" ? Number(limitRaw) : undefined;
+    const rows = store.listKnowledgePacks({ limit });
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        scope: r.scope,
+        owner_id: r.owner_id,
+        is_active: Boolean(r.is_active),
+        created_at: toIso(r.created_at),
+      })),
+    };
+  });
+
+  app.post<{ Body: { title: string; scope: "global" | "store" | "service"; owner_id?: string; is_active?: boolean } }>(
+    "/v1/knowledge/packs",
+    async (req, reply) => {
+      const denied = requireCreator(reply);
+      if (denied) return denied;
+
+      const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
+      const scope = req.body?.scope;
+      const owner_id = typeof req.body?.owner_id === "string" ? req.body.owner_id.trim() : "default";
+      const is_active = typeof req.body?.is_active === "boolean" ? req.body.is_active : true;
+
+      if (!title) {
+        return reply.status(400).send(apiError("knowledge", "BAD_REQUEST", "title is required"));
+      }
+      if (scope !== "global" && scope !== "store" && scope !== "service") {
+        return reply.status(400).send(apiError("knowledge", "BAD_REQUEST", "invalid scope"));
+      }
+
+      const id = hexId24();
+      const created_at = Date.now();
+      store.createKnowledgePack({ id, title, scope, owner_id, is_active, created_at });
+
+      return {
+        id,
+        title,
+        scope,
+        owner_id,
+        is_active,
+        created_at: toIso(created_at),
+      };
+    }
+  );
+
+  app.put<{ Params: { id: string }; Body: { is_active: boolean } }>(
+    "/v1/knowledge/packs/:id",
+    async (req, reply) => {
+      const denied = requireCreator(reply);
+      if (denied) return denied;
+
+      const id = req.params.id;
+      const is_active = req.body?.is_active;
+      if (typeof is_active !== "boolean") {
+        return reply
+          .status(400)
+          .send(apiError("knowledge", "BAD_REQUEST", "is_active must be boolean"));
+      }
+
+      const r = store.setKnowledgePackActive({ id, is_active });
+      if (r.changed <= 0) {
+        return reply.status(404).send(apiError(id, "NOT_FOUND", "pack not found"));
+      }
+      return { ok: true };
+    }
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/v1/knowledge/packs/:id/docs",
+    async (req, reply) => {
+      const denied = requireCreator(reply);
+      if (denied) return denied;
+
+      const limitRaw = (req.query as any)?.limit;
+      const limit = typeof limitRaw === "string" ? Number(limitRaw) : undefined;
+      const rows = store.listKnowledgeDocs({ pack_id: req.params.id, limit });
+      return {
+        items: rows.map((d) => ({
+          id: d.id,
+          pack_id: d.pack_id,
+          kind: d.kind,
+          title: d.title,
+          body_md: d.body_md,
+          updated_at: toIso(d.updated_at),
+        })),
+      };
+    }
+  );
+
+  app.post<{ Body: { pack_id: string; kind: string; title: string; body_md: string } }>(
+    "/v1/knowledge/docs",
+    async (req, reply) => {
+      const denied = requireCreator(reply);
+      if (denied) return denied;
+
+      const pack_id = typeof req.body?.pack_id === "string" ? req.body.pack_id.trim() : "";
+      const kind = typeof req.body?.kind === "string" ? req.body.kind.trim() : "";
+      const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
+      const body_md = typeof req.body?.body_md === "string" ? req.body.body_md : "";
+
+      if (!pack_id || !title || !kind) {
+        return reply.status(400).send(apiError("knowledge", "BAD_REQUEST", "pack_id, kind, title required"));
+      }
+
+      const id = hexId24();
+      const updated_at = Date.now();
+      store.createKnowledgeDoc({ id, pack_id, kind, title, body_md, updated_at });
+      return { id, pack_id, kind, title, body_md, updated_at: toIso(updated_at) };
+    }
+  );
+
+  app.put<{ Params: { id: string }; Body: { kind?: string; title?: string; body_md?: string } }>(
+    "/v1/knowledge/docs/:id",
+    async (req, reply) => {
+      const denied = requireCreator(reply);
+      if (denied) return denied;
+
+      const id = req.params.id;
+      const kind = typeof req.body?.kind === "string" ? req.body.kind.trim() : undefined;
+      const title = typeof req.body?.title === "string" ? req.body.title.trim() : undefined;
+      const body_md = typeof req.body?.body_md === "string" ? req.body.body_md : undefined;
+
+      const r = store.updateKnowledgeDoc({
+        id,
+        kind: kind ?? null,
+        title: title ?? null,
+        body_md: typeof body_md === "string" ? body_md : null,
+        updated_at: Date.now(),
+      });
+
+      if (r.changed <= 0) {
+        return reply.status(404).send(apiError(id, "NOT_FOUND", "doc not found"));
+      }
+
+      const doc = store.getKnowledgeDoc({ id });
+      return {
+        id,
+        pack_id: doc?.pack_id,
+        kind: doc?.kind,
+        title: doc?.title,
+        body_md: doc?.body_md,
+        updated_at: doc ? toIso(doc.updated_at) : null,
+      };
+    }
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/v1/knowledge/docs/:id/publish",
+    async (req, reply) => {
+      const denied = requireCreator(reply);
+      if (denied) return denied;
+
+      const doc_id = req.params.id;
+      const version_id = hexId24();
+      const created_at = Date.now();
+      const r = store.publishKnowledgeDoc({ doc_id, version_id, created_at });
+      if (!r.ok) {
+        return reply.status(404).send(apiError(doc_id, "NOT_FOUND", "doc not found"));
+      }
+      return { id: version_id, doc_id, created_at: toIso(created_at) };
+    }
+  );
+
+  // --- Sales/Support Agent
+  app.post<{ Body: { message: string; mode: "sales" | "support"; scope?: "global" | "store" | "service"; intent_hint?: string } }>(
+    "/v1/agent/sales-support/ask",
+    async (req, reply) => {
+      const t = hexId24();
+      const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+      const mode = req.body?.mode === "sales" ? "sales" : "support";
+      const scope = req.body?.scope ?? "global";
+      const intent_hint = typeof req.body?.intent_hint === "string" ? req.body.intent_hint.trim() : undefined;
+
+      if (!message) {
+        return reply.status(400).send(apiError(t, "BAD_REQUEST", "message is required"));
+      }
+      if (scope !== "global" && scope !== "store" && scope !== "service") {
+        return reply.status(400).send(apiError(t, "BAD_REQUEST", "invalid scope"));
+      }
+
+      const packs = store.listActiveKnowledgePacksByScope({ scope, limit: 50 });
+      const docs = packs.flatMap((p) => store.listKnowledgeDocs({ pack_id: p.id, limit: 200 }));
+
+      const tokens = message
+        .toLowerCase()
+        .split(/[^a-z0-9а-яё]+/i)
+        .map((s) => s.trim())
+        .filter((s) => s.length >= 3)
+        .slice(0, 24);
+
+      const scored = docs
+        .map((d) => {
+          const hay = `${d.title}\n${d.body_md}`.toLowerCase();
+          let score = 0;
+          for (const tok of tokens) {
+            if (hay.includes(tok)) score += 1;
+          }
+          return { d, score };
+        })
+        .filter((x) => x.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5);
+
+      const citations = scored.map((x) => {
+        const snippet = x.d.body_md.slice(0, 240);
+        return { pack_id: x.d.pack_id, doc_id: x.d.id, snippet };
+      });
+
+      // If no LLM providers available, return deterministic decision (anti-magic fallback)
+      const hasOpenAIKey = Boolean(process.env.OPENAI_API_KEY?.trim());
+      const localBaseRaw = process.env.LOCAL_OPENAI_BASE_URL?.trim();
+      const guarded = guardCreatorOnlyBaseUrl({
+        baseUrlEnvName: "LOCAL_OPENAI_BASE_URL",
+        baseUrlValue: localBaseRaw,
+        logger: app.log,
+      });
+      const hasLocalBase = Boolean(guarded.baseUrl);
+      if (guarded.baseUrl) {
+        process.env.LOCAL_OPENAI_BASE_URL = guarded.baseUrl;
+      }
+
+      const fallbackDecision = {
+        mode,
+        intent: citations.length > 0 ? "faq" : "unknown",
+        confidence: citations.length > 0 ? 0.65 : 0.3,
+        answer:
+          citations.length > 0
+            ? `${citations[0].snippet}`
+            : "I don’t have enough information in the knowledge base. Please describe what you need, and I will help.",
+        actions:
+          citations.length > 0
+            ? [
+                {
+                  type: "request_info",
+                  label: "Ask one clarifying question",
+                  payload: { question: "What exactly do you need help with?" },
+                },
+              ]
+            : [
+                {
+                  type: "handoff_human",
+                  label: "Escalate to human",
+                  payload: { reason: "no_matching_docs" },
+                },
+              ],
+        citations,
+        safety: {
+          needs_human: citations.length === 0,
+          reason: citations.length === 0 ? "no_knowledge" : undefined,
+        },
+      };
+
+      if (!hasOpenAIKey && !hasLocalBase) {
+        store.insertAgentTrace({
+          trace_id: t,
+          mode,
+          message,
+          decision_json: JSON.stringify(fallbackDecision),
+          citations_json: JSON.stringify(citations),
+          provider: "local",
+          model: "local-demo",
+          created_at: Date.now(),
+          ok: 1,
+        });
+        return { trace_id: t, decision: fallbackDecision };
+      }
+
+      const classifierSystem = [
+        "You are Tele•GPT Sales/Support Agent.",
+        "Follow these hard rules:",
+        "- Output ONLY one tag: <json>{...}</json>",
+        "- JSON must match AgentDecision schema.",
+        "- If knowledge is insufficient or risky, set safety.needs_human=true and add handoff_human action.",
+        "- Never promise facts not present in citations.",
+        "- Ask at most one clarifying question (via actions.request_info).",
+        "",
+        `MODE: ${mode}`,
+        intent_hint ? `INTENT_HINT: ${intent_hint}` : "",
+        "",
+        "CITED_DOCS:",
+        ...citations.map((c, i) => `#${i + 1} pack_id=${c.pack_id} doc_id=${c.doc_id}\n${c.snippet}`),
+        "",
+        "AgentDecision JSON schema:",
+        JSON.stringify({
+          mode: "support",
+          intent: "faq",
+          confidence: 0.7,
+          answer: "string",
+          actions: [{ type: "request_info", label: "string", payload: {} }],
+          citations: [{ pack_id: "...", doc_id: "...", snippet: "..." }],
+          safety: { needs_human: false, reason: "" },
+        }),
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      // Use existing INTENT-2 lane selection infra as a cheap heuristic
+      const kw = keywordIntent(message);
+      const lane: Lane = kw.confidence >= 0.8 ? "cheap" : "smart";
+
+      const envModels = {
+        has_openai_key: hasOpenAIKey,
+        has_local_base_url: hasLocalBase,
+        local_default_model: process.env.LOCAL_OPENAI_MODEL?.trim(),
+        cheap_model: process.env.TELEGPT_MODEL_CHEAP,
+        smart_model: process.env.TELEGPT_MODEL_SMART,
+        coding_model: process.env.TELEGPT_MODEL_CODING,
+      };
+
+      const fullChain = buildProviderChain(lane, envModels);
+      const chain = fullChain.filter((spec) => {
+        const isOpen = circuitBreaker.isOpen(spec.provider, spec.model);
+        return !isOpen || spec.model === "local-demo";
+      });
+
+      const callProvider = async (spec: ProviderSpec, chatReq: ChatRequest) => {
+        const modelWithPrefix = `${spec.provider}:${spec.model}`;
+        try {
+          const response = await routeChat({
+            ...chatReq,
+            model: modelWithPrefix,
+          });
+          circuitBreaker.recordSuccess(spec.provider, spec.model);
+          return response;
+        } catch (err) {
+          circuitBreaker.recordFailure(spec.provider, spec.model);
+          throw err;
+        }
+      };
+
+      const llm = await runWithFallback(chain, callProvider, {
+        message,
+        request_id: `${t}_agent`,
+        system: classifierSystem,
+      } as ChatRequest);
+
+      const jsonText = extractTaggedText(llm.reply, "json");
+      const parsed = safeJsonParse(jsonText);
+
+      // Minimal validation
+      const decision =
+        parsed && typeof parsed === "object" && typeof parsed.answer === "string" && Array.isArray(parsed.actions)
+          ? {
+              mode: parsed.mode === "sales" ? "sales" : "support",
+              intent: typeof parsed.intent === "string" ? parsed.intent : "unknown",
+              confidence:
+                typeof parsed.confidence === "number" && Number.isFinite(parsed.confidence)
+                  ? Math.min(Math.max(parsed.confidence, 0), 1)
+                  : 0.3,
+              answer: parsed.answer,
+              actions: parsed.actions,
+              citations: Array.isArray(parsed.citations) ? parsed.citations : citations,
+              safety: parsed.safety && typeof parsed.safety === "object" ? parsed.safety : { needs_human: false },
+            }
+          : fallbackDecision;
+
+      // Optionally map heavy actions to tasks
+      const heavy = new Set(["open_ticket", "create_quote", "apply_loyalty"]);
+      const enrichedActions: any[] = [];
+      for (const a of decision.actions ?? []) {
+        if (a && typeof a === "object" && heavy.has(a.type)) {
+          const taskPayload: any = {
+            type: "build_task",
+            version: "1.0",
+            meta: {
+              task_id: "auto",
+              created_at: Date.now(),
+              priority: "normal",
+              mode: "smart",
+              persona: "tele-gpt",
+              ecosystem: "telega",
+              visibility: "creator",
+            },
+            goal: {
+              title: a.label || `Action: ${a.type}`,
+              description: `Requested by agent (${mode})`,
+            },
+            spec: {
+              skill_kind:
+                a.type === "open_ticket"
+                  ? "support_ticket"
+                  : a.type === "create_quote"
+                  ? "sales_quote"
+                  : "loyalty_apply",
+              payload: a.payload ?? {},
+            },
+          };
+
+          const created = await app.inject({
+            method: "POST",
+            url: "/v1/build/tasks",
+            payload: taskPayload,
+          });
+          const createdJson = created.statusCode === 200 ? (created.json() as any) : null;
+          const task_id = createdJson?.task_id;
+          enrichedActions.push({
+            ...a,
+            payload: { ...(a.payload ?? {}), task_id },
+          });
+        } else {
+          enrichedActions.push(a);
+        }
+      }
+
+      const finalDecision = { ...decision, actions: enrichedActions, citations };
+
+      store.insertAgentTrace({
+        trace_id: t,
+        mode,
+        message,
+        decision_json: JSON.stringify(finalDecision),
+        citations_json: JSON.stringify(citations),
+        provider: llm.provider,
+        model: llm.model,
+        created_at: Date.now(),
+        ok: 1,
+      });
+
+      return {
+        trace_id: t,
+        decision: finalDecision,
+        meta: {
+          provider: llm.provider,
+          model: llm.model,
+          lane,
+        },
+      };
+    }
+  );
+
   // KB-2: GET knowledge pack
   app.get<{ Params: { business_id: string } }>(
     "/v1/knowledge/:business_id",
     async (req, reply) => {
       const business_id = req.params.business_id;
-      const pack = store.getKnowledgePack(business_id);
+      const pack = store.getKb2KnowledgePack(business_id);
       if (!pack) {
         return reply
           .status(404)
@@ -185,7 +640,7 @@ export async function buildServer() {
           .send(apiError(business_id, "BAD_REQUEST", "expected_version must be a number"));
       }
 
-      const result = store.putKnowledgePack({
+      const result = store.putKb2KnowledgePack({
         business_id,
         payload_json: JSON.stringify(payload),
         expected_version,
@@ -265,7 +720,7 @@ export async function buildServer() {
     let knowledge_version: number | undefined;
     let knowledgeForReq: KnowledgePack | undefined;
 
-    const dbPack = store.getKnowledgePack(business_id);
+    const dbPack = store.getKb2KnowledgePack(business_id);
     if (dbPack) {
       knowledge_source = "db";
       knowledge_version = dbPack.version;

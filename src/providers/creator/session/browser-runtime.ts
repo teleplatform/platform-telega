@@ -76,6 +76,7 @@ const providerProfilePaths: Record<SessionProviderId, string> = {
   chatgpt_web: getCreatorProfileDir("chatgpt_web"),
   qwen_web: getCreatorProfileDir("qwen_web"),
   deepseek_web: getCreatorProfileDir("deepseek_web"),
+  grok_web: getCreatorProfileDir("grok_web"),
   kimi_web: getCreatorProfileDir("kimi_web"),
 };
 
@@ -773,6 +774,201 @@ async function executeDeepSeekWithCDP(prompt: string, traceId: string): Promise<
   }
 }
 
+async function executeGrokWithCDP(prompt: string, traceId: string): Promise<SessionBridgeResult> {
+  const startTime = Date.now();
+  
+  let cdpBaseUrl = "http://127.0.0.1:9222";
+  if (process.env.CDP_ENDPOINT) {
+    const match = process.env.CDP_ENDPOINT.match(/^ws?:\/\/([^:\/]+)(?::(\d+))?/);
+    if (match) {
+      cdpBaseUrl = `http://${match[1]}:${match[2] || 9222}`;
+    }
+  }
+  
+  const CDP_URL = cdpBaseUrl;
+  const evidence: string[] = [];
+  
+  console.log(`[creator-bridge] execution_started: grok_web`);
+  console.log(`[creator-bridge] CDP_URL: ${CDP_URL}`);
+  
+  try {
+    const browser = await chromium.connectOverCDP(CDP_URL);
+    const contexts = browser.contexts();
+    
+    if (!contexts.length) {
+      console.log(`[creator-bridge] execution_failed: no_cdp_contexts`);
+      return {
+        success: false,
+        provider: "grok_web",
+        session_state: "not_authenticated",
+        error_code: "no_cdp_contexts",
+        trace_id: traceId,
+        evidence,
+        duration_ms: Date.now() - startTime,
+      };
+    }
+    
+    const context = contexts[0];
+    console.log(`[creator-bridge] CDP contexts: ${contexts.length}`);
+    
+    // Find Grok page
+    const grokPage = context.pages().find(p => 
+      p.url().includes("grok.com") || 
+      p.url().includes("x.com/i/grok")
+    );
+    
+    let page = grokPage;
+    
+    if (!page) {
+      console.log("[creator-bridge] No Grok page found, creating new one");
+      page = await context.newPage();
+      await page.goto("https://grok.com", {
+        waitUntil: "domcontentloaded",
+        timeout: 60000,
+      });
+    } else {
+      console.log(`[creator-bridge] Found existing Grok page: ${page.url()}`);
+    }
+    
+    console.log(`[creator-bridge] browser_url: ${page.url()}`);
+    evidence.push(`url:${page.url()}`);
+    
+    await page.bringToFront();
+    await page.waitForLoadState("domcontentloaded");
+    await page.waitForTimeout(2000);
+    
+    // Grok input selectors - be more specific to avoid hidden elements
+    const inputSelectors = [
+      'textarea:not([aria-hidden="true"])',
+      'textarea[aria-hidden="false"]',
+      'div[contenteditable="true"][role="textbox"]',
+      'div[ contenteditable="true"]',
+    ];
+    
+    let inputLocator: ReturnType<typeof page.locator> | null = null;
+    let inputFound = false;
+    
+    for (const selector of inputSelectors) {
+      const locator = page.locator(selector);
+      const count = await locator.count();
+      if (count > 0) {
+        inputLocator = locator;
+        inputFound = true;
+        console.log(`[creator-bridge] input_selector_found: ${selector} (count=${count})`);
+        break;
+      }
+    }
+    
+    if (!inputFound || !inputLocator) {
+      console.log(`[creator-bridge] execution_failed: input_selector_not_found`);
+      return {
+        success: false,
+        provider: "grok_web",
+        session_state: "blocked",
+        error_code: "input_selector_not_found",
+        trace_id: traceId,
+        evidence,
+        duration_ms: Date.now() - startTime,
+      };
+    }
+    
+    // Click to focus (required for React)
+    await inputLocator.click({ force: true });
+    await page.waitForTimeout(500);
+    
+    // Clear any existing text
+    await inputLocator.fill("");
+    await page.waitForTimeout(200);
+    
+    // Type the prompt character by character
+    await inputLocator.type(prompt, { delay: 10 });
+    console.log("[creator-bridge] typing prompt...");
+    evidence.push("prompt_typed");
+    
+    await inputLocator.press("Enter");
+    console.log("[creator-bridge] ENTER pressed");
+    evidence.push("submit:enter");
+    
+    console.log(`[creator-bridge] response_wait_started: timeout=${DEFAULT_RESPONSE_TIMEOUT_MS}ms`);
+    
+    const responseWaitStart = Date.now();
+    let outputText = "";
+    let responseReceived = false;
+    
+    while ((Date.now() - responseWaitStart) < DEFAULT_RESPONSE_TIMEOUT_MS) {
+      await page.waitForTimeout(3000);
+      
+      const messages = await page.evaluate(() => {
+        const msgs = Array.from(document.querySelectorAll('[data-testid="message"], [class*="message"], [class*="markdown"], [role="article"]'));
+        const last = msgs[msgs.length - 1] as HTMLElement | undefined;
+        return last ? (last.innerText || last?.textContent || "").trim() : "";
+      });
+      
+      if (messages.length > 0) {
+        outputText = messages;
+        console.log(`[creator-bridge] response_wait: got ${messages.length} chars after ${Date.now() - responseWaitStart}ms`);
+        responseReceived = true;
+        break;
+      }
+    }
+    
+    if (!responseReceived) {
+      console.log(`[creator-bridge] execution_timeout: no_response`);
+      await browser.close();
+      return {
+        success: false,
+        provider: "grok_web",
+        session_state: "unknown",
+        submit_status: "sent",
+        response_status: "timeout",
+        error_code: "no_response",
+        trace_id: traceId,
+        evidence,
+        duration_ms: Date.now() - startTime,
+      };
+    }
+    
+    console.log(`[creator-bridge] extraction_success: ${outputText.length} chars`);
+    
+    if (!outputText.trim()) {
+      throw new Error("EMPTY_GROK_EXTRACTION");
+    }
+    
+    evidence.push(`output_text_length:${outputText.length}`);
+    evidence.push("response:received");
+    
+    await browser.close();
+    
+    return {
+      success: true,
+      provider: "grok_web",
+      session_state: "ok",
+      submit_status: "sent",
+      response_status: "received",
+      output_text: outputText,
+      trace_id: traceId,
+      evidence,
+      duration_ms: Date.now() - startTime,
+    };
+  } catch (error: any) {
+    console.error("[creator-bridge] GROK_EXECUTION_ERROR", {
+      name: error?.name,
+      message: error?.message,
+      stack: error?.stack,
+    });
+    console.log(`[creator-bridge] execution_failed: ${error.message}`);
+    return {
+      success: false,
+      provider: "grok_web",
+      session_state: "blocked",
+      error_code: error.message || "grok_cdp_execution_error",
+      trace_id: traceId,
+      evidence,
+      duration_ms: Date.now() - startTime,
+    };
+  }
+}
+
 export async function executeWithSession(
   adapter: WebAdapter,
   prompt: string,
@@ -797,6 +993,12 @@ export async function executeWithSession(
   if (adapter.providerId === "deepseek_web") {
     console.log("[creator-bridge] using CDP path for deepseek_web");
     return await executeDeepSeekWithCDP(prompt, traceId);
+  }
+  
+  // For grok_web, use CDP connection (existing Chrome)
+  if (adapter.providerId === "grok_web") {
+    console.log("[creator-bridge] using CDP path for grok_web");
+    return await executeGrokWithCDP(prompt, traceId);
   }
   
   // For other providers, use ManagedBrowser with profile

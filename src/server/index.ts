@@ -12,7 +12,9 @@ import { registerTranslateRoute } from "./routes/translate.route.js";
 import { registerModelsRoute } from "./routes/models.route.js";
 import { registerJsonRoute } from "./routes/json.route.js";
 import { registerChatRoute } from "./routes/chat.route.js";
+import { registerAgentRoute } from "./routes/agent.route.js";
 import { startTelegramBotIfEnabled } from "../telegram/bot.js";
+import { registerPolicyGate } from "../apps/http/registerPolicyGate.js";
 import {
   guardrails429Total,
   errorsTotal,
@@ -58,12 +60,16 @@ const app = Fastify({
   trustProxy: process.env.TELEGPT_TRUST_PROXY === "1",
 });
 
-await startTelegramBotIfEnabled();
+void startTelegramBotIfEnabled().catch((err) => {
+  app.log.error({ err }, "[telegram] bot start failed");
+});
 
 await registerTranslateRoute(app);
 await registerModelsRoute(app);
 await registerJsonRoute(app);
 await registerChatRoute(app);
+await registerPolicyGate(app);
+await registerAgentRoute(app);
 
 const MAX_CONCURRENCY = Math.max(
   1,
@@ -74,11 +80,11 @@ const MAX_QUEUE = Math.max(0, Number.isFinite(maxQueueParsed) ? maxQueueParsed :
 const BUILD_ID = process.env.TELEGPT_BUILD_ID ?? "dev";
 const GIT_SHA = process.env.TELEGPT_GIT_SHA ?? "";
 const HOST = process.env.TELEGPT_HOST ?? process.env.HOST ?? "0.0.0.0";
-const PORT =
-  Number(process.env.TELEGPT_PORT ?? process.env.PORT ?? "8787") || 8787;
+const PORT_PARSED = Number(process.env.TELEGPT_PORT ?? process.env.PORT ?? "8787");
+const PORT = Number.isFinite(PORT_PARSED) ? PORT_PARSED : 8787;
 const REQUEST_TIMEOUT_MS = Math.max(
   1000,
-  Number(process.env.TELEGPT_REQUEST_TIMEOUT_MS ?? "15000") || 15000
+  Number(process.env.TELEGPT_REQUEST_TIMEOUT_MS ?? "180000") || 180000
 );
 const sem = createSemaphore(MAX_CONCURRENCY);
 let isClosing = false;
@@ -243,9 +249,45 @@ app.addHook("onResponse", async (req, reply) => {
       guardrails429Total.labels(reason).inc(1);
     }
   }
+
+  const requestId = ctx?.requestId;
+  const ua = req.headers["user-agent"];
+  const logRecord = {
+    ts: new Date().toISOString(),
+    level:
+      reply.statusCode >= 500
+        ? "error"
+        : reply.statusCode >= 400
+        ? "warn"
+        : "info",
+    request_id: requestId,
+    method: req.method,
+    path: req.url,
+    status: reply.statusCode,
+    duration_ms: typeof durationMs === "number" ? durationMs : undefined,
+    error_code: errorCodeValue,
+    provider: typeof usedProvider === "string"
+      ? usedProvider
+      : Array.isArray(usedProvider)
+      ? usedProvider[0]
+      : undefined,
+    model: ctx?.model,
+    ip: req.ip,
+    user_agent: typeof ua === "string" ? ua : undefined,
+  };
+  console.log(JSON.stringify(logRecord));
 });
 
 app.addHook("onSend", async (_req, reply, payload) => {
+  const ctx = (_req as any).__logCtx;
+  const rid =
+    ctx?.requestId ||
+    (typeof _req.headers["x-request-id"] === "string" && _req.headers["x-request-id"]) ||
+    (_req as any).id;
+
+  if (rid) {
+    reply.header("x-request-id", rid);
+  }
   reply.header("x-build-id", BUILD_ID);
   if (GIT_SHA) reply.header("x-git-sha", GIT_SHA);
   return payload;
@@ -338,6 +380,7 @@ app.post("/v1/chat", async (req, reply) => {
         retryable: true,
         requestId,
       },
+      request_id: requestId,
     });
   }
   const body = (req.body ?? {}) as ChatRequest;
@@ -346,11 +389,15 @@ app.post("/v1/chat", async (req, reply) => {
   const ctx = (req as any).__logCtx as ReqLogCtx | undefined;
   if (ctx && model) ctx.model = model;
   const headerId = req.headers["x-request-id"];
-  const requestId =
+  let requestId =
     ctx?.requestId ||
     (typeof headerId === "string" && headerId) ||
     (req as any).id ||
     randomUUID();
+  if (!headerId && typeof body.request_id === "string" && body.request_id) {
+    requestId = body.request_id;
+    if (ctx) ctx.requestId = requestId;
+  }
   const result = await idempoHandle(requestId, async () => {
     const st = sem.stats();
     if (st.inFlight >= st.max && st.queued >= MAX_QUEUE) {
@@ -375,33 +422,67 @@ app.post("/v1/chat", async (req, reply) => {
             retryable: true,
             requestId,
           },
+          request_id: requestId,
         },
         statusCode: 429,
       };
     }
-    const release = await sem.acquire();
-    try {
-      const res = await (REQUEST_TIMEOUT_MS > 0
-        ? new Promise<ChatResponse>((resolve, reject) => {
-            const timer = setTimeout(() => {
-              const err = new Error("Upstream timeout");
-              (err as any).name = "AbortError";
-              (err as any).code = "ETIMEDOUT";
-              reject(err);
-            }, REQUEST_TIMEOUT_MS);
-            routeChat({ ...body, request_id: requestId })
-              .then((value) => {
-                clearTimeout(timer);
-                resolve(value);
-              })
-              .catch((err) => {
-                clearTimeout(timer);
-                reject(err);
-              });
-          })
-        : routeChat({ ...body, request_id: requestId }));
-      return { body: res, statusCode: 200 };
+     const release = await sem.acquire();
+     try {
+       const res = await (REQUEST_TIMEOUT_MS > 0
+         ? Promise.race([
+             routeChat({ ...body, request_id: requestId }),
+             new Promise<never>((_, reject) => {
+               setTimeout(() => {
+                 const err = new Error("Upstream timeout");
+                 (err as any).name = "AbortError";
+                 (err as any).code = "ETIMEDOUT";
+                 reject(err);
+               }, REQUEST_TIMEOUT_MS);
+             }),
+           ])
+         : routeChat({ ...body, request_id: requestId }));
+       return { body: res, statusCode: 200 };
     } catch (e) {
+      const code =
+        typeof (e as any)?.code === "string" ? (e as any).code : undefined;
+      if (code === "NO_PROVIDER_CONFIGURED") {
+        const hint =
+          typeof (e as any)?.hint === "string" ? (e as any).hint : undefined;
+        reply.header("x-error-code", code);
+        return {
+          body: {
+            error: code,
+            message: "No LLM provider configured",
+            hint:
+              hint ??
+              "Set OPENAI_API_KEY or LOCAL_OPENAI_BASE_URL + LOCAL_OPENAI_MODEL",
+            request_id: requestId,
+            ts: new Date().toISOString(),
+          },
+          statusCode: 503,
+        };
+      }
+      if (code === "PROVIDER_UNAVAILABLE" || code === "PROVIDER_ERROR") {
+        const provider =
+          typeof (e as any)?.provider === "string" ? (e as any).provider : undefined;
+        const message =
+          typeof (e as any)?.message === "string" && (e as any).message.length
+            ? (e as any).message
+            : "Provider unavailable";
+        reply.header("x-error-code", code);
+        if (provider) reply.header("x-used-provider", provider);
+        return {
+          body: {
+            error: "PROVIDER_UNAVAILABLE",
+            provider,
+            message,
+            request_id: requestId,
+            ts: new Date().toISOString(),
+          },
+          statusCode: 502,
+        };
+      }
       const providerHint =
         typeof model === "string" && model.startsWith("openai:")
           ? "openai"
@@ -425,6 +506,7 @@ app.post("/v1/chat", async (req, reply) => {
             provider: ne.provider,
             provider_error: ne.provider_error,
           },
+          request_id: requestId,
         },
         statusCode: ne.status,
       };

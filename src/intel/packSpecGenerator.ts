@@ -1,0 +1,150 @@
+// @ts-nocheck
+import fs from "fs";
+import path from "path";
+import type { TelecoreBuildTaskV1 } from "./buildTaskTypes";
+
+type PackTypeHints = {
+  primaryModules: string[];
+  tables: string[];
+  endpoints: string[];
+};
+
+const PACK_HINTS: Record<string, PackTypeHints> = {};
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function bullets(items: string[], fallback?: string) {
+  if (!items || items.length === 0) return [fallback || "- (TBD)"];
+  return items.map((s) => `- ${s}`);
+}
+
+function section(title: string, lines: string[]) {
+  return [`## ${title}`, ...lines, ""];
+}
+
+function packToPathHint(pack: string) {
+  return `docs/packs/${String(pack).replace(/\s+/g, "_")}_v1.md`;
+}
+
+function resolvePackHints(pack: string): PackTypeHints {
+  return PACK_HINTS[pack] || { primaryModules: [], tables: [], endpoints: [] };
+}
+
+export function generatePackSpecMarkdown(opts: {
+  telegaRoot: string;
+  task: TelecoreBuildTaskV1;
+  mode?: "target_repo" | "draft_artifacts";
+}) {
+  const telegaRoot = opts.telegaRoot;
+  const task = opts.task;
+  const mode = opts.mode || "target_repo";
+
+  const packType = resolvePackHints(task.intent.pack);
+  const intelIds = task.context?.evidence?.intel_ids || [];
+  const links = task.context?.evidence?.links || [];
+  const notes = task.context?.evidence?.notes || [];
+
+  const outRel =
+    mode === "draft_artifacts"
+      ? path.join("mission-control", "buildtasks", "artifacts", "packs", packToPathHint(task.intent.pack))
+      : packToPathHint(task.intent.pack);
+  const outAbs = path.join(telegaRoot, outRel);
+
+  fs.mkdirSync(path.dirname(outAbs), { recursive: true });
+
+  const md: string[] = [];
+  md.push(`# Pack: ${task.intent.pack}`);
+  md.push(``);
+  md.push(`**Version:** v1`);
+  md.push(`**Status:** draft`);
+  md.push(`**Date:** ${today()}`);
+  md.push(`**Owner:** pantheon`);
+  md.push(``);
+
+  // 1) Goal
+  md.push(...section("Goal", [
+    `Deliver a minimal, canonical Pack spec for **${task.intent.pack}** that is actionable by Tele•Ga.`,
+  ]));
+
+  // 2) Scope (In/Out)
+  md.push(...section("Scope (In/Out)", [
+    `### In scope`,
+    ...bullets(packType.primaryModules, "- (TBD)"),
+    "",
+    `### Out of scope`,
+    `- Любые дополнительные фичи “по пути”, не описанные в Acceptance Criteria.`,
+    `- Переизобретение соседних модулей (делаем минимально совместимо с каноном Tele•Ga).`,
+  ]));
+
+  // 3) User Stories
+  md.push(...section("User Stories", [
+    `- Как владелец/админ, я могу включать/выключать функционал этого Pack.`,
+    `- Как оператор/менеджер, я вижу понятный результат и статус.`,
+    `- Как система, я пишу trace/лог решений (если Pack затрагивает policy/quality/ads).`,
+  ]));
+
+  // 4) UX Notes
+  md.push(...section("UX Notes", [
+    `- UI стиль: Tele•GPT glassmorphism (Dark стекло, градиентный акцент, pill-чипы).`,
+    `- Ошибки и пустые состояния — полностью локализованы (RU/UZ/EN… по Language Set).`,
+    `- Важное: не прячем “почему” — если есть решение/фильтр, показываем explainable hint.`,
+  ]));
+
+  // 5) API / Data
+  md.push(...section("API / Data", [
+    `### Data / Tables (proposed)`,
+    ...bullets(packType.tables),
+    "",
+    `### Endpoints (proposed)`,
+    ...bullets(packType.endpoints),
+    "",
+    `### Evidence`,
+    `- digest_id: ${task.context?.digest_id || "(none)"}`,
+    `- intel_ids: ${intelIds.length ? intelIds.join(", ") : "(none)"}`,
+    `- links: ${links.length ? links.join(", ") : "(none)"}`,
+    `- notes: ${notes.length ? notes.join(" | ") : "(none)"}`,
+  ]));
+
+  // 6) Security / Policy
+  md.push(...section("Security / Policy", [
+    `- Все действия должны проходить через Policy Gate (минимум: role-based).`,
+    `- Любые автодействия пишут trace (id, inputs, decision, outcome).`,
+    `- Никаких секретов в логах/артефактах; токены только через env.`,
+  ]));
+
+  // 7) Tele•Core Contract mapping
+  md.push(...section("Tele•Core Contract mapping", [
+    `- BuildTask kind: **${task.kind}**`,
+    `- Deliverable: **${task.deliverable.format}** → ${task.deliverable.target_repo}:${task.deliverable.target_path_hint}`,
+    `- Result kind: **TELECORE_BUILD_RESULT_V1** (пишется воркером)`,
+    `- Status model: queued → running → done/failed`,
+  ]));
+
+  // 8) Rollout & Tests
+  md.push(...section("Rollout & Tests", [
+    `- Rollout: feature-flag (env или config) + постепенное включение.`,
+    `- Tests:`,
+    `  - unit: функции/валидаторы`,
+    `  - integration: API routes`,
+    `  - E2E (минимум): happy-path + empty-state + policy-deny`,
+  ]));
+
+  // 9) Acceptance Criteria
+  md.push(...section("Acceptance Criteria", [
+    `- Pack-spec существует в репо по пути: \`${outRel}\``,
+    `- В документе нет “дырок” кроме явно помеченных **(TBD)**.`,
+    `- Есть четкий scope + acceptance criteria — без двусмысленности.`,
+    `- Воркер v1.4 пишет BuildResult с artifact path на этот Pack-spec.`,
+  ]));
+
+  // 10) Changelog
+  md.push(...section("Changelog", [
+    `- ${today()} — generated by packSpecGenerator (v1.4).`,
+  ]));
+
+  fs.writeFileSync(outAbs, md.join("\n"), "utf8");
+
+  return { outRel, outAbs };
+}

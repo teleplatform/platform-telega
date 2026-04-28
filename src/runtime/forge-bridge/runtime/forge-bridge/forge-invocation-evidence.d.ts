@@ -1,0 +1,20 @@
+import type { ForgeInvocationEvidenceRecord, ForgeInvocationStatus, ForgeInvocationEvidenceSnapshot } from "./forge-invocation-evidence.types.js";
+export declare function createInvocationEvidence(record: ForgeInvocationEvidenceRecord): ForgeInvocationEvidenceRecord;
+export declare function updateInvocationEvidence(invocationId: string, patch: Partial<ForgeInvocationEvidenceRecord>): ForgeInvocationEvidenceRecord | null;
+export declare function updateInvocationEvidenceByTaskId(taskId: string, patch: Partial<ForgeInvocationEvidenceRecord>): ForgeInvocationEvidenceRecord | null;
+export declare function getInvocationEvidence(invocationId: string): ForgeInvocationEvidenceRecord | null;
+export declare function getInvocationEvidenceSnapshot(invocationId: string): ForgeInvocationEvidenceSnapshot | null;
+export declare function listInvocationEvidence(): ForgeInvocationEvidenceRecord[];
+export declare function findInvocationEvidenceByTaskId(taskId: string): ForgeInvocationEvidenceRecord | null;
+export declare function findInvocationEvidenceByUserId(userId: string): ForgeInvocationEvidenceRecord[];
+export declare function findInvocationEvidenceByStatus(status: ForgeInvocationStatus): ForgeInvocationEvidenceRecord[];
+export declare function clearInvocationEvidence(): void;
+export declare function getEvidenceStoreSize(): number;
+export declare function buildEvidenceFromInvocation(params: {
+    userId: string;
+    chatId?: string;
+    action: string;
+    target: string;
+    kind: string;
+    adapter?: string;
+}, taskId: string): ForgeInvocationEvidenceRecord;

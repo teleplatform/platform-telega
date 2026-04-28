@@ -6,6 +6,9 @@ export type ChatRequest = {
 
   // Optional request correlation id (propagated through router)
   request_id?: string;
+
+  // Task context for routing (e.g., chat vs reasoning)
+  task?: { type?: string };
 };
 
 export type ChatUsage = {
@@ -15,9 +18,16 @@ export type ChatUsage = {
 };
 
 export type ChatMeta = {
-  provider?: "local" | "openai";
+  provider?: "local" | "openai" | "persona" | "deepseek" | "qwen" | "creator" | "openai_web" | "qwen_web" | "deepseek_web" | "grok_web" | "kimi_web" | "chatgpt_web" | "openai_api" | "qwen_api" | "deepseek_api" | "openrouter_kimi";
   model?: string;
   usage?: ChatUsage;
+  fallback_used?: boolean;
+  ranked_primary?: string;
+  ranked_candidates?: string[];
+  role?: "creator" | "user";
+  intendedPath?: "bridge" | "api";
+  actualPath?: "bridge" | "api";
+  candidateProviders?: string[];
 };
 
 export type ChatResponse = {

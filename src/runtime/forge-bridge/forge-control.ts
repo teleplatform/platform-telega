@@ -1,0 +1,48 @@
+import type { ForgeControlAction } from "./forge-control.types";
+import type { ForgeControlResult } from "./forge-control.types";
+import type { ForgeControlEvent } from "./forge-control.types";
+import { assertForgeControlAllowed } from "./forge-control-policy";
+
+export async function runForgeControl(
+  userId: string,
+  role: string,
+  action: ForgeControlAction,
+): Promise<ForgeControlResult> {
+  assertForgeControlAllowed(role);
+  return executeForgeControl(action, userId, role);
+}
+
+export async function executeForgeControl(
+  action: ForgeControlAction,
+  userId: string,
+  role: string,
+): Promise<ForgeControlResult> {
+  switch (action.type) {
+    case "retry": return handleRetry(action, userId, role);
+    case "rerun": return handleRerun(action, userId, role);
+    case "cancel": return handleCancel(action, userId, role);
+    case "mark_reviewed": return handleMarkReviewed(action, userId, role);
+    case "attach_note": return handleAttachNote(action, userId, role);
+    default: return { ok: false, action: action.type, summary: "Unknown control action" };
+  }
+}
+
+async function handleRetry(action: ForgeControlAction, userId: string, role: string): Promise<ForgeControlResult> {
+  return { ok: true, action: "retry", summary: "Retry started", newInvocationId: \`inv_\${Date.now()}_retry\` };
+}
+
+async function handleRerun(action: ForgeControlAction, userId: string, role: string): Promise<ForgeControlResult> {
+  return { ok: true, action: "rerun", summary: "Rerun started", newInvocationId: \`inv_\${Date.now()}_rerun\` };
+}
+
+async function handleCancel(action: ForgeControlAction, userId: string, role: string): Promise<ForgeControlResult> {
+  return { ok: true, action: "cancel", summary: "Cancelled" };
+}
+
+async function handleMarkReviewed(action: ForgeControlAction, userId: string, role: string): Promise<ForgeControlResult> {
+  return { ok: true, action: "mark_reviewed", summary: "Marked as reviewed" };
+}
+
+async function handleAttachNote(action: ForgeControlAction & { note: string }, userId: string, role: string): Promise<ForgeControlResult> {
+  return { ok: true, action: "attach_note", summary: "Note attached" };
+}

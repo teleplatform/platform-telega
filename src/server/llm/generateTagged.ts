@@ -25,7 +25,7 @@ export async function llmGenerateTagged(args: GenerateTaggedArgs): Promise<{
     model: args.model,
     prompt: args.prompt,
     temperature: args.temperature ?? 0,
-    timeoutMs: args.timeoutMs ?? 60000,
+    timeoutMs: args.timeoutMs ?? 180000,
   });
 
   const latency_ms = Date.now() - t0;
