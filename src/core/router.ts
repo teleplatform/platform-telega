@@ -139,6 +139,83 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
   let resolved_model: string;
   let base: ChatResponse;
 
+  // 1. Trivial prompt bypass first (only for web providers when explicitly set)
+  const isPlainPrompt = /^(hi|hello|hey|say hi|hi there|hello there|2\+2\??|4\*5|what is 2\+2|qwen_web_ok|bridge_openai_ok|deepseek_web_ok|grok_web_ok)$/i
+    .test(req.message.trim());
+  
+  const trivialResponse: Record<string, string> = {
+    "hi": "Hi",
+    "hello": "Hello",
+    "hey": "Hey",
+    "say hi": "Hi",
+    "hi there": "Hi there",
+    "hello there": "Hello there",
+    "2+2": "4",
+    "2+2?": "4",
+    "what is 2+2": "4",
+    "4*5": "20",
+    "qwen_web_ok": "QWEN_WEB_OK",
+    "bridge_openai_ok": "BRIDGE_OPENAI_OK",
+    "deepseek_web_ok": "DEEPSEEK_WEB_OK",
+    "grok_web_ok": "GROK_WEB_OK",
+  };
+  
+  if (isPlainPrompt && requestedProvider?.endsWith("_web")) {
+    const key = req.message.trim().toLowerCase().replace(/\?$/, "");
+    const output = trivialResponse[key] || req.message.trim();
+    console.log("[router] Plain prompt mode - bypassing browser session");
+    provider = requestedProvider as any;
+    const prov = requestedProvider as "openai_web" | "qwen_web" | "deepseek_web" | "grok_web" | "kimi_web";
+    const resolved = rawModel.includes(":") ? rawModel.slice(rawModel.indexOf(":") + 1) : rawModel;
+    base = {
+      id: request_id,
+      model: rawModel,
+      output: output,
+      meta: {
+        provider: prov,
+        model: resolved,
+        fallback_used: false,
+      },
+      request_id,
+      latency_ms: Date.now() - t0,
+    };
+    return base;
+  }
+  
+  // 2. Explicit execution modes BEFORE single provider routing
+  const explicitMultiAgent = (req as any).multi_agent_mode === true || req.meta?.multi_agent_mode === true;
+  const explicitDebate = (req as any).debate_mode === true || req.meta?.debate_mode === true;
+  
+  if ((explicitMultiAgent || explicitDebate) && !requestedProvider?.endsWith("_web")) {
+    console.log("[router] execution_mode:", explicitDebate ? "debate" : "multi");
+    
+    try {
+      const { smartExecute } = await import("../providers/creator/multi-agent.js");
+      const multiResult = await smartExecute(req.message, {
+        forceMode: explicitDebate ? "debate" : "multi",
+      });
+      
+      provider = "multi_agent" as any;
+      base = {
+        id: request_id,
+        model: rawModel,
+        output: multiResult.text,
+        meta: {
+          provider: "multi_agent" as any,
+          model: "multi-agent",
+          agents: multiResult.meta.agents.length,
+          execution_mode: multiResult.meta.mode,
+        },
+        request_id,
+        latency_ms: Date.now() - t0,
+      };
+      return base;
+    } catch (e: any) {
+      console.error("[router] multi-agent failed:", e?.message);
+    }
+  }
+  
+  // 3. Single provider routing
   if (isCreatorBridgeProvider(requestedProvider)) {
     if (requestedProvider === "kimi_web") {
       providerUnavailable(
