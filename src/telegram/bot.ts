@@ -919,6 +919,40 @@ console.error("[creator-control] /patch_rollback failed", e?.message || e);
     }
   });
 
+  const userLanguages: Record<string, "ru" | "en"> = {};
+  
+  function getUserLang(ctx: any): "ru" | "en" {
+    const uid = String(userIdOf(ctx));
+    if (userLanguages[uid]) return userLanguages[uid];
+    const code = ctx.from?.language_code;
+    if (code?.startsWith("en")) return "en";
+    return "ru";
+  }
+  
+  function setUserLang(ctx: any, lang: "ru" | "en") {
+    const uid = String(userIdOf(ctx));
+    userLanguages[uid] = lang;
+  }
+
+  bot.command("lang", async (ctx) => {
+    try {
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const lang = args[0]?.toLowerCase();
+      
+      if (lang === "ru" || lang === "en") {
+        setUserLang(ctx, lang);
+        const { t } = await import("../providers/creator/i18n.js");
+        await ctx.reply(t("language_set", lang as "ru" | "en"));
+      } else {
+        const { t, detectLanguage } = await import("../providers/creator/i18n.js");
+        const currentLang = getUserLang(ctx);
+        await ctx.reply(t("current_language", currentLang));
+      }
+    } catch (e: any) {
+      console.error("[creator-control] /lang failed", e?.message || e);
+    }
+  });
+
   bot.command("agents", async (ctx) => {
     try {
       const userId = String(userIdOf(ctx));

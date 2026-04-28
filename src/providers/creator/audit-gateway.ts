@@ -15,6 +15,7 @@ export interface AuditRecord {
   request_id: string;
   user_id: string;
   role: string;
+  language?: string;
   action_type: ActionType;
   input_summary: string;
   strategy_mode?: string;
@@ -75,6 +76,7 @@ export async function writeAudit(
     governorState?: AuditRecord["governor_state"];
     latencyMs?: number;
     riskLevel?: RiskLevel;
+    language?: string;
   }
 ): Promise<void> {
   const record: AuditRecord = {
