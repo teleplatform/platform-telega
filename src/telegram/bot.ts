@@ -1992,6 +1992,167 @@ const action = await getAction(actionId);
     }
   });
 
+  // ADS - Autonomous Marketing Department
+  bot.command("ads_create", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const listingId = args[0];
+      const budget = parseInt(args[1]) || 1000;
+      const name = args.slice(2).join(" ") || "Ad Campaign";
+      
+      if (!listingId) {
+        await ctx.reply("Usage: /ads_create <listing_id> [budget] [name]\nExample: /ads_create lst_12345 5000 Summer Sale");
+        return;
+      }
+      
+      const { getListing } = await import("../providers/creator/marketplace.js");
+      const listing = await getListing(listingId);
+      
+      if (!listing) {
+        await ctx.reply("Listing not found");
+        return;
+      }
+      
+      const { createCampaign, formatCampaign } = await import("../providers/creator/ads-department.js");
+      const campaign = await createCampaign(userId, listingId, name, budget, ["telegram_channel", "internal_feed"]);
+      
+      await ctx.reply(`📢 Campaign created:\n\n${formatCampaign(campaign)}\n\nUse /ads_start ${campaign.campaign_id} to launch.`);
+    } catch (e: any) {
+      console.error("[ads] /ads_create failed", e?.message || e);
+    }
+  });
+
+  bot.command("ads_start", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const campaignId = args[0];
+      
+      if (!campaignId) {
+        await ctx.reply("Usage: /ads_start <campaign_id>");
+        return;
+      }
+      
+      const { startCampaign, formatCampaign } = await import("../providers/creator/ads-department.js");
+      const success = await startCampaign(campaignId, userId);
+      
+      if (success) {
+        await ctx.reply(`🟢 Campaign started!\n\nBudget reserved and creatives active.`);
+      } else {
+        await ctx.reply("Cannot start. Check funds and campaign status.");
+      }
+    } catch (e: any) {
+      console.error("[ads] /ads_start failed", e?.message || e);
+    }
+  });
+
+  bot.command("ads_pause", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const campaignId = args[0];
+      
+      if (!campaignId) {
+        await ctx.reply("Usage: /ads_pause <campaign_id>");
+        return;
+      }
+      
+      const { pauseCampaign } = await import("../providers/creator/ads-department.js");
+      const success = await pauseCampaign(campaignId, userId);
+      
+      if (success) {
+        await ctx.reply(`⏸️ Campaign paused`);
+      } else {
+        await ctx.reply("Cannot pause. Check ownership.");
+      }
+    } catch (e: any) {
+      console.error("[ads] /ads_pause failed", e?.message || e);
+    }
+  });
+
+  bot.command("ads_status", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      
+      if (args.length > 0) {
+        const campaignId = args[0];
+        const { getCampaign, formatCampaign } = await import("../providers/creator/ads-department.js");
+        const campaign = await getCampaign(campaignId);
+        
+        if (!campaign) {
+          await ctx.reply("Campaign not found");
+          return;
+        }
+        
+        await ctx.reply(formatCampaign(campaign));
+      } else {
+        const { loadCampaigns, formatCampaignList } = await import("../providers/creator/ads-department.js");
+        const campaigns = role === "owner" ? await loadCampaigns(undefined, "active", 10) : await loadCampaigns(userId, undefined, 10);
+        await ctx.reply(formatCampaignList(campaigns));
+      }
+    } catch (e: any) {
+      console.error("[ads] /ads_status failed", e?.message || e);
+    }
+  });
+
+  bot.command("ads_report", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const campaignId = args[0];
+      
+      if (!campaignId) {
+        await ctx.reply("Usage: /ads_report <campaign_id>");
+        return;
+      }
+      
+      const { getCampaign, loadCreatives, formatCampaign, formatCreative, optimizeCampaign } = await import("../providers/creator/ads-department.js");
+      const campaign = await getCampaign(campaignId);
+      
+      if (!campaign) {
+        await ctx.reply("Campaign not found");
+        return;
+      }
+      
+      const creatives = await loadCreatives(campaignId);
+      
+      let response = formatCampaign(campaign) + "\n\n🎨 Creatives:\n";
+      for (const c of creatives.slice(0, 3)) {
+        response += "\n" + formatCreative(c) + "\n";
+      }
+      
+      const opt = await optimizeCampaign(campaignId);
+      response += `\n\n🔧 Optimization: ${opt.action} - ${opt.reason}`;
+      
+      await ctx.reply(response);
+    } catch (e: any) {
+      console.error("[ads] /ads_report failed", e?.message || e);
+    }
+  });
+
+  bot.command("ads_optimize", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const campaignId = args[0];
+      
+      if (!campaignId) {
+        await ctx.reply("Usage: /ads_optimize <campaign_id>");
+        return;
+      }
+      
+      const { optimizeCampaign } = await import("../providers/creator/ads-department.js");
+      const result = await optimizeCampaign(campaignId);
+      
+      await ctx.reply(`🔧 Optimization result:\n\nAction: ${result.action}\nReason: ${result.reason}`);
+    } catch (e: any) {
+      console.error("[ads] /ads_optimize failed", e?.message || e);
+    }
+  });
+
   bot.action("menu:chat", async (ctx) => {
     try {
       console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "menu:chat" });
