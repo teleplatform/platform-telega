@@ -214,7 +214,7 @@ export async function executeWithFallback(
   };
 }
 
-export function logEvidence(evidence: EvidenceLog): void {
+export async function logEvidence(evidence: EvidenceLog): Promise<void> {
   console.log("[v2-evidence]", {
     requestId: evidence.requestId,
     mode: evidence.mode,
@@ -229,4 +229,21 @@ export function logEvidence(evidence: EvidenceLog): void {
       errorCode: p.errorCode,
     })),
   });
+  
+  try {
+    const { addBridgeEvidence } = await import("./evidence-store.js");
+    addBridgeEvidence({
+      id: evidence.requestId,
+      timestamp: Date.now(),
+      message: "",
+      mode: evidence.mode,
+      finalProvider: evidence.finalProvider,
+      providers: evidence.providers,
+      fallbackCount: evidence.fallbackCount,
+      totalLatencyMs: evidence.totalLatencyMs,
+      outputLength: evidence.providers.reduce((sum, p) => sum + (p.outputChars || 0), 0),
+    });
+  } catch (e) {
+    // Evidence store optional
+  }
 }

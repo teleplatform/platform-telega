@@ -319,6 +319,74 @@ export async function startPantheonTelegramBot() {
     }
   });
 
+  bot.command("bridge_status", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const { formatProviderHealth } = await import("../providers/creator/evidence-store.js");
+      await ctx.reply(formatProviderHealth());
+    } catch (e: any) {
+      console.error("[creator-control] /bridge_status failed", e?.message || e);
+    }
+  });
+
+  bot.command("bridge_evidence", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const { bridgeEvidenceStore, formatEvidenceSummary } = await import("../providers/creator/evidence-store.js");
+      const recent = bridgeEvidenceStore.getRecent(5);
+      if (recent.length === 0) {
+        await ctx.reply("No bridge evidence yet");
+        return;
+      }
+      const lines = recent.map(formatEvidenceSummary);
+      await ctx.reply(lines.join("\n\n"));
+    } catch (e: any) {
+      console.error("[creator-control] /bridge_evidence failed", e?.message || e);
+    }
+  });
+
+  bot.command("bridge_failures", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const { bridgeEvidenceStore, formatEvidenceSummary } = await import("../providers/creator/evidence-store.js");
+      const failed = bridgeEvidenceStore.getFailed(5);
+      if (failed.length === 0) {
+        await ctx.reply("No recent failures");
+        return;
+      }
+      const lines = failed.map(formatEvidenceSummary);
+      await ctx.reply(lines.join("\n\n"));
+    } catch (e: any) {
+      console.error("[creator-control] /bridge_failures failed", e?.message || e);
+    }
+  });
+
+  bot.command("provider_health", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const { formatProviderHealth } = await import("../providers/creator/evidence-store.js");
+      await ctx.reply(formatProviderHealth());
+    } catch (e: any) {
+      console.error("[creator-control] /provider_health failed", e?.message || e);
+    }
+  });
+
   bot.hears("▦ Menu", async (ctx) => {
     try {
       console.log("[telegram-menu] menu_open_requested", { user_id: userIdOf(ctx), role: getTelegramRole(userIdOf(ctx)) });
