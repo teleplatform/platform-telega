@@ -2153,6 +2153,139 @@ const action = await getAction(actionId);
     }
   });
 
+  // GLOBAL - Multi-currency and Regions
+  bot.command("set_country", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const countryCode = args[0]?.toUpperCase();
+      
+      if (!countryCode) {
+        const globalExp = await import("../providers/creator/global-expansion.js");
+        const getUserLocale = globalExp.getUserLocale;
+        const formatUserLocale = globalExp.formatUserLocale;
+        const locale = await getUserLocale(userId);
+        await ctx.reply(formatUserLocale(locale));
+        return;
+      }
+      
+      const globalExp = await import("../providers/creator/global-expansion.js");
+      const setUserLocale = globalExp.setUserLocale;
+      const getRegion = globalExp.getRegion;
+      const formatUserLocale = globalExp.formatUserLocale;
+      const suggestRegion = globalExp.suggestRegion;
+      
+      const region = await getRegion(countryCode);
+      if (!region) {
+        const suggested = suggestRegion(undefined, countryCode);
+        await ctx.reply(`Region ${countryCode} not found. Try: UZ, RU, KZ, EU, US`);
+        return;
+      }
+      
+      const locale = await setUserLocale(userId, countryCode, region.language_default, region.currency_default);
+      await ctx.reply(formatUserLocale(locale));
+    } catch (e: any) {
+      console.error("[global] /set_country failed", e?.message || e);
+    }
+  });
+
+bot.command("set_currency", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const currencyCode = args[0]?.toUpperCase();
+      
+      if (!currencyCode) {
+        await ctx.reply("Usage: /set_currency <code>\nExample: /set_currency USD");
+        return;
+      }
+      
+      const globalExp = await import("../providers/creator/global-expansion.js");
+      const setUserLocale = globalExp.setUserLocale;
+      const getCurrency = globalExp.getCurrency;
+      const formatUserLocale = globalExp.formatUserLocale;
+      const loadCurrencies = globalExp.loadCurrencies;
+      
+      const currency = await getCurrency(currencyCode);
+      if (!currency) {
+        const currencies = await loadCurrencies();
+        await ctx.reply(`Currency not found. Available: ${currencies.map(c => c.code).join(", ")}`);
+        return;
+      }
+      
+      const locale = await setUserLocale(userId, undefined, undefined, currencyCode as any);
+      await ctx.reply(formatUserLocale(locale));
+    } catch (e: any) {
+      console.error("[global] /set_currency failed", e?.message || e);
+    }
+  });
+
+  bot.command("rates", async (ctx) => {
+    try {
+      const { loadCurrencies, formatRatesList } = await import("../providers/creator/global-expansion.js");
+      const currencies = await loadCurrencies();
+      await ctx.reply(formatRatesList(currencies));
+    } catch (e: any) {
+      console.error("[global] /rates failed", e?.message || e);
+    }
+  });
+
+  bot.command("regions", async (ctx) => {
+    try {
+      const { getActiveRegions, formatRegionList } = await import("../providers/creator/global-expansion.js");
+      const regions = await getActiveRegions();
+      await ctx.reply(formatRegionList(regions));
+    } catch (e: any) {
+      console.error("[global] /regions failed", e?.message || e);
+    }
+  });
+
+  bot.command("locale", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const { getUserLocale, formatUserLocale, getRegion, formatPriceWithConversion, convertTeletonToLocal } = await import("../providers/creator/global-expansion.js");
+      const { getOrCreateWallet } = await import("../providers/creator/wallet.js");
+      
+      const locale = await getUserLocale(userId);
+      const wallet = await getOrCreateWallet(userId);
+      const region = await getRegion(locale.country);
+      
+      const converted = await convertTeletonToLocal(wallet.teleton_balance, locale.currency);
+      
+      let response = formatUserLocale(locale);
+      response += `\n\n💰 Your balance: ${converted.toLocaleString()} ${locale.currency}`;
+      
+      if (region) {
+        response += `\n\n🌍 Payment methods: ${region.payment_providers.join(", ")}`;
+      }
+      
+      await ctx.reply(response);
+    } catch (e: any) {
+      console.error("[global] /locale failed", e?.message || e);
+    }
+  });
+
+  bot.command("convert", async (ctx) => {
+    try {
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const amount = parseFloat(args[0]);
+      const fromCode = args[1]?.toUpperCase() as any;
+      const toCode = args[2]?.toUpperCase() as any;
+      
+      if (isNaN(amount) || !fromCode || !toCode) {
+        await ctx.reply("Usage: /convert <amount> <from> <to>\nExample: /convert 100 TNT UZS");
+        return;
+      }
+      
+      const { convertCurrency } = await import("../providers/creator/global-expansion.js");
+      const result = await convertCurrency(amount, fromCode, toCode);
+      
+      await ctx.reply(`${amount} ${fromCode} = ${result.amount} ${toCode}\nRate: ${result.rate.toFixed(4)}`);
+    } catch (e: any) {
+      console.error("[global] /convert failed", e?.message || e);
+    }
+  });
+
   bot.action("menu:chat", async (ctx) => {
     try {
       console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "menu:chat" });
