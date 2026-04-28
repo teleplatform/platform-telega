@@ -594,6 +594,45 @@ export async function startPantheonTelegramBot() {
     }
   });
 
+  bot.command("bridge_tools", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const { formatToolList } = await import("../providers/creator/tool-gateway.js");
+      await ctx.reply(formatToolList());
+    } catch (e: any) {
+      console.error("[creator-control] /bridge_tools failed", e?.message || e);
+    }
+  });
+
+  bot.command("bridge_tool_test", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const command = args.join(" ");
+      if (!command) {
+        await ctx.reply("Usage: /bridge_tool_test <command>\nExample: /bridge_tool_test git status");
+        return;
+      }
+      const { executeTool } = await import("../providers/creator/tool-gateway.js");
+      const result = await executeTool("shell_readonly", { command }, true);
+      if (result.ok) {
+        await ctx.reply(`✅ Output:\n${result.output.slice(0, 4000)}`);
+      } else {
+        await ctx.reply(`❌ Error: ${result.error}`);
+      }
+    } catch (e: any) {
+      console.error("[creator-control] /bridge_tool_test failed", e?.message || e);
+    }
+  });
+
   bot.command("job_evidence", async (ctx) => {
     try {
       const userId = String(userIdOf(ctx));
