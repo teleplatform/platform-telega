@@ -579,6 +579,200 @@ async function executeQwenWithCDP(prompt: string, traceId: string): Promise<Sess
   }
 }
 
+async function executeDeepSeekWithCDP(prompt: string, traceId: string): Promise<SessionBridgeResult> {
+  const startTime = Date.now();
+  
+  let cdpBaseUrl = "http://127.0.0.1:9222";
+  if (process.env.CDP_ENDPOINT) {
+    const match = process.env.CDP_ENDPOINT.match(/^ws?:\/\/([^:\/]+)(?::(\d+))?/);
+    if (match) {
+      cdpBaseUrl = `http://${match[1]}:${match[2] || 9222}`;
+    }
+  }
+  
+  const CDP_URL = cdpBaseUrl;
+  const evidence: string[] = [];
+  
+  console.log(`[creator-bridge] execution_started: deepseek_web`);
+  console.log(`[creator-bridge] CDP_URL: ${CDP_URL}`);
+  
+  try {
+    const browser = await chromium.connectOverCDP(CDP_URL);
+    const contexts = browser.contexts();
+    
+    if (!contexts.length) {
+      console.log(`[creator-bridge] execution_failed: no_cdp_contexts`);
+      return {
+        success: false,
+        provider: "deepseek_web",
+        session_state: "not_authenticated",
+        error_code: "no_cdp_contexts",
+        trace_id: traceId,
+        evidence,
+        duration_ms: Date.now() - startTime,
+      };
+    }
+    
+    const context = contexts[0];
+    console.log(`[creator-bridge] CDP contexts: ${contexts.length}`);
+    
+    // Find DeepSeek page
+    const deepseekPage = context.pages().find(p => 
+      p.url().includes("deepseek.com")
+    );
+    
+    let page = deepseekPage;
+    
+    if (!page) {
+      console.log("[creator-bridge] No DeepSeek page found, creating new one");
+      page = await context.newPage();
+      await page.goto("https://chat.deepseek.com", {
+        waitUntil: "domcontentloaded",
+        timeout: 60000,
+      });
+    } else {
+      console.log(`[creator-bridge] Found existing DeepSeek page: ${page.url()}`);
+    }
+    
+    console.log(`[creator-bridge] browser_url: ${page.url()}`);
+    evidence.push(`url:${page.url()}`);
+    
+    await page.bringToFront();
+    await page.waitForLoadState("domcontentloaded");
+    await page.waitForTimeout(2000);
+    
+    // DeepSeek input selectors
+    const inputSelectors = [
+      'textarea[placeholder*="输入"]',
+      'textarea[placeholder*="message"]',
+      'textarea',
+      'div[contenteditable="true"]',
+    ];
+    
+    let inputLocator: ReturnType<typeof page.locator> | null = null;
+    let inputFound = false;
+    
+    for (const selector of inputSelectors) {
+      const locator = page.locator(selector);
+      const count = await locator.count();
+      if (count > 0) {
+        inputLocator = locator;
+        inputFound = true;
+        console.log(`[creator-bridge] input_selector_found: ${selector} (count=${count})`);
+        break;
+      }
+    }
+    
+    if (!inputFound || !inputLocator) {
+      console.log(`[creator-bridge] execution_failed: input_selector_not_found`);
+      return {
+        success: false,
+        provider: "deepseek_web",
+        session_state: "blocked",
+        error_code: "input_selector_not_found",
+        trace_id: traceId,
+        evidence,
+        duration_ms: Date.now() - startTime,
+      };
+    }
+    
+    await inputLocator.click({ force: true });
+    await page.waitForTimeout(500);
+    await inputLocator.fill("");
+    await page.waitForTimeout(200);
+    
+    await inputLocator.type(prompt, { delay: 10 });
+    console.log("[creator-bridge] typing prompt...");
+    evidence.push("prompt_typed");
+    
+    await inputLocator.press("Enter");
+    console.log("[creator-bridge] ENTER pressed");
+    evidence.push("submit:enter");
+    
+    console.log(`[creator-bridge] response_wait_started: timeout=${DEFAULT_RESPONSE_TIMEOUT_MS}ms`);
+    
+    const responseWaitStart = Date.now();
+    let outputText = "";
+    let responseReceived = false;
+    
+    while ((Date.now() - responseWaitStart) < DEFAULT_RESPONSE_TIMEOUT_MS) {
+      await page.waitForTimeout(3000);
+      
+      const messages = await page.evaluate(() => {
+        const msgs = Array.from(document.querySelectorAll('[class*="message"]'));
+        const assistantMsgs = msgs.filter((m: Element) => {
+          const text = m.textContent || "";
+          return text.length > 20 && !m.querySelector('input, textarea, button');
+        });
+        const last = assistantMsgs[assistantMsgs.length - 1] as HTMLElement | undefined;
+        return last ? (last.innerText || last?.textContent || "").trim() : "";
+      });
+      
+      if (messages.length > 0) {
+        outputText = messages;
+        console.log(`[creator-bridge] response_wait: got ${messages.length} chars after ${Date.now() - responseWaitStart}ms`);
+        responseReceived = true;
+        break;
+      }
+    }
+    
+    if (!responseReceived) {
+      console.log(`[creator-bridge] execution_timeout: no_response`);
+      await browser.close();
+      return {
+        success: false,
+        provider: "deepseek_web",
+        session_state: "unknown",
+        submit_status: "sent",
+        response_status: "timeout",
+        error_code: "no_response",
+        trace_id: traceId,
+        evidence,
+        duration_ms: Date.now() - startTime,
+      };
+    }
+    
+    console.log(`[creator-bridge] extraction_success: ${outputText.length} chars`);
+    
+    if (!outputText.trim()) {
+      throw new Error("EMPTY_DEEPSEEK_EXTRACTION");
+    }
+    
+    evidence.push(`output_text_length:${outputText.length}`);
+    evidence.push("response:received");
+    
+    await browser.close();
+    
+    return {
+      success: true,
+      provider: "deepseek_web",
+      session_state: "ok",
+      submit_status: "sent",
+      response_status: "received",
+      output_text: outputText,
+      trace_id: traceId,
+      evidence,
+      duration_ms: Date.now() - startTime,
+    };
+  } catch (error: any) {
+    console.error("[creator-bridge] DEEPSEEK_EXECUTION_ERROR", {
+      name: error?.name,
+      message: error?.message,
+      stack: error?.stack,
+    });
+    console.log(`[creator-bridge] execution_failed: ${error.message}`);
+    return {
+      success: false,
+      provider: "deepseek_web",
+      session_state: "blocked",
+      error_code: error.message || "deepseek_cdp_execution_error",
+      trace_id: traceId,
+      evidence,
+      duration_ms: Date.now() - startTime,
+    };
+  }
+}
+
 export async function executeWithSession(
   adapter: WebAdapter,
   prompt: string,
@@ -597,6 +791,12 @@ export async function executeWithSession(
   if (adapter.providerId === "qwen_web") {
     console.log("[creator-bridge] using CDP path for qwen_web");
     return await executeQwenWithCDP(prompt, traceId);
+  }
+  
+  // For deepseek_web, use CDP connection (existing Chrome)
+  if (adapter.providerId === "deepseek_web") {
+    console.log("[creator-bridge] using CDP path for deepseek_web");
+    return await executeDeepSeekWithCDP(prompt, traceId);
   }
   
   // For other providers, use ManagedBrowser with profile
