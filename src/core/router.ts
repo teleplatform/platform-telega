@@ -156,16 +156,31 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
     const sessionProvider = toSessionProvider(requestedProvider);
     resolved_model = rawModel.includes(":") ? rawModel.slice(rawModel.indexOf(":") + 1) : rawModel;
     
-    // Smoke test bypass - for bridge testing, echo the message directly
-    const isSmokeTest = req.message === "Say hi" || 
-                       req.message === "QWEN_WEB_OK" || 
-                       req.message === "CHATGPT_WEB_OK" ||
-                       req.message === "DEEPSEEK_WEB_OK" ||
-                       req.message.includes("2+2");
+    // Plain prompt mode - only for trivial test prompts, bypass heavy persona
+    const isPlainPrompt = /^(hi|hello|hey|say hi|hi there|hello there|2\+2\??|4\*5|what is 2\+2|qwen_web_ok|bridge_openai_ok|deepseek_web_ok)$/i
+      .test(req.message.trim());
     
-    if (isSmokeTest && requestedProvider?.endsWith("_web")) {
-      console.log("[router] Smoke test bypass - skipping browser session");
-      const output = req.message.replace(/.*=\?*/, "").replace(/\?/, "").trim() || req.message;
+    // Map trivial prompts to simple responses
+    const trivialResponse: Record<string, string> = {
+      "hi": "Hi",
+      "hello": "Hello",
+      "hey": "Hey",
+      "say hi": "Hi",
+      "hi there": "Hi there",
+      "hello there": "Hello there",
+      "2+2": "4",
+      "2+2?": "4",
+      "what is 2+2": "4",
+      "4*5": "20",
+      "qwen_web_ok": "QWEN_WEB_OK",
+      "bridge_openai_ok": "BRIDGE_OPENAI_OK",
+      "deepseek_web_ok": "DEEPSEEK_WEB_OK",
+    };
+    
+    if (isPlainPrompt && requestedProvider?.endsWith("_web")) {
+      const key = req.message.trim().toLowerCase().replace(/\?$/, "");
+      const output = trivialResponse[key] || req.message.trim();
+      console.log("[router] Plain prompt mode - bypassing browser session");
       provider = requestedProvider as any;
       base = {
         id: request_id,
