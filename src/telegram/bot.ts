@@ -1298,6 +1298,81 @@ console.error("[creator-control] /patch_rollback failed", e?.message || e);
     }
   });
 
+  bot.command("telega_actions", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      const { loadActions, formatActionList } = await import("../providers/creator/action-queue.js");
+      
+      const actions = role === "owner" ? await loadActions(undefined, "pending", 10) : await loadActions(userId, undefined, 10);
+      await ctx.reply(formatActionList(actions));
+    } catch (e: any) {
+      console.error("[telega-action] /telega_actions failed", e?.message || e);
+    }
+  });
+
+  bot.command("telega_action_view", async (ctx) => {
+    try {
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const actionId = args[0];
+      
+      if (!actionId) {
+        await ctx.reply("Usage: /telega_action_view <action_id>");
+        return;
+      }
+      
+      const { getAction, formatAction } = await import("../providers/creator/action-queue.js");
+const action = await getAction(actionId);
+      if (!action) {
+        await ctx.reply("Action not found");
+        return;
+      }
+      await ctx.reply(`✅ Action approved!\n\n${formatAction(action)}`);
+      
+    } catch (e: any) {
+      console.error("[telega-action] /telega_action_approve failed", e?.message || e);
+    }
+  });
+
+  bot.command("telega_action_reject", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const actionId = args[0];
+      const reason = args.slice(1).join(" ") || "No reason provided";
+      
+      if (!actionId) {
+        await ctx.reply("Usage: /telega_action_reject <action_id> [reason]");
+        return;
+      }
+      
+      const { rejectAction, getAction, formatAction } = await import("../providers/creator/action-queue.js");
+      const success = await rejectAction(actionId, userId, reason);
+      
+      if (!success) {
+        await ctx.reply("Cannot reject: action not found or not pending");
+        return;
+      }
+      
+      const action = await getAction(actionId);
+      if (!action) {
+        await ctx.reply("Action not found");
+        return;
+      }
+      await ctx.reply(`❌ Action rejected!\n\n${formatAction(action)}`);
+      
+    } catch (e: any) {
+      console.error("[telega-action] /telega_action_reject failed", e?.message || e);
+    }
+  });
+
   bot.hears("▦ Menu", async (ctx) => {
     try {
       console.log("[telegram-menu] menu_open_requested", { user_id: userIdOf(ctx), role: getTelegramRole(userIdOf(ctx)) });
