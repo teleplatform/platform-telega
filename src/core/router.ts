@@ -293,13 +293,34 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       
       try {
         const { buildStrategyWithGuardrails, executeStrategy, formatStrategySummary } = await import("../providers/creator/strategy-engine.js");
+        const { writeAudit, computeRiskLevel } = await import("../providers/creator/audit-gateway.js");
         
         const { strategy, evidence, usedFallback } = await buildStrategyWithGuardrails(req.message, request_id);
         console.log("[router] Strategy:", formatStrategySummary(strategy), { evidence });
         
+        const t1 = Date.now();
         const strategyResult = await executeStrategy(strategy, req.message);
+        const latency = Date.now() - t1;
         
         console.log("[router] Strategy executed:", strategyResult.provider, { fallback: usedFallback });
+        
+        await writeAudit(
+          request_id,
+          "user",
+          req.meta?.role || "user",
+          "strategy",
+          req.message,
+          `Strategy: ${strategy.mode} via ${strategyResult.provider}, fallback: ${usedFallback}`,
+          "passed",
+          strategyResult.text ? "success" : "failed",
+          {
+            strategyMode: strategy.mode,
+            providersUsed: strategy.providers,
+            guardrailReason: usedFallback ? "fallback used" : undefined,
+            riskLevel: computeRiskLevel("strategy", strategy.providers),
+            latencyMs: latency,
+          }
+        );
         
         provider = strategyResult.provider as any;
         base = {

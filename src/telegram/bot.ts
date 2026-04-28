@@ -788,34 +788,73 @@ export async function startPantheonTelegramBot() {
       const rolled = await rollbackApply(applyId);
       await ctx.reply(formatApplyStatus(rolled));
     } catch (e: any) {
-      console.error("[creator-control] /patch_rollback failed", e?.message || e);
+console.error("[creator-control] /patch_rollback failed", e?.message || e);
     }
   });
 
-  bot.command("job_evidence", async (ctx) => {
+  bot.command("bridge_audit", async (ctx) => {
     try {
-      const userId = String(userIdOf(ctx));
-      const role = getTelegramRole(userId);
-      const args = ctx.message?.text?.split(" ").slice(1) || [];
-      const jobId = args[0];
-      if (!jobId) {
-        await ctx.reply("Usage: /job_evidence <job_id>");
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
         return;
       }
-      const { getJob, getJobEvidence } = await import("../providers/creator/job-runtime.js");
-      const job = getJob(jobId);
-      if (!job) {
-        await ctx.reply("Job not found");
-        return;
-      }
-      if (job.user_id !== userId && role !== "owner") {
-        await ctx.reply("Not your job");
-        return;
-      }
-      const evidence = getJobEvidence(jobId);
-      await ctx.reply(`📋 Job Evidence:\n\`\`\`\n${JSON.stringify(evidence, null, 2)}\n\`\`\``);
+      const { formatAuditSummary } = await import("../providers/creator/audit-gateway.js");
+      await ctx.reply(await formatAuditSummary(10));
     } catch (e: any) {
-      console.error("[creator-control] /job_evidence failed", e?.message || e);
+      console.error("[creator-control] /bridge_audit failed", e?.message || e);
+    }
+  });
+
+  bot.command("bridge_audit_find", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const query = args.join(" ");
+      if (!query) {
+        await ctx.reply("Usage: /bridge_audit_find <query>");
+        return;
+      }
+      const { findAudit, formatAuditRecord } = await import("../providers/creator/audit-gateway.js");
+      const results = await findAudit(query, 5);
+      if (results.length === 0) {
+        await ctx.reply("No matches");
+        return;
+      }
+      for (const r of results) {
+        await ctx.reply(await formatAuditRecord(r));
+      }
+    } catch (e: any) {
+      console.error("[creator-control] /bridge_audit_find failed", e?.message || e);
+    }
+  });
+
+  bot.command("bridge_audit_view", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const auditId = args[0];
+      if (!auditId) {
+        await ctx.reply("Usage: /bridge_audit_view <audit_id>");
+        return;
+      }
+      const { getAuditById, formatAuditRecord } = await import("../providers/creator/audit-gateway.js");
+      const record = await getAuditById(auditId);
+      if (!record) {
+        await ctx.reply("Audit not found");
+        return;
+      }
+      await ctx.reply(await formatAuditRecord(record));
+    } catch (e: any) {
+      console.error("[creator-control] /bridge_audit_view failed", e?.message || e);
     }
   });
 
