@@ -2286,6 +2286,136 @@ bot.command("set_currency", async (ctx) => {
     }
   });
 
+  // CREATOR ECONOMY - v20
+  bot.command("referral_code", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const { createReferralCode } = await import("../providers/creator/creator-economy.js");
+      const code = await createReferralCode(userId);
+      await ctx.reply(`🎯 Your referral code: ${code}\n\nShare: telega.app/invite?ref=${code}`);
+    } catch (e: any) {
+      console.error("[economy] /referral_code failed", e?.message || e);
+    }
+  });
+
+  bot.command("referral_stats", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const { getReferralStats, formatReferralStats } = await import("../providers/creator/creator-economy.js");
+      const stats = await getReferralStats(userId);
+      await ctx.reply(formatReferralStats(stats));
+    } catch (e: any) {
+      console.error("[economy] /referral_stats failed", e?.message || e);
+    }
+  });
+
+  bot.command("invite", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const newUserId = args[0];
+      
+      if (!newUserId) {
+        await ctx.reply("Usage: /invite <new_user_id>\nExample: /invite 123456789");
+        return;
+      }
+      
+      const { registerReferral } = await import("../providers/creator/creator-economy.js");
+      const result = await registerReferral("REFDEFAULT", newUserId);
+      
+      if (result.success) {
+        await ctx.reply(`✅ Referral registered! Both you and the new user get ${result.reward} TN bonus.`);
+      } else {
+        await ctx.reply(`❌ Failed: ${result.reason}`);
+      }
+    } catch (e: any) {
+      console.error("[economy] /invite failed", e?.message || e);
+    }
+  });
+
+  bot.command("creator_profile", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      
+      if (args.length > 0) {
+        const bio = args.join(" ");
+        const { updateCreatorProfile, getCreatorProfile, formatCreatorProfile } = await import("../providers/creator/creator-economy.js");
+        await updateCreatorProfile(userId, { bio, updated_at: Date.now() });
+        const profile = await getCreatorProfile(userId);
+        await ctx.reply(formatCreatorProfile(profile!));
+      } else {
+        const { getCreatorProfile, formatCreatorProfile, createReferralCode } = await import("../providers/creator/creator-economy.js");
+        let profile = await getCreatorProfile(userId);
+        if (!profile) {
+          await createReferralCode(userId);
+          profile = await getCreatorProfile(userId);
+        }
+        await ctx.reply(formatCreatorProfile(profile!));
+      }
+    } catch (e: any) {
+      console.error("[economy] /creator_profile failed", e?.message || e);
+    }
+  });
+
+  bot.command("creator_stats", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const { getCreatorProfile, formatCreatorProfile } = await import("../providers/creator/creator-economy.js");
+      const profile = await getCreatorProfile(userId);
+      
+      if (!profile) {
+        await ctx.reply("No creator profile yet. Use /creator_profile to create one.");
+        return;
+      }
+      
+      let response = formatCreatorProfile(profile);
+      
+      const { getReferralStats, formatReferralStats } = await import("../providers/creator/creator-economy.js");
+      const stats = await getReferralStats(userId);
+      response += "\n\n" + formatReferralStats(stats);
+      
+      await ctx.reply(response);
+    } catch (e: any) {
+      console.error("[economy] /creator_stats failed", e?.message || e);
+    }
+  });
+
+  bot.command("leaderboard", async (ctx) => {
+    try {
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const type = (args[0] === "creators" || args[0] === "sellers" || args[0] === "affiliates") 
+        ? args[0].replace("s", "") as "creator" | "seller" | "affiliate"
+        : undefined;
+      
+      const { getLeaderboard, formatLeaderboard } = await import("../providers/creator/creator-economy.js");
+      const profiles = await getLeaderboard(type, 10);
+      await ctx.reply(formatLeaderboard(profiles));
+    } catch (e: any) {
+      console.error("[economy] /leaderboard failed", e?.message || e);
+    }
+  });
+
+  bot.command("partner", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const rate = parseFloat(args[0]) || 0.1;
+      
+      if (rate < 0.05 || rate > 0.3) {
+        await ctx.reply("Commission rate must be between 5% and 30% (0.05-0.3)");
+        return;
+      }
+      
+      const { createPartner } = await import("../providers/creator/creator-economy.js");
+      const partner = await createPartner(userId, rate);
+      
+      await ctx.reply(`✅ Partner account created!\n\nCommission rate: ${rate * 100}%\nEarnings: ${partner.earnings_teleton} TN`);
+    } catch (e: any) {
+      console.error("[economy] /partner failed", e?.message || e);
+    }
+  });
+
   bot.action("menu:chat", async (ctx) => {
     try {
       console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "menu:chat" });
