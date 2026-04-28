@@ -70,6 +70,9 @@ function getTelegramRole(userId: string | number | undefined): TelegramRole {
 }
 
 export async function startPantheonTelegramBot() {
+  const { initEvidenceStore } = await import("../providers/creator/evidence-store.js");
+  await initEvidenceStore();
+  
   console.log("[pantheon-tg] boot check", {
     polling: process.env.PANTHEON_TG_POLLING,
     token_present: Boolean((process.env.TELEGRAM_BOT_TOKEN || "").trim()),

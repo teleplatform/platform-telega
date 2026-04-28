@@ -1,4 +1,11 @@
+import fs from "fs/promises";
+import path from "path";
 import type { SessionProviderId } from "./session/session-registry.js";
+
+const EVIDENCE_DIR = path.join(process.cwd(), "data", "creator-bridge");
+const EVIDENCE_FILE = path.join(EVIDENCE_DIR, "evidence.jsonl");
+const COOLDOWN_FILE = path.join(EVIDENCE_DIR, "cooldowns.json");
+const MAX_RECORDS = 500;
 
 export type ExecutionMode = "single" | "multi" | "debate" | "research";
 export type ExecutionStatus = "success" | "failed" | "timeout" | "attempted";
@@ -30,15 +37,80 @@ export interface BridgeEvidence {
   outputLength: number;
 }
 
+async function ensureDir(): Promise<void> {
+  try {
+    await fs.mkdir(EVIDENCE_DIR, { recursive: true });
+  } catch {}
+}
+
+async function appendEvidenceToFile(evidence: BridgeEvidence): Promise<void> {
+  try {
+    await ensureDir();
+    const line = JSON.stringify(evidence) + "\n";
+    await fs.appendFile(EVIDENCE_FILE, line, "utf-8");
+  } catch (e) {
+    console.error("[bridge-evidence] write failed", e);
+  }
+}
+
+async function loadEvidenceFromFile(): Promise<BridgeEvidence[]> {
+  const evidences: BridgeEvidence[] = [];
+  try {
+    await ensureDir();
+    const content = await fs.readFile(EVIDENCE_FILE, "utf-8");
+    const lines = content.trim().split("\n").filter(Boolean);
+    const recent = lines.slice(-MAX_RECORDS);
+    for (const line of recent) {
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed.id && parsed.timestamp) {
+          evidences.push(parsed);
+        }
+      } catch {}
+    }
+  } catch {}
+  return evidences;
+}
+
+interface PersistedCooldown {
+  provider: SessionProviderId;
+  errorCode: ErrorCode;
+  cooldownUntil: number;
+}
+
+async function saveCooldowns(cooldowns: PersistedCooldown[]): Promise<void> {
+  try {
+    await ensureDir();
+    await fs.writeFile(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2), "utf-8");
+  } catch (e) {
+    console.error("[bridge-cooldown] save failed", e);
+  }
+}
+
+async function loadCooldowns(): Promise<PersistedCooldown[]> {
+  try {
+    const content = await fs.readFile(COOLDOWN_FILE, "utf-8");
+    return JSON.parse(content);
+  } catch {
+    return [];
+  }
+}
+
 class BridgeEvidenceStore {
   private evidences: BridgeEvidence[] = [];
-  private maxSize = 100;
+  private maxSize = 500;
+
+  async init(): Promise<void> {
+    this.evidences = await loadEvidenceFromFile();
+    console.log("[bridge-evidence] loaded", this.evidences.length, "records");
+  }
 
   add(evidence: BridgeEvidence): void {
     this.evidences.unshift(evidence);
     if (this.evidences.length > this.maxSize) {
       this.evidences.pop();
     }
+    appendEvidenceToFile(evidence).catch(() => {});
   }
 
   getRecent(limit = 10): BridgeEvidence[] {
@@ -112,6 +184,17 @@ class ProviderCooldownManager {
     UNKNOWN: 5,
   };
 
+  async init(): Promise<void> {
+    const persisted = await loadCooldowns();
+    const now = Date.now();
+    for (const cd of persisted) {
+      if (cd.cooldownUntil > now) {
+        this.cooldowns.set(cd.provider, cd);
+      }
+    }
+    console.log("[bridge-cooldown] restored", this.cooldowns.size, "cooldowns");
+  }
+
   setCooldown(provider: SessionProviderId, errorCode: ErrorCode): void {
     const minutes = this.cooldownMinutes[errorCode] || 5;
     this.cooldowns.set(provider, {
@@ -119,6 +202,7 @@ class ProviderCooldownManager {
       errorCode,
       cooldownUntil: Date.now() + minutes * 60 * 1000,
     });
+    this.persistCooldowns();
   }
 
   isInCooldown(provider: SessionProviderId): boolean {
@@ -126,6 +210,7 @@ class ProviderCooldownManager {
     if (!cd) return false;
     if (Date.now() > cd.cooldownUntil) {
       this.cooldowns.delete(provider);
+      this.persistCooldowns();
       return false;
     }
     return true;
@@ -143,15 +228,27 @@ class ProviderCooldownManager {
 
   reset(provider: SessionProviderId): void {
     this.cooldowns.delete(provider);
+    this.persistCooldowns();
   }
 
   resetAll(): void {
     this.cooldowns.clear();
+    this.persistCooldowns();
+  }
+
+  private async persistCooldowns(): Promise<void> {
+    const arr = Array.from(this.cooldowns.values());
+    await saveCooldowns(arr);
   }
 }
 
 export const bridgeEvidenceStore = new BridgeEvidenceStore();
 export const providerCooldownManager = new ProviderCooldownManager();
+
+export async function initEvidenceStore(): Promise<void> {
+  await bridgeEvidenceStore.init();
+  await providerCooldownManager.init();
+}
 
 export function addBridgeEvidence(evidence: BridgeEvidence): void {
   bridgeEvidenceStore.add(evidence);
