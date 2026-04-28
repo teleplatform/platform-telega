@@ -24,6 +24,7 @@ import {
 } from "../intel/explainTrace.js";
 import { retryBuildTask } from "../intel/retryBuildTask.js";
 import { MSG } from "#i18n/messages";
+import type { SessionProviderId } from "../providers/creator/session/adapters.js";
 
 function getTelegaRoot(): string {
   const root = (process.env.TELEGA_ROOT || "").trim();
@@ -384,6 +385,27 @@ export async function startPantheonTelegramBot() {
       await ctx.reply(formatProviderHealth());
     } catch (e: any) {
       console.error("[creator-control] /provider_health failed", e?.message || e);
+    }
+  });
+
+  bot.command("bridge_reset_provider", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const provider = args[0] as SessionProviderId;
+      if (!provider) {
+        await ctx.reply("Usage: /bridge_reset_provider <provider>\nExample: /bridge_reset_provider grok_web");
+        return;
+      }
+      const { providerCooldownManager } = await import("../providers/creator/evidence-store.js");
+      providerCooldownManager.reset(provider);
+      await ctx.reply(`✅ Cooldown reset for ${provider}`);
+    } catch (e: any) {
+      console.error("[creator-control] /bridge_reset_provider failed", e?.message || e);
     }
   });
 

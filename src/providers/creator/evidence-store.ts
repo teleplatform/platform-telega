@@ -93,7 +93,65 @@ class BridgeEvidenceStore {
   }
 }
 
+interface ProviderCooldown {
+  provider: SessionProviderId;
+  errorCode: ErrorCode;
+  cooldownUntil: number;
+}
+
+class ProviderCooldownManager {
+  private cooldowns: Map<SessionProviderId, ProviderCooldown> = new Map();
+  private cooldownMinutes: Record<ErrorCode, number> = {
+    RATE_LIMIT: 10,
+    OVERLOAD: 10,
+    AUTH_REQUIRED: 999999,
+    EMPTY_OUTPUT: 2,
+    TIMEOUT: 2,
+    DOM_SELECTOR_MISS: 5,
+    EXTRACTION_FAILED: 5,
+    UNKNOWN: 5,
+  };
+
+  setCooldown(provider: SessionProviderId, errorCode: ErrorCode): void {
+    const minutes = this.cooldownMinutes[errorCode] || 5;
+    this.cooldowns.set(provider, {
+      provider,
+      errorCode,
+      cooldownUntil: Date.now() + minutes * 60 * 1000,
+    });
+  }
+
+  isInCooldown(provider: SessionProviderId): boolean {
+    const cd = this.cooldowns.get(provider);
+    if (!cd) return false;
+    if (Date.now() > cd.cooldownUntil) {
+      this.cooldowns.delete(provider);
+      return false;
+    }
+    return true;
+  }
+
+  getCooldownInfo(provider: SessionProviderId): ProviderCooldown | undefined {
+    return this.cooldowns.get(provider);
+  }
+
+  getAllCooldowns(): ProviderCooldown[] {
+    return Array.from(this.cooldowns.values()).filter(
+      cd => Date.now() <= cd.cooldownUntil
+    );
+  }
+
+  reset(provider: SessionProviderId): void {
+    this.cooldowns.delete(provider);
+  }
+
+  resetAll(): void {
+    this.cooldowns.clear();
+  }
+}
+
 export const bridgeEvidenceStore = new BridgeEvidenceStore();
+export const providerCooldownManager = new ProviderCooldownManager();
 
 export function addBridgeEvidence(evidence: BridgeEvidence): void {
   bridgeEvidenceStore.add(evidence);
@@ -114,6 +172,16 @@ export function formatProviderHealth(): string {
   for (const [provider, stat] of Object.entries(stats)) {
     const rate = stat.attempts > 0 ? Math.round((stat.success / stat.attempts) * 100) : 0;
     lines.push(`${provider}: ${stat.success}/${stat.attempts} (${rate}%) avg ${Math.round(stat.avgLatencyMs)}ms`);
+  }
+  
+  const cooldowns = providerCooldownManager.getAllCooldowns();
+  if (cooldowns.length > 0) {
+    lines.push("\n❄️ Cooldowns:");
+    for (const cd of cooldowns) {
+      const remaining = Math.round((cd.cooldownUntil - Date.now()) / 60000);
+      const mins = cd.errorCode === "AUTH_REQUIRED" ? "∞" : `${remaining}m`;
+      lines.push(`${cd.provider}: ${cd.errorCode} (${mins})`);
+    }
   }
   
   const emptyCount = bridgeEvidenceStore.getEmptyOutputCount();

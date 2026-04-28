@@ -128,11 +128,18 @@ export async function executeWithFallback(
   evidence: EvidenceLog;
 }> {
   const { getSessionBridge } = await import("./session/session-bridge.js");
+  const { providerCooldownManager } = await import("./evidence-store.js");
   const traceId = options?.traceId || `v2-${Date.now()}`;
   const timeoutMs = options?.timeoutMs || 120000;
   const fallbackEnabled = options?.fallbackEnabled !== false;
   
-  const chain = fallbackEnabled ? getFallbackChain(provider) : [provider];
+  let chain = fallbackEnabled ? getFallbackChain(provider) : [provider];
+  chain = chain.filter(p => !providerCooldownManager.isInCooldown(p));
+  
+  if (chain.length === 0) {
+    chain = [provider];
+  }
+  
   const evidence: EvidenceLog = {
     requestId: traceId,
     mode: "single",
@@ -143,6 +150,7 @@ export async function executeWithFallback(
   };
   
   let lastError: Error | undefined;
+  let lastErrorCode: ErrorCode | undefined;
   let successProvider: SessionProviderId | undefined;
   
   for (const p of chain) {
@@ -178,6 +186,8 @@ export async function executeWithFallback(
         evidence.totalLatencyMs += currentLatencyMs;
         evidence.finalProvider = p;
         
+        console.log(`[v2] provider ${p} succeeded`);
+        
         return {
           text: result.output_text,
           provider: p,
@@ -185,7 +195,13 @@ export async function executeWithFallback(
         };
       }
       
+      lastErrorCode = errorCode;
       lastError = new Error(result.error_code || "execution_failed");
+      
+      if (errorCode === "RATE_LIMIT" || errorCode === "OVERLOAD" || errorCode === "EMPTY_OUTPUT") {
+        providerCooldownManager.setCooldown(p, errorCode);
+        console.log(`[v2] cooldown set for ${p}: ${errorCode}`);
+      }
     } catch (e: any) {
       currentLatencyMs = Date.now() - startTime;
       const errorCode = classifyError("", e);
@@ -197,7 +213,13 @@ export async function executeWithFallback(
         errorCode,
       });
       
+      lastErrorCode = errorCode;
       lastError = e;
+      
+      if (errorCode === "RATE_LIMIT" || errorCode === "OVERLOAD" || errorCode === "EMPTY_OUTPUT") {
+        providerCooldownManager.setCooldown(p, errorCode);
+        console.log(`[v2] cooldown set for ${p}: ${errorCode}`);
+      }
     }
     
     evidence.totalLatencyMs += currentLatencyMs;
@@ -205,7 +227,11 @@ export async function executeWithFallback(
   }
   
   evidence.finalProvider = successProvider || provider;
-  evidence.providers[evidence.providers.length - 1].status = "failed";
+  if (evidence.providers.length > 0) {
+    evidence.providers[evidence.providers.length - 1].status = "failed";
+  }
+  
+  console.log(`[v2] all providers failed: ${lastErrorCode}`);
   
   return {
     text: lastError?.message || "All providers failed",
