@@ -133,6 +133,11 @@ export async function getOrCreateUser(userId: string, role: UserRole = "public")
   return user;
 }
 
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+  const users = await loadUsers();
+  return users.find(u => u.user_id === userId) || null;
+}
+
 export function checkUserLimits(user: UserProfile): { allowed: boolean; reason?: string } {
   const now = Date.now();
   const dayMs = 24 * 60 * 60 * 1000;

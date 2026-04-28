@@ -919,6 +919,218 @@ console.error("[creator-control] /patch_rollback failed", e?.message || e);
     }
   });
 
+  bot.command("agents", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      const { getUserAgents, getAllAgents, formatAgentList } = await import("../providers/creator/agent-runtime.js");
+      
+      const agents = role === "owner" ? await getAllAgents() : await getUserAgents(userId);
+      await ctx.reply(formatAgentList(agents));
+    } catch (e: any) {
+      console.error("[creator-control] /agents failed", e?.message || e);
+    }
+  });
+
+  bot.command("agent_create", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      
+      if (role === "public") {
+        await ctx.reply("Agents require creator or higher plan");
+        return;
+      }
+      
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      if (args.length < 2) {
+        await ctx.reply("Usage: /agent_create <name> | <purpose>\nExample: /agent_create research_bot | Search and summarize AI news");
+        return;
+      }
+      
+      const sepIdx = args.indexOf("|");
+      if (sepIdx === -1) {
+        await ctx.reply("Missing purpose. Use: /agent_create <name> | <purpose>");
+        return;
+      }
+      
+      const name = args.slice(0, sepIdx).join(" ");
+      const purpose = args.slice(sepIdx + 1).join(" ");
+      const modeArg = args.find(a => a.startsWith("mode:"))?.replace("mode:", "") || "research";
+      
+      const { createAgent, getDefaultToolsForMode, getDefaultProvidersForMode, formatAgent } = await import("../providers/creator/agent-runtime.js");
+      
+      const agent = await createAgent(
+        userId,
+        name,
+        purpose,
+        modeArg as any,
+        getDefaultToolsForMode(modeArg as any),
+        getDefaultProvidersForMode(modeArg as any)
+      );
+      
+      await ctx.reply(`Agent created:\n\n${formatAgent(agent)}`);
+    } catch (e: any) {
+      console.error("[creator-control] /agent_create failed", e?.message || e);
+    }
+  });
+
+  bot.command("agent_run", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      
+      if (role === "public") {
+        await ctx.reply("Agents require creator or higher plan");
+        return;
+      }
+      
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const agentId = args[0];
+      const input = args.slice(1).join(" ");
+      
+      if (!agentId || !input) {
+        await ctx.reply("Usage: /agent_run <agent_id> <input>\nExample: /agent_run agent_123_abc What is the latest AI news?");
+        return;
+      }
+      
+      const { getAgent, startAgentRun, checkAgentRunLimit, formatAgentRuns, loadAgentRuns } = await import("../providers/creator/agent-runtime.js");
+      
+      const agent = await getAgent(agentId, userId);
+      if (!agent) {
+        await ctx.reply("Agent not found or not yours");
+        return;
+      }
+      
+      const limitCheck = await checkAgentRunLimit(agentId);
+      if (!limitCheck.allowed) {
+        await ctx.reply(`❌ ${limitCheck.reason}`);
+        return;
+      }
+      
+      const run = await startAgentRun(agentId, input);
+      
+      await ctx.reply(`🚀 Agent run started!\n\nRun ID: ${run.run_id}\nAgent: ${agent.name}\nInput: ${input}`);
+    } catch (e: any) {
+      console.error("[creator-control] /agent_run failed", e?.message || e);
+      await ctx.reply(`❌ Error: ${e?.message || e}`);
+    }
+  });
+
+  bot.command("agent_status", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const agentId = args[0];
+      
+      if (!agentId) {
+        await ctx.reply("Usage: /agent_status <agent_id>");
+        return;
+      }
+      
+      const { getAgent, formatAgent, checkAgentRunLimit } = await import("../providers/creator/agent-runtime.js");
+      
+      const agent = await getAgent(agentId, role === "owner" ? undefined : userId);
+      if (!agent) {
+        await ctx.reply("Agent not found");
+        return;
+      }
+      
+      const limitCheck = await checkAgentRunLimit(agentId);
+      const limitInfo = limitCheck.allowed ? "✅ Can run" : `❌ ${limitCheck.reason}`;
+      
+      await ctx.reply(formatAgent(agent) + `\n\nRun today: ${limitInfo}`);
+    } catch (e: any) {
+      console.error("[creator-control] /agent_status failed", e?.message || e);
+    }
+  });
+
+  bot.command("agent_runs", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const agentId = args[0];
+      
+      if (!agentId) {
+        await ctx.reply("Usage: /agent_runs <agent_id>");
+        return;
+      }
+      
+      const { getAgent, loadAgentRuns, formatAgentRuns } = await import("../providers/creator/agent-runtime.js");
+      
+      const agent = await getAgent(agentId, role === "owner" ? undefined : userId);
+      if (!agent) {
+        await ctx.reply("Agent not found");
+        return;
+      }
+      
+      const runs = await loadAgentRuns(agentId);
+      await ctx.reply(formatAgentRuns(runs));
+    } catch (e: any) {
+      console.error("[creator-control] /agent_runs failed", e?.message || e);
+    }
+  });
+
+  bot.command("agent_pause", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const agentId = args[0];
+      
+      if (!agentId) {
+        await ctx.reply("Usage: /agent_pause <agent_id>");
+        return;
+      }
+      
+      const { getAgent, updateAgentStatus } = await import("../providers/creator/agent-runtime.js");
+      
+      const agent = await getAgent(agentId, role === "owner" ? undefined : userId);
+      if (!agent) {
+        await ctx.reply("Agent not found");
+        return;
+      }
+      
+      await updateAgentStatus(agentId, "paused", role === "owner" ? undefined : userId);
+      await ctx.reply(`⏸️ Agent paused: ${agent.name}`);
+    } catch (e: any) {
+      console.error("[creator-control] /agent_pause failed", e?.message || e);
+    }
+  });
+
+  bot.command("agent_resume", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const agentId = args[0];
+      
+      if (!agentId) {
+        await ctx.reply("Usage: /agent_resume <agent_id>");
+        return;
+      }
+      
+      const { getAgent, updateAgentStatus } = await import("../providers/creator/agent-runtime.js");
+      
+      const agent = await getAgent(agentId, role === "owner" ? undefined : userId);
+      if (!agent) {
+        await ctx.reply("Agent not found");
+        return;
+      }
+      
+      await updateAgentStatus(agentId, "active", role === "owner" ? undefined : userId);
+      await ctx.reply(`▶️ Agent resumed: ${agent.name}`);
+    } catch (e: any) {
+      console.error("[creator-control] /agent_resume failed", e?.message || e);
+    }
+  });
+
   bot.hears("▦ Menu", async (ctx) => {
     try {
       console.log("[telegram-menu] menu_open_requested", { user_id: userIdOf(ctx), role: getTelegramRole(userIdOf(ctx)) });
