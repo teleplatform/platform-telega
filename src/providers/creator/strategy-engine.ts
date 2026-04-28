@@ -176,13 +176,42 @@ Rules:
 - If task is complex and needs multiple perspectives → use "multi_agent" mode
 - Always provide reasoning`;
 
+let lastMemoryContext = "";
+
 export async function buildStrategy(
   message: string,
-  requestId: string
+  requestId: string,
+  useMemory = true
 ): Promise<ExecutionStrategy> {
   const { executeWithFallback } = await import("./provider-intelligence.js");
   
-  const prompt = STRATEGY_PROMPT.replace("{task}", message);
+  let memoryContext = "";
+  if (useMemory) {
+    try {
+      const { retrieveSimilarTasks } = await import("./execution-memory.js");
+      const { records, fastPathUsed, reusedStrategy } = await retrieveSimilarTasks(message, 3);
+      
+      if (fastPathUsed && reusedStrategy) {
+        console.log("[strategy] using fast-path from memory", reusedStrategy);
+        const fastStrategy = createFallbackStrategy(message);
+        fastStrategy.mode = reusedStrategy.mode as any;
+        fastStrategy.providers = reusedStrategy.providers as any;
+        fastStrategy.reasoning = `Faster path from memory: ${reusedStrategy.mode} with ${reusedStrategy.providers.join(", ")}`;
+        return fastStrategy;
+      }
+      
+      if (records.length > 0) {
+        memoryContext = "\n\nRelevant past executions:\n" + records.map(r => 
+          `- mode: ${r.strategy_mode}, providers: ${r.providers_used.join(" → ")}, summary: ${r.result_summary.slice(0, 100)}...`
+        ).join("\n");
+        console.log("[strategy] memory context found", { count: records.length });
+      }
+} catch (e: any) {
+      console.log("[strategy] memory_lookup failed", e?.message);
+    }
+  }
+  
+  const prompt = (STRATEGY_PROMPT + (memoryContext ? `\n\n${memoryContext}` : "")).replace("{task}", message);
   
   const result = await executeWithFallback("qwen_web", prompt, {
     traceId: requestId,
@@ -319,6 +348,24 @@ export async function executeStrategy(
       };
     }
   }
+}
+
+async function recordToMemory(
+  originalMessage: string,
+  strategy: ExecutionStrategy,
+  result: { text: string; provider: string }
+): Promise<void> {
+  try {
+    const { writeMemory } = await import("./execution-memory.js");
+    await writeMemory(
+      originalMessage,
+      strategy.mode as any,
+      strategy.providers as any,
+      result.text,
+      result.text.length > 10,
+      1000
+    );
+  } catch {}
 }
 
 export function formatStrategySummary(strategy: ExecutionStrategy): string {

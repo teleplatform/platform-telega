@@ -560,6 +560,40 @@ export async function startPantheonTelegramBot() {
     }
   });
 
+  bot.command("bridge_memory", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const { formatMemorySummary } = await import("../providers/creator/execution-memory.js");
+      await ctx.reply(await formatMemorySummary());
+    } catch (e: any) {
+      console.error("[creator-control] /bridge_memory failed", e?.message || e);
+    }
+  });
+
+  bot.command("bridge_memory_find", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const query = args.join(" ");
+      if (!query) {
+        await ctx.reply("Usage: /bridge_memory_find <query>");
+        return;
+      }
+      const { findMemory } = await import("../providers/creator/execution-memory.js");
+      await ctx.reply(await findMemory(query));
+    } catch (e: any) {
+      console.error("[creator-control] /bridge_memory_find failed", e?.message || e);
+    }
+  });
+
   bot.command("job_evidence", async (ctx) => {
     try {
       const userId = String(userIdOf(ctx));
