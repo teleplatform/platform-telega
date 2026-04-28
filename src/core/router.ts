@@ -285,6 +285,42 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       return base;
     }
     
+    // 3b. Strategy Engine for complex tasks
+    const useStrategy = !requestedProvider && req.message.length > 100 && !isPlainPrompt;
+    
+    if (useStrategy) {
+      console.log("[router] Using Strategy Engine for complex task");
+      
+      try {
+        const { buildStrategy, executeStrategy, formatStrategySummary } = await import("../providers/creator/strategy-engine.js");
+        
+        const strategy = await buildStrategy(req.message, request_id);
+        console.log("[router] Strategy built:", formatStrategySummary(strategy));
+        
+        const strategyResult = await executeStrategy(strategy, req.message);
+        
+        console.log("[router] Strategy executed:", strategyResult.provider);
+        
+        provider = strategyResult.provider as any;
+        base = {
+          id: request_id,
+          model: rawModel,
+          output: strategyResult.text,
+          meta: {
+            provider: provider as any,
+            model: "strategy-engine",
+            execution_mode: strategy.mode as any,
+            strategy_reasoning: strategy.reasoning,
+          },
+          request_id,
+          latency_ms: Date.now() - t0,
+        };
+        return base;
+      } catch (e: any) {
+        console.error("[router] Strategy engine failed:", e?.message);
+      }
+    }
+    
     // Use multi-agent execution if requested or message is complex
     const useMultiAgent = (req as any).multi_agent_mode === true || req.meta?.multi_agent_mode === true;
     const useDebate = (req as any).debate_mode === true || req.meta?.debate_mode === true;

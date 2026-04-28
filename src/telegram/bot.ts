@@ -412,6 +412,28 @@ export async function startPantheonTelegramBot() {
     }
   });
 
+  bot.command("bridge_strategy", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const message = args.join(" ");
+      if (!message) {
+        await ctx.reply("Usage: /bridge_strategy <your question>\nExample: /bridge_strategy What is the latest AI news?");
+        return;
+      }
+      const { buildStrategy, formatStrategySummary } = await import("../providers/creator/strategy-engine.js");
+      await ctx.reply("🧠 Analyzing...");
+      const strategy = await buildStrategy(message, `tg-${Date.now()}`);
+      await ctx.reply(formatStrategySummary(strategy));
+    } catch (e: any) {
+      console.error("[creator-control] /bridge_strategy failed", e?.message || e);
+    }
+  });
+
   bot.hears("▦ Menu", async (ctx) => {
     try {
       console.log("[telegram-menu] menu_open_requested", { user_id: userIdOf(ctx), role: getTelegramRole(userIdOf(ctx)) });
