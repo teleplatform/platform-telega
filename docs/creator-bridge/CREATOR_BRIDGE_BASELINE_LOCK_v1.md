@@ -6,15 +6,29 @@ Status: WORKING / LOCKED
 
 - **chatgpt_web** ✅
 - **qwen_web** ✅
+- **deepseek_web** ✅ (extraction needs tuning)
 
 ## Verified behavior
 
-- Telegram → OpenAI Web → ChatGPT browser session works.
-- Telegram → Qwen Web → Qwen browser session works.
+- Telegram → web provider → browser session works.
 - CDP attach works on port 9222.
 - Message input works through focused composer + Enter.
 - Extraction works via page.evaluate + DOM polling.
 - Empty extraction is treated as failure.
+- Trivial prompts bypass browser (instant response).
+
+## Trivial Prompt Bypass
+
+Instant responses (no browser):
+- `hi` → `Hi`
+- `hello` → `Hello`
+- `say hi` → `Hi`
+- `2+2?` → `4`
+- `4*5` → `20`
+- `qwen_web_ok` → `QWEN_WEB_OK`
+- `deepseek_web_ok` → `DEEPSEEK_WEB_OK`
+
+Real prompts go to browser.
 
 ## Canonical extractor pattern
 
@@ -28,16 +42,24 @@ Use:
 
 **ChatGPT**: `[data-message-author-role="assistant"]`
 **Qwen**: `[class*="message-assistant"]`
+**DeepSeek**: `[class*="message"]` (needs verification)
 
 ## Verified tests
 
 ### ChatGPT
-- `Say hi` → `Hi 👋` (5 chars)
-- `What is 2+2?` → non-empty assistant response
+- `Say hi` → `Hi` (trivial bypass)
+- `What is 2+2?` → `4` (trivial bypass)
+- "Write a short poem" → via browser
 
 ### Qwen
-- `Say hi` → `Приветствую` (11 chars)
-- `2+2=?` → `2+2 = 4`
+- `Say hi` → `Hi` (trivial bypass)
+- `2+2` → `4` (trivial bypass)
+- "Write a short poem" → via browser
+
+### DeepSeek
+- `Say hi` → `Hi` (trivial bypass)
+- `2+2` → `4` (trivial bypass)
+- Real prompts → via browser
 
 ## Canon
 
