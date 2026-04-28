@@ -1165,6 +1165,139 @@ console.error("[creator-control] /patch_rollback failed", e?.message || e);
     }
   });
 
+  bot.command("telega_workflows", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const { loadWorkflows, formatWorkflowList, formatWorkflowTypes } = await import("../providers/creator/telega-integration.js");
+      const workflows = await loadWorkflows(userId, 10);
+      await ctx.reply(formatWorkflowList(workflows) + "\n\n" + formatWorkflowTypes());
+    } catch (e: any) {
+      console.error("[telega] /telega_workflows failed", e?.message || e);
+    }
+  });
+
+  bot.command("telega_product_card", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const input = args.join(" ");
+      
+      if (!input) {
+        await ctx.reply("Usage: /telega_product_card <product description>\nExample: /telega_product_card iPhone 15 Pro 256GB");
+        return;
+      }
+      
+      const { createWorkflow, updateWorkflow, generateProductCard, formatWorkflow, detectWorkflowType } = await import("../providers/creator/telega-integration.js");
+      
+      const workflow = await createWorkflow(userId, "product_card", input, "ru");
+      await updateWorkflow(workflow.workflow_id, { status: "running" });
+      
+      const result = await generateProductCard(input, "ru");
+      
+      await updateWorkflow(workflow.workflow_id, {
+        status: "completed",
+        output: result,
+        quality_score: result.quality_score,
+        suggestions: result.suggestions,
+      });
+      
+      const output = `📦 Product Card Generated\n\n` +
+        `🎯 Title:\n${result.title}\n\n` +
+        `📝 Description:\n${result.description}\n\n` +
+        `🏷️ Tags: ${result.tags.join(", ")}\n\n` +
+        `📂 Category: ${result.category}\n\n` +
+        `⭐ Quality: ${result.quality_score}%\n\n` +
+        `💡 Suggestions:\n${result.suggestions.map(s => "• " + s).join("\n")}`;
+      
+      await ctx.reply(output);
+    } catch (e: any) {
+      console.error("[telega] /telega_product_card failed", e?.message || e);
+      await ctx.reply(`❌ Error: ${e?.message || e}`);
+    }
+  });
+
+  bot.command("telega_research", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const query = args.join(" ");
+      
+      if (!query) {
+        await ctx.reply("Usage: /telega_research <research query>\nExample: /telega_research competitors in electronics market");
+        return;
+      }
+      
+      await ctx.reply(`🔍 Research started: "${query}"\n\nThis requires strategy execution with perplexity_web.\nUse /bridge_strategy for detailed research.`);
+      
+      const { createWorkflow, updateWorkflow } = await import("../providers/creator/telega-integration.js");
+      const workflow = await createWorkflow(userId, "market_research", query, "ru");
+      await updateWorkflow(workflow.workflow_id, { status: "running", provider: "perplexity_web" });
+      
+    } catch (e: any) {
+      console.error("[telega] /telega_research failed", e?.message || e);
+      await ctx.reply(`❌ Error: ${e?.message || e}`);
+    }
+  });
+
+  bot.command("telega_content", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const query = args.join(" ");
+      
+      if (!query) {
+        await ctx.reply("Usage: /telega_content <topic>\nExample: /telega_content new collection promotion");
+        return;
+      }
+      
+      await ctx.reply(`📝 Content generation started: "${query}"\n\nUse /bridge_strategy for detailed content generation.`);
+      
+      const { createWorkflow, updateWorkflow } = await import("../providers/creator/telega-integration.js");
+      const workflow = await createWorkflow(userId, "content", query, "ru");
+      await updateWorkflow(workflow.workflow_id, { status: "running" });
+      
+    } catch (e: any) {
+      console.error("[telega] /telega_content failed", e?.message || e);
+      await ctx.reply(`❌ Error: ${e?.message || e}`);
+    }
+  });
+
+  bot.command("telega_ops", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      
+      const { loadWorkflows, loadActionResults } = await import("../providers/creator/telega-integration.js");
+      const { formatProviderHealth } = await import("../providers/creator/evidence-store.js");
+      const { formatAuditSummary } = await import("../providers/creator/audit-gateway.js");
+      
+      const workflows = await loadWorkflows(undefined, 5);
+      const results = await loadActionResults(undefined, 5);
+      
+      const lines = [
+        "📊 Tele•Ga Ops Report",
+        "",
+        "📋 Recent Workflows:",
+        workflows.map(w => `• ${w.type}: ${w.status}`).join("\n") || "none",
+        "",
+        "📋 Recent Results:",
+        results.map(r => `• ${r.action_type}: ${r.approved ? "approved" : "pending"}`).join("\n") || "none",
+        "",
+        "🟢 Provider Health:",
+        formatProviderHealth(),
+      ];
+      
+      await ctx.reply(lines.join("\n"));
+    } catch (e: any) {
+      console.error("[telega] /telega_ops failed", e?.message || e);
+    }
+  });
+
   bot.hears("▦ Menu", async (ctx) => {
     try {
       console.log("[telegram-menu] menu_open_requested", { user_id: userIdOf(ctx), role: getTelegramRole(userIdOf(ctx)) });
