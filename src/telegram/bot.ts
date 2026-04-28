@@ -2436,6 +2436,179 @@ bot.command("set_currency", async (ctx) => {
     }
   });
 
+  // PAYOUT SYSTEM - v20.1
+  bot.command("withdraw", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const amount = parseFloat(args[0]);
+      const method = (args[1] || "click") as any;
+      const details = args.slice(2).join(" ") || "N/A";
+      
+      if (isNaN(amount) || amount < 100) {
+        await ctx.reply("Usage: /withdraw <amount_tn> [method] [details]\nMinimum: 100 TN\nMethods: click, payme, stripe, yoomoney, bank");
+        return;
+      }
+      
+      const { createPayoutRequest, formatPayout } = await import("../providers/creator/payout-system.js");
+      const { getUserLocale } = await import("../providers/creator/global-expansion.js");
+      const locale = await getUserLocale(userId);
+      
+      const result = await createPayoutRequest(userId, amount, method, details, locale.currency);
+      
+      if (!result.success) {
+        await ctx.reply(`❌ Withdrawal failed: ${result.reason}`);
+        return;
+      }
+      
+      await ctx.reply(`⏳ Withdrawal request created!\n\n${formatPayout(result.payout!)}\n\nOwner will review your request.`);
+    } catch (e: any) {
+      console.error("[payout] /withdraw failed", e?.message || e);
+    }
+  });
+
+  bot.command("withdraw_status", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      
+      if (args.length > 0) {
+        const payoutId = args[0];
+        const { getPayout, formatPayout } = await import("../providers/creator/payout-system.js");
+        const payout = await getPayout(payoutId);
+        
+        if (!payout || payout.user_id !== userId) {
+          await ctx.reply("Payout not found");
+          return;
+        }
+        
+        await ctx.reply(formatPayout(payout));
+      } else {
+        const { loadPayouts, formatPayoutList } = await import("../providers/creator/payout-system.js");
+        const payouts = await loadPayouts(userId);
+        await ctx.reply(formatPayoutList(payouts));
+      }
+    } catch (e: any) {
+      console.error("[payout] /withdraw_status failed", e?.message || e);
+    }
+  });
+
+  bot.command("withdraw_history", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const { loadPayouts, formatPayoutList } = await import("../providers/creator/payout-system.js");
+      const payouts = await loadPayouts(userId);
+      await ctx.reply(formatPayoutList(payouts));
+    } catch (e: any) {
+      console.error("[payout] /withdraw_history failed", e?.message || e);
+    }
+  });
+
+  bot.command("approve_withdraw", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const payoutId = args[0];
+      
+      if (!payoutId) {
+        await ctx.reply("Usage: /approve_withdraw <payout_id>");
+        return;
+      }
+      
+      const { approvePayout, formatPayout, getPayout } = await import("../providers/creator/payout-system.js");
+      const result = await approvePayout(payoutId, userId);
+      
+      if (result.success) {
+        const payout = await getPayout(payoutId);
+        await ctx.reply(`✅ Payout approved! Processing...\n\n${formatPayout(payout!)}`);
+      } else {
+        await ctx.reply(`❌ Failed: ${result.reason}`);
+      }
+    } catch (e: any) {
+      console.error("[payout] /approve_withdraw failed", e?.message || e);
+    }
+  });
+
+  bot.command("process_withdraw", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const payoutId = args[0];
+      
+      if (!payoutId) {
+        await ctx.reply("Usage: /process_withdraw <payout_id>");
+        return;
+      }
+      
+      const { processPayout, formatPayout, getPayout } = await import("../providers/creator/payout-system.js");
+      const payout = await getPayout(payoutId);
+      
+      if (!payout || payout.user_id !== userId) {
+        await ctx.reply("Payout not found or not yours");
+        return;
+      }
+      
+      const result = await processPayout(payoutId);
+      
+      if (result.success) {
+        const payout = await getPayout(payoutId);
+        await ctx.reply(`🎉 Payout completed!\n\n${formatPayout(payout!)}`);
+      } else {
+        await ctx.reply(`❌ Failed: ${result.reason}`);
+      }
+    } catch (e: any) {
+      console.error("[payout] /process_withdraw failed", e?.message || e);
+    }
+  });
+
+  bot.command("reject_withdraw", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const payoutId = args[0];
+      const reason = args.slice(1).join(" ") || "No reason provided";
+      
+      if (!payoutId) {
+        await ctx.reply("Usage: /reject_withdraw <payout_id> [reason]");
+        return;
+      }
+      
+      const { rejectPayout, formatPayout, getPayout } = await import("../providers/creator/payout-system.js");
+      const result = await rejectPayout(payoutId, userId, reason);
+      
+      if (result.success) {
+        const payout = await getPayout(payoutId);
+        await ctx.reply(`❌ Payout rejected!\n\n${formatPayout(payout!)}`);
+      } else {
+        await ctx.reply(`❌ Failed: ${result.reason}`);
+      }
+    } catch (e: any) {
+      console.error("[payout] /reject_withdraw failed", e?.message || e);
+    }
+  });
+
   bot.action("menu:settings", async (ctx) => {
     try {
       console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "menu:settings" });
