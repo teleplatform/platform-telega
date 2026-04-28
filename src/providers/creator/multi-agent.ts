@@ -1,5 +1,6 @@
 import { getSessionBridge } from "./session/session-bridge.js";
 import type { SessionProviderId } from "./session/session-registry.js";
+import { logEvidence, type EvidenceLog } from "./provider-intelligence.js";
 
 export type AgentRole = "planner" | "research" | "reasoning" | "creative" | "synth" | "critic";
 
@@ -18,10 +19,13 @@ export interface MultiAgentResult {
       provider: SessionProviderId;
       text: string;
     }>;
+    evidence?: EvidenceLog;
   };
 }
 
-const ROLE_MAPPING: Record<AgentRole, SessionProviderId> = {
+const STABLE_CHAIN = ["qwen_web", "deepseek_web", "chatgpt_web"] as const;
+
+const ROLE_PROVIDER: Record<string, SessionProviderId> = {
   planner: "qwen_web",
   research: "qwen_web",
   reasoning: "deepseek_web",
@@ -83,69 +87,90 @@ export async function multiAgentExecute(
 ): Promise<MultiAgentResult> {
   const traceId = `multi-${mode}-${Date.now()}`;
   const agents: MultiAgentResult["meta"]["agents"] = [];
+  const evidence: EvidenceLog = {
+    requestId: traceId,
+    mode,
+    providers: [],
+    totalLatencyMs: 0,
+    finalProvider: "chatgpt_web",
+    fallbackCount: 0,
+  };
   
   if (mode === "debate") {
     const proposal = await executeWithProvider("chatgpt_web", `
-Create the best possible answer for:
-${message}
+Answer: ${message}
 `, traceId);
     agents.push({ role: "creative", provider: proposal.provider, text: proposal.text });
+    evidence.providers.push({ provider: proposal.provider, status: "success", outputChars: proposal.text.length });
 
     const critique = await executeWithProvider("deepseek_web", `
-Review this answer. Find issues:
-${message}
-
-Answer:
-${proposal.text}
+Critique: ${proposal.text}
+Find issues.
 `, traceId);
     agents.push({ role: "critic", provider: critique.provider, text: critique.text });
+    evidence.providers.push({ provider: critique.provider, status: "success", outputChars: critique.text.length });
 
     const research = await executeWithProvider("qwen_web", `
-Verify facts:
-${message}
+Verify: ${message}
 `, traceId);
     agents.push({ role: "research", provider: research.provider, text: research.text });
+    evidence.providers.push({ provider: research.provider, status: "success", outputChars: research.text.length });
 
     const final = await executeWithProvider("qwen_web", `
 Combine:
+${proposal.text}
+${critique.text}
+${research.text}
 
-Answer: ${proposal.text}
-Critique: ${critique.text}
-Research: ${research.text}
-
-Create final answer:
-${message}
+Final answer for: ${message}
 `, traceId);
     agents.push({ role: "synth", provider: final.provider, text: final.text });
+    evidence.providers.push({ provider: final.provider, status: "success", outputChars: final.text.length });
+    evidence.finalProvider = final.provider;
 
+    logEvidence(evidence);
     return {
       text: final.text,
-      meta: { mode: "debate", agents },
+      meta: { mode: "debate", agents, evidence },
     };
   }
 
-  const plan = await executeWithProvider("qwen_web", `Steps for: ${message}`, traceId);
+  const plan = await executeWithProvider("qwen_web", `Plan: ${message}`, traceId);
   agents.push({ role: "planner", provider: plan.provider, text: plan.text });
+  evidence.providers.push({ provider: plan.provider, status: "success", outputChars: plan.text.length });
 
-  const research = await executeWithProvider("qwen_web", `Research: ${message}`, traceId);
-  agents.push({ role: "research", provider: research.provider, text: research.text });
-
-  const reasoning = await executeWithProvider("deepseek_web", `Analyze: ${message}`, traceId);
+  const reasoning = await executeWithProvider("deepseek_web", `Reason: ${message}`, traceId);
   agents.push({ role: "reasoning", provider: reasoning.provider, text: reasoning.text });
+  evidence.providers.push({ provider: reasoning.provider, status: "success", outputChars: reasoning.text.length });
 
   const final = await executeWithProvider("chatgpt_web", `
 Task: ${message}
+Plan: ${plan.text}
+Reasoning: ${reasoning.text}
 
-Research: ${research.text}
-Analysis: ${reasoning.text}
-
-Combine into final answer:
+Final answer:
 `, traceId);
   agents.push({ role: "synth", provider: final.provider, text: final.text });
+  evidence.providers.push({ provider: final.provider, status: "success", outputChars: final.text.length });
+  evidence.finalProvider = final.provider;
 
+  logEvidence(evidence);
   return {
     text: final.text,
-    meta: { mode: "multi", agents },
+    meta: { mode: "multi", agents, evidence },
+  };
+}
+
+export interface MultiAgentResult {
+  text: string;
+  meta: {
+    mode: "single" | "multi" | "debate";
+    agents: Array<{
+      role: AgentRole;
+      provider: SessionProviderId;
+      text: string;
+    }>;
+    evidence?: EvidenceLog;
   };
 }
 
@@ -166,7 +191,7 @@ export async function smartExecute(
 
   const forceMode = options?.forceMode;
   if (forceMode === "single" || !forceMode && !shouldUseMultiAgent(message) && !shouldUseDebate(message)) {
-    const result = await executeWithProvider("chatgpt_web", message);
+    const result = await executeWithProvider("qwen_web", message);
     return {
       text: result.text,
       meta: { mode: "single", agents: [{ role: "creative", provider: result.provider, text: result.text }] },
