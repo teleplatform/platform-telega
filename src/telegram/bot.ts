@@ -709,6 +709,89 @@ export async function startPantheonTelegramBot() {
     }
   });
 
+  bot.command("patch_apply", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const patchId = args[0];
+      if (!patchId) {
+        await ctx.reply("Usage: /patch_apply <patch_id>\n⚠️ Only after patch plan is reviewed and approved");
+        return;
+      }
+      const { applyPatch, verifyApply, formatApplyStatus } = await import("../providers/creator/apply-gateway.js");
+      const { getPatchPlan: loadPatchPlan } = await import("../providers/creator/patch-planner.js");
+      const patch = await loadPatchPlan(patchId);
+      if (!patch) {
+        await ctx.reply("Patch plan not found");
+        return;
+      }
+      await ctx.reply("Creating backup and applying...");
+      const userId = String(userIdOf(ctx));
+      const record = await applyPatch(patchId, userId, patch);
+      await ctx.reply(formatApplyStatus(record) + "\n\nVerifying...");
+      const verified = await verifyApply(record.apply_id);
+      await ctx.reply(formatApplyStatus(verified));
+    } catch (e: any) {
+      console.error("[creator-control] /patch_apply failed", e?.message || e);
+    }
+  });
+
+  bot.command("patch_status", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const applyId = args[0];
+      if (!applyId) {
+        await ctx.reply("Usage: /patch_status <apply_id>");
+        return;
+      }
+      const { getApplyStatus, formatApplyStatus } = await import("../providers/creator/apply-gateway.js");
+      const record = await getApplyStatus(applyId);
+      if (!record) {
+        await ctx.reply("Apply not found");
+        return;
+      }
+      await ctx.reply(formatApplyStatus(record));
+    } catch (e: any) {
+      console.error("[creator-control] /patch_status failed", e?.message || e);
+    }
+  });
+
+  bot.command("patch_rollback", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const applyId = args[0];
+      if (!applyId) {
+        await ctx.reply("Usage: /patch_rollback <apply_id>");
+        return;
+      }
+      const { getApplyStatus, rollbackApply, formatApplyStatus } = await import("../providers/creator/apply-gateway.js");
+      const record = await getApplyStatus(applyId);
+      if (!record) {
+        await ctx.reply("Apply not found");
+        return;
+      }
+      await ctx.reply("Rolling back...");
+      const rolled = await rollbackApply(applyId);
+      await ctx.reply(formatApplyStatus(rolled));
+    } catch (e: any) {
+      console.error("[creator-control] /patch_rollback failed", e?.message || e);
+    }
+  });
+
   bot.command("job_evidence", async (ctx) => {
     try {
       const userId = String(userIdOf(ctx));
