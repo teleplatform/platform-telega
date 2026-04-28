@@ -10,6 +10,7 @@ export type ProviderId =
   | "grok_web"
   | "kimi_web"
   | "perplexity_web"
+  | "claude_web"
   | "openai_api"
   | "qwen_api"
   | "deepseek_api"

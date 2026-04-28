@@ -58,10 +58,10 @@ export const PROVIDER_INTELLIGENCE: Record<string, ProviderIntelligence> = {
     timeoutMs: 120000,
   },
   claude_web: {
-    provider: "chatgpt_web",
-    confidence: 0.7,
-    bestFor: ["long", "writing", "document", "think"],
-    fallbackChain: ["chatgpt_web", "qwen_web"],
+    provider: "claude_web",
+    confidence: 0.9,
+    bestFor: ["long", "writing", "document", "think", "edit", "rewrite", "summarize", "текст", "перепиши", "резюме", "анализ"],
+    fallbackChain: ["claude_web", "chatgpt_web", "qwen_web"],
     timeoutMs: 120000,
   },
   chatgpt_web: {
@@ -94,12 +94,16 @@ export function selectProviderByIntent(message: string): SessionProviderId {
     return "perplexity_web";
   }
   
+  if (m.includes("write") || m.includes("rewrite") || m.includes("edit") || m.includes("summarize") || m.includes("document") || m.includes("текст") || m.includes("перепиши") || m.includes("резюме") || m.includes("анализ")) {
+    return "claude_web";
+  }
+  
   if (m.includes("code") || m.includes("logic") || m.includes("analyze compare")) {
     return "deepseek_web";
   }
   
-  if (m.length > 500 || m.includes("write") || m.includes("document") || m.includes("long")) {
-    return "qwen_web";
+  if (m.length > 1000 || m.includes("long") || m.includes("think")) {
+    return "claude_web";
   }
   
   if (m.includes("strategy") || m.includes("risk") || m.includes("architecture")) {

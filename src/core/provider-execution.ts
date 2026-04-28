@@ -141,6 +141,14 @@ function toFallbackProvider(target: ProviderId): ResolvedProviderConfig {
       source: "fallback",
       rawInput: "perplexity_web:sonar",
     },
+    claude_web: {
+      provider: "claude_web",
+      model: "claude-sonnet-4-20250514",
+      fallbackTo: ["chatgpt_web", "qwen_web"],
+      role: "creator",
+      source: "fallback",
+      rawInput: "claude_web:claude-sonnet-4-20250514",
+    },
   };
   return defaults[target] || defaults.local;
 }
