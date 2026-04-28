@@ -1583,6 +1583,281 @@ const action = await getAction(actionId);
     }
   });
 
+  // MARKETPLACE
+  bot.command("market_search", async (ctx) => {
+    try {
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const query = args.join(" ");
+      
+      if (!query) {
+        await ctx.reply("Usage: /market_search <query>\nExample: /market_search iPhone");
+        return;
+      }
+      
+      const { searchListings, formatListingList } = await import("../providers/creator/marketplace.js");
+      const results = await searchListings(query, 10);
+      await ctx.reply(formatListingList(results));
+    } catch (e: any) {
+      console.error("[market] /market_search failed", e?.message || e);
+    }
+  });
+
+  bot.command("market_category", async (ctx) => {
+    try {
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const category = args[0];
+      
+      if (!category) {
+        const { getCategories } = await import("../providers/creator/marketplace.js");
+        await ctx.reply("Categories: " + getCategories().join(", "));
+        return;
+      }
+      
+      const { loadListings, formatListingList } = await import("../providers/creator/marketplace.js");
+      const results = await loadListings({ category }, 10);
+      await ctx.reply(formatListingList(results));
+    } catch (e: any) {
+      console.error("[market] /market_category failed", e?.message || e);
+    }
+  });
+
+  bot.command("market_view", async (ctx) => {
+    try {
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const listingId = args[0];
+      
+      if (!listingId) {
+        await ctx.reply("Usage: /market_view <listing_id>");
+        return;
+      }
+      
+      const { getListing, formatListing, loadReviews, formatReview } = await import("../providers/creator/marketplace.js");
+      const listing = await getListing(listingId);
+      
+      if (!listing) {
+        await ctx.reply("Listing not found");
+        return;
+      }
+      
+      const reviews = await loadReviews(listingId, false);
+      let response = formatListing(listing);
+      
+      if (reviews.length > 0) {
+        response += "\n\n� Reviews:\n" + reviews.slice(0, 3).map(r => formatReview(r, false)).join("\n\n");
+      }
+      
+      await ctx.reply(response);
+    } catch (e: any) {
+      console.error("[market] /market_view failed", e?.message || e);
+    }
+  });
+
+  bot.command("market_create", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      
+      const sepIdx = args.indexOf("|");
+      if (sepIdx === -1 || args.length < 3) {
+        await ctx.reply("Usage: /market_create <type> <price> | <title> | <description>\nExample: /market_create product 500000 | iPhone 15 | Good phone");
+        return;
+      }
+      
+      const type = args[0] as "product" | "service";
+      const price = parseInt(args[1]);
+      if (isNaN(price)) {
+        await ctx.reply("Invalid price");
+        return;
+      }
+      
+      const title = args.slice(2, sepIdx).join(" ");
+      const description = args.slice(sepIdx + 1).join(" ");
+      
+      const { createListing, formatListing } = await import("../providers/creator/marketplace.js");
+      const listing = await createListing(userId, type, title, description, price, "other", []);
+      
+      await ctx.reply(`📝 Listing created (pending review):\n\n${formatListing(listing)}`);
+    } catch (e: any) {
+      console.error("[market] /market_create failed", e?.message || e);
+    }
+  });
+
+  bot.command("review", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const listingId = args[0];
+      const rating = parseInt(args[1]);
+      const text = args.slice(2).join(" ");
+      
+      if (!listingId || isNaN(rating) || rating < 1 || rating > 5) {
+        await ctx.reply("Usage: /review <listing_id> <1-5> <text>\nExample: /review lst_12345 5 Great product!");
+        return;
+      }
+      
+      const { addReview, getListing } = await import("../providers/creator/marketplace.js");
+      const listing = await getListing(listingId);
+      
+      if (!listing) {
+        await ctx.reply("Listing not found");
+        return;
+      }
+      
+      const review = await addReview(listingId, userId, rating, text);
+      
+      if (!review) {
+        await ctx.reply("Failed to add review");
+        return;
+      }
+      
+      const visibility = review.is_public ? "Public" : "Private (1-3 star)";
+      await ctx.reply(`✅ Review added!\nRating: ${rating}⭐\nVisibility: ${visibility}`);
+    } catch (e: any) {
+      console.error("[market] /review failed", e?.message || e);
+    }
+  });
+
+  bot.command("order_create", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const listingId = args[0];
+      
+      if (!listingId) {
+        await ctx.reply("Usage: /order_create <listing_id>");
+        return;
+      }
+      
+      const { createOrder, formatOrder } = await import("../providers/creator/marketplace.js");
+      const order = await createOrder(listingId, userId);
+      
+      if (!order) {
+        await ctx.reply("Cannot create order. Listing may not exist or be inactive, or you are the owner.");
+        return;
+      }
+      
+      await ctx.reply(`📋 Order created:\n\n${formatOrder(order)}\n\nSeller will be notified.`);
+    } catch (e: any) {
+      console.error("[market] /order_create failed", e?.message || e);
+    }
+  });
+
+  bot.command("order_status", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const orderId = args[0];
+      
+      if (!orderId) {
+        const { loadOrders, formatOrderList } = await import("../providers/creator/marketplace.js");
+        const orders = await loadOrders(userId);
+        await ctx.reply(formatOrderList(orders));
+        return;
+      }
+      
+      const { loadOrders, formatOrder } = await import("../providers/creator/marketplace.js");
+      const orders = await loadOrders(userId);
+      const order = orders.find(o => o.order_id === orderId);
+      
+      if (!order) {
+        await ctx.reply("Order not found");
+        return;
+      }
+      
+      await ctx.reply(formatOrder(order));
+    } catch (e: any) {
+      console.error("[market] /order_status failed", e?.message || e);
+    }
+  });
+
+  bot.command("order_accept", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const orderId = args[0];
+      
+      if (!orderId) {
+        await ctx.reply("Usage: /order_accept <order_id>");
+        return;
+      }
+      
+      const { updateOrderStatus, loadOrders, formatOrder } = await import("../providers/creator/marketplace.js");
+      const success = await updateOrderStatus(orderId, "accepted", userId);
+      
+      if (success) {
+        const orders = await loadOrders(userId);
+        const order = orders.find(o => o.order_id === orderId);
+        await ctx.reply(`✅ Order accepted!\n\n${formatOrder(order!)}`);
+      } else {
+        await ctx.reply("Cannot accept order. Check ownership and status.");
+      }
+    } catch (e: any) {
+      console.error("[market] /order_accept failed", e?.message || e);
+    }
+  });
+
+  bot.command("order_complete", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const orderId = args[0];
+      
+      if (!orderId) {
+        await ctx.reply("Usage: /order_complete <order_id>");
+        return;
+      }
+      
+      const { updateOrderStatus, loadOrders, formatOrder } = await import("../providers/creator/marketplace.js");
+      const success = await updateOrderStatus(orderId, "completed", userId);
+      
+      if (success) {
+        const orders = await loadOrders(userId);
+        const order = orders.find(o => o.order_id === orderId);
+        await ctx.reply(`🎉 Order completed!\n\n${formatOrder(order!)}`);
+      } else {
+        await ctx.reply("Cannot complete order. Check your role and status.");
+      }
+    } catch (e: any) {
+      console.error("[market] /order_complete failed", e?.message || e);
+    }
+  });
+
+  bot.command("order_chat", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const orderId = args[0];
+      const message = args.slice(1).join(" ");
+      
+      if (!orderId) {
+        const { loadOrders, loadDealMessages, formatDealChat } = await import("../providers/creator/marketplace.js");
+        const orders = await loadOrders(userId);
+        if (orders.length === 0) {
+          await ctx.reply("No active orders");
+          return;
+        }
+        const firstOrder = orders[0];
+        const msgs = await loadDealMessages(firstOrder.order_id);
+        await ctx.reply(`Chat for ${firstOrder.order_id}:\n\n${formatDealChat(msgs, userId)}`);
+        return;
+      }
+      
+      if (!message) {
+        const { loadDealMessages, formatDealChat } = await import("../providers/creator/marketplace.js");
+        const msgs = await loadDealMessages(orderId);
+        await ctx.reply(formatDealChat(msgs, userId));
+        return;
+      }
+      
+      const { sendDealMessage, formatDealChat, loadDealMessages } = await import("../providers/creator/marketplace.js");
+      await sendDealMessage(orderId, userId, message);
+      const msgs = await loadDealMessages(orderId);
+      await ctx.reply(formatDealChat(msgs, userId));
+    } catch (e: any) {
+      console.error("[market] /order_chat failed", e?.message || e);
+    }
+  });
+
   bot.action("menu:chat", async (ctx) => {
     try {
       console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "menu:chat" });
