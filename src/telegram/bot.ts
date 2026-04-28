@@ -1858,6 +1858,140 @@ const action = await getAction(actionId);
     }
   });
 
+  // WALLET - Payments
+  bot.command("wallet", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const { getOrCreateWallet, formatWallet } = await import("../providers/creator/wallet.js");
+      
+      const wallet = await getOrCreateWallet(userId);
+      await ctx.reply(formatWallet(wallet));
+    } catch (e: any) {
+      console.error("[wallet] /wallet failed", e?.message || e);
+    }
+  });
+
+  bot.command("wallet_history", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const { loadTransactions, formatTransactionList } = await import("../providers/creator/wallet.js");
+      
+      const txs = await loadTransactions(userId, 15);
+      await ctx.reply(formatTransactionList(txs));
+    } catch (e: any) {
+      console.error("[wallet] /wallet_history failed", e?.message || e);
+    }
+  });
+
+  bot.command("pay", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const orderId = args[0];
+      
+      if (!orderId) {
+        await ctx.reply("Usage: /pay <order_id>\nHold funds for the order");
+        return;
+      }
+      
+      const { loadOrders } = await import("../providers/creator/marketplace.js");
+      const { getOrCreateWallet, holdFunds, formatWallet } = await import("../providers/creator/wallet.js");
+      
+      const orders = await loadOrders(userId, "buyer");
+      const order = orders.find(o => o.order_id === orderId);
+      
+      if (!order) {
+        await ctx.reply("Order not found or you're not the buyer");
+        return;
+      }
+      
+      if (order.status !== "accepted") {
+        await ctx.reply(`Order status is ${order.status}. Must be accepted first.`);
+        return;
+      }
+      
+      const wallet = await getOrCreateWallet(userId);
+      const result = await holdFunds(userId, order.price, orderId);
+      
+      if (!result.success) {
+        await ctx.reply(`❌ Payment failed: ${result.reason}\n\n${formatWallet(wallet)}`);
+        return;
+      }
+      
+      await ctx.reply(`✅ Payment held!\n\nAmount: ${order.price} ${order.currency}\nOrder: ${orderId}\n\nFunds locked until delivery.`);
+    } catch (e: any) {
+      console.error("[wallet] /pay failed", e?.message || e);
+    }
+  });
+
+  bot.command("refund", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const orderId = args[0];
+      
+      if (!orderId) {
+        await ctx.reply("Usage: /refund <order_id>");
+        return;
+      }
+      
+      if (role !== "owner") {
+        await ctx.reply("Owner only for refunds");
+        return;
+      }
+      
+      const { loadOrders } = await import("../providers/creator/marketplace.js");
+      const { refundToBuyer } = await import("../providers/creator/wallet.js");
+      
+      const orders = await loadOrders(userId);
+      const order = orders.find(o => o.order_id === orderId);
+      
+      if (!order) {
+        await ctx.reply("Order not found");
+        return;
+      }
+      
+      const success = await refundToBuyer(order.buyer_id, order.price, orderId);
+      
+      if (success) {
+        await ctx.reply(`✅ Refunded ${order.price} ${order.currency} to buyer`);
+      } else {
+        await ctx.reply("Refund failed");
+      }
+    } catch (e: any) {
+      console.error("[wallet] /refund failed", e?.message || e);
+    }
+  });
+
+  bot.command("add_teleton", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const amount = parseInt(args[0]);
+      const targetUserId = args[1] || userId;
+      
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      
+      if (isNaN(amount) || amount <= 0) {
+        await ctx.reply("Usage: /add_teleton <amount> [user_id]");
+        return;
+      }
+      
+      const { purchaseTeleton, getOrCreateWallet, formatWallet } = await import("../providers/creator/wallet.js");
+      await purchaseTeleton(targetUserId, amount, "admin");
+      
+      const wallet = await getOrCreateWallet(targetUserId);
+      await ctx.reply(`✅ Added ${amount} TN to user ${targetUserId}\n\n${formatWallet(wallet)}`);
+    } catch (e: any) {
+      console.error("[wallet] /add_teleton failed", e?.message || e);
+    }
+  });
+
   bot.action("menu:chat", async (ctx) => {
     try {
       console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "menu:chat" });
