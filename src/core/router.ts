@@ -208,6 +208,39 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       return base;
     }
     
+    // Use multi-agent execution if requested or message is complex
+    const useMultiAgent = (req as any).multi_agent_mode === true || req.meta?.multi_agent_mode === true;
+    const useDebate = (req as any).debate_mode === true || req.meta?.debate_mode === true;
+    
+    if (useMultiAgent || useDebate) {
+      console.log("[router] multi-agent execution:", { useMultiAgent, useDebate });
+      
+      try {
+        const { smartExecute } = await import("../providers/creator/multi-agent.js");
+        const multiResult = await smartExecute(req.message, {
+          forceMode: useDebate ? "debate" : "multi",
+        });
+        
+        provider = "openai" as any;
+        base = {
+          id: request_id,
+          model: rawModel,
+          output: multiResult.text,
+          meta: {
+            provider: "multi_agent" as any,
+            model: "multi-agent",
+            agents: multiResult.meta.agents.length,
+            execution_mode: multiResult.meta.mode,
+          },
+          request_id,
+          latency_ms: Date.now() - t0,
+        };
+        return base;
+      } catch (e: any) {
+        console.error("[router] multi-agent failed:", e?.message);
+      }
+    }
+    
     try {
       const { getSessionBridge } = await import("../providers/creator/session/session-bridge.js");
       const sessionBridge = getSessionBridge({ fallbackToApi: false });

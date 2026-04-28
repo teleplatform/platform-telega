@@ -18,7 +18,7 @@ export type ChatUsage = {
 };
 
 export type ChatMeta = {
-  provider?: "local" | "openai" | "persona" | "deepseek" | "qwen" | "creator" | "openai_web" | "qwen_web" | "deepseek_web" | "grok_web" | "kimi_web" | "chatgpt_web" | "openai_api" | "qwen_api" | "deepseek_api" | "openrouter_kimi";
+  provider?: "local" | "openai" | "persona" | "deepseek" | "qwen" | "creator" | "openai_web" | "qwen_web" | "deepseek_web" | "grok_web" | "kimi_web" | "chatgpt_web" | "openai_api" | "qwen_api" | "deepseek_api" | "openrouter_kimi" | "multi_agent";
   model?: string;
   usage?: ChatUsage;
   fallback_used?: boolean;
@@ -28,6 +28,8 @@ export type ChatMeta = {
   intendedPath?: "bridge" | "api";
   actualPath?: "bridge" | "api";
   candidateProviders?: string[];
+  agents?: number;
+  execution_mode?: "single" | "multi" | "debate";
 };
 
 export type ChatResponse = {
