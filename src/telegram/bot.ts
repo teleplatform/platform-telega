@@ -464,8 +464,10 @@ export async function startPantheonTelegramBot() {
   bot.command("jobs", async (ctx) => {
     try {
       const userId = String(userIdOf(ctx));
-      const { listJobs, formatJobStatus } = await import("../providers/creator/job-runtime.js");
-      const jobs = listJobs(userId, 5);
+      const role = getTelegramRole(userId);
+      const { listJobs, listAllJobs, formatJobStatus } = await import("../providers/creator/job-runtime.js");
+      
+      const jobs = role === "owner" ? listAllJobs(10) : listJobs(userId, 5);
       if (jobs.length === 0) {
         await ctx.reply("No jobs");
         return;
@@ -527,6 +529,33 @@ export async function startPantheonTelegramBot() {
       await ctx.reply(success ? `✅ Job ${jobId} cancelled` : `❌ Failed to cancel`);
     } catch (e: any) {
       console.error("[creator-control] /cancel_job failed", e?.message || e);
+    }
+  });
+
+  bot.command("job_evidence", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const jobId = args[0];
+      if (!jobId) {
+        await ctx.reply("Usage: /job_evidence <job_id>");
+        return;
+      }
+      const { getJob, getJobEvidence } = await import("../providers/creator/job-runtime.js");
+      const job = getJob(jobId);
+      if (!job) {
+        await ctx.reply("Job not found");
+        return;
+      }
+      if (job.user_id !== userId && role !== "owner") {
+        await ctx.reply("Not your job");
+        return;
+      }
+      const evidence = getJobEvidence(jobId);
+      await ctx.reply(`📋 Job Evidence:\n\`\`\`\n${JSON.stringify(evidence, null, 2)}\n\`\`\``);
+    } catch (e: any) {
+      console.error("[creator-control] /job_evidence failed", e?.message || e);
     }
   });
 

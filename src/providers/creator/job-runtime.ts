@@ -35,6 +35,8 @@ export interface Job {
   };
 }
 
+const MAX_JOBS_IN_MEMORY = 500;
+
 async function ensureDir(): Promise<void> {
   try {
     await fs.mkdir(JOBS_DIR, { recursive: true });
@@ -77,9 +79,12 @@ class JobRegistry {
 
   async init(): Promise<void> {
     const loaded = await loadJobsFromFile();
-    for (const job of loaded) {
-      if (job.status === "queued" || job.status === "running") {
-        job.status = "failed";
+    const sorted = loaded.sort((a, b) => b.created_at - a.created_at);
+    const recent = sorted.slice(0, MAX_JOBS_IN_MEMORY);
+    
+    for (const job of recent) {
+      if (job.status === "queued" || job.status === "running" || job.status === "waiting_provider") {
+        job.status = "queued";
         job.error_code = "job_pending_on_restart";
       }
       this.jobs.set(job.job_id, job);
@@ -121,6 +126,12 @@ class JobRegistry {
       .filter(j => j.user_id === userId)
       .sort((a, b) => b.created_at - a.created_at);
     return userJobs.slice(0, limit);
+  }
+
+  listAll(limit = 50): Job[] {
+    return Array.from(this.jobs.values())
+      .sort((a, b) => b.created_at - a.created_at)
+      .slice(0, limit);
   }
 
   updateStatus(jobId: string, status: JobStatus, extra?: Partial<Job>): void {
@@ -273,6 +284,29 @@ export function getJob(jobId: string): Job | undefined {
 
 export function listJobs(userId: string, limit?: number): Job[] {
   return jobRegistry.listByUser(userId, limit);
+}
+
+export function listAllJobs(limit = 50): Job[] {
+  return jobRegistry.listAll(limit);
+}
+
+export function getJobEvidence(jobId: string): Record<string, unknown> | undefined {
+  const job = jobRegistry.get(jobId);
+  if (!job) return undefined;
+  return {
+    job_id: job.job_id,
+    user_id: job.user_id,
+    mode: job.mode,
+    status: job.status,
+    created_at: job.created_at,
+    started_at: job.started_at,
+    completed_at: job.completed_at,
+    provider_chain: job.provider_chain,
+    progress: job.progress,
+    error_code: job.error_code,
+    evidence_refs: job.evidence_refs,
+    result_length: job.result_text?.length || 0,
+  };
 }
 
 export function cancelJob(jobId: string, userId: string): boolean {
