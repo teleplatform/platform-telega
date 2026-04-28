@@ -149,6 +149,14 @@ function toFallbackProvider(target: ProviderId): ResolvedProviderConfig {
       source: "fallback",
       rawInput: "claude_web:claude-sonnet-4-20250514",
     },
+    gemini_web: {
+      provider: "gemini_web",
+      model: "gemini-2.0-flash",
+      fallbackTo: ["chatgpt_web", "qwen_web"],
+      role: "creator",
+      source: "fallback",
+      rawInput: "gemini_web:gemini-2.0-flash",
+    },
   };
   return defaults[target] || defaults.local;
 }

@@ -11,6 +11,7 @@ export type ProviderId =
   | "kimi_web"
   | "perplexity_web"
   | "claude_web"
+  | "gemini_web"
   | "openai_api"
   | "qwen_api"
   | "deepseek_api"

@@ -85,6 +85,13 @@ export const PROVIDER_INTELLIGENCE: Record<string, ProviderIntelligence> = {
     fallbackChain: ["kimi_web", "qwen_web", "chatgpt_web"],
     timeoutMs: 120000,
   },
+  gemini_web: {
+    provider: "gemini_web",
+    confidence: 0.8,
+    bestFor: ["vision", "multimodal", "google", "visual", "image", "картинка", "изображение", "визуал", "гугл"],
+    fallbackChain: ["gemini_web", "chatgpt_web", "qwen_web"],
+    timeoutMs: 120000,
+  },
 };
 
 export function selectProviderByIntent(message: string): SessionProviderId {
@@ -92,6 +99,10 @@ export function selectProviderByIntent(message: string): SessionProviderId {
   
   if (m.includes("latest") || m.includes("news") || m.includes("source") || m.includes("find current") || m.includes("research") || m.includes("verify") || m.includes("сейчас") || m.includes("новост") || m.includes("источник") || m.includes("найди") || m.includes("проверь")) {
     return "perplexity_web";
+  }
+  
+  if (m.includes("image") || m.includes("vision") || m.includes("visual") || m.includes("google") || m.includes("multimodal") || m.includes("картинка") || m.includes("изображение") || m.includes("визуал") || m.includes("гугл") || m.includes("анализ картинку")) {
+    return "gemini_web";
   }
   
   if (m.includes("write") || m.includes("rewrite") || m.includes("edit") || m.includes("summarize") || m.includes("document") || m.includes("текст") || m.includes("перепиши") || m.includes("резюме") || m.includes("анализ")) {

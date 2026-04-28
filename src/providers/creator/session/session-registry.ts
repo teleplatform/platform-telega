@@ -1,4 +1,4 @@
-export type BridgeProviderId = "chatgpt_web" | "qwen_web" | "deepseek_web" | "grok_web" | "kimi_web" | "perplexity_web" | "claude_web";
+export type BridgeProviderId = "chatgpt_web" | "qwen_web" | "deepseek_web" | "grok_web" | "kimi_web" | "perplexity_web" | "claude_web" | "gemini_web";
 
 export type SessionProviderId = BridgeProviderId;
 
@@ -57,7 +57,7 @@ class InMemorySessionRegistry implements SessionRegistry {
   private sessions = new Map<SessionProviderId, CreatorSessionEntry>();
 
   constructor() {
-    const providers: SessionProviderId[] = ["chatgpt_web", "qwen_web", "deepseek_web", "grok_web", "kimi_web", "perplexity_web", "claude_web"];
+    const providers: SessionProviderId[] = ["chatgpt_web", "qwen_web", "deepseek_web", "grok_web", "kimi_web", "perplexity_web", "claude_web", "gemini_web"];
     for (const id of providers) {
       this.sessions.set(id, createEntry(id));
     }
