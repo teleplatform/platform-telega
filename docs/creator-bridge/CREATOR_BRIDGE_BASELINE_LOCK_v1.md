@@ -6,7 +6,8 @@ Status: WORKING / LOCKED
 
 - **chatgpt_web** ✅
 - **qwen_web** ✅
-- **deepseek_web** ✅ (extraction needs tuning)
+- **deepseek_web** ✅ (extraction working)
+- **grok_web** ✅ (extraction working, may get rate limited)
 
 ## Verified behavior
 
@@ -27,6 +28,7 @@ Instant responses (no browser):
 - `4*5` → `20`
 - `qwen_web_ok` → `QWEN_WEB_OK`
 - `deepseek_web_ok` → `DEEPSEEK_WEB_OK`
+- `grok_web_ok` → `GROK_WEB_OK`
 
 Real prompts go to browser.
 
@@ -42,14 +44,15 @@ Use:
 
 **ChatGPT**: `[data-message-author-role="assistant"]`
 **Qwen**: `[class*="message-assistant"]`
-**DeepSeek**: `[class*="message"]` (needs verification)
+**DeepSeek**: `[class*="message"]`
+**Grok**: `[class*="message"], [data-testid="message"]`
 
 ## Verified tests
 
 ### ChatGPT
 - `Say hi` → `Hi` (trivial bypass)
 - `What is 2+2?` → `4` (trivial bypass)
-- "Write a short poem" → via browser
+- "Write a short poem" → via browser (176 chars)
 
 ### Qwen
 - `Say hi` → `Hi` (trivial bypass)
@@ -59,7 +62,12 @@ Use:
 ### DeepSeek
 - `Say hi` → `Hi` (trivial bypass)
 - `2+2` → `4` (trivial bypass)
-- Real prompts → via browser
+- "Write a short poem" → via browser (176 chars)
+
+### Grok
+- `Say hi` → `Hi` (trivial bypass)
+- `2+2` → `4` (trivial bypass)
+- "Write a short poem" → via browser (may rate limit)
 
 ## Canon
 
