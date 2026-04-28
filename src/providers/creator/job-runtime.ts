@@ -1,5 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
+import { checkUserJobLimit, checkGlobalLimit, checkProviderLoad, acquireProviderSlot, releaseProviderSlot, incrementUserJob, decrementUserJob, getPriorityClass } from "./governor.js";
 
 const JOBS_DIR = path.join(process.cwd(), "data", "creator-bridge");
 const JOBS_FILE = path.join(JOBS_DIR, "jobs.jsonl");
@@ -93,7 +94,28 @@ class JobRegistry {
     this.processQueue();
   }
 
-  create(userId: string, chatId: number | undefined, message: string, mode: Job["mode"], providerChain: string[], strategy?: Job["strategy"]): Job {
+  create(userId: string, chatId: number | undefined, message: string, mode: Job["mode"], providerChain: string[], strategy?: Job["strategy"]): { job?: Job; rejected?: { reason: string } } {
+    const priority = getPriorityClass(userId, "user");
+    const userCheck = checkUserJobLimit(userId);
+    if (!userCheck.allowed) {
+      console.log("[job-runtime] rejected:", userCheck.reason);
+      return { rejected: { reason: userCheck.reason || "user_limit" } };
+    }
+    
+    const globalCheck = checkGlobalLimit();
+    if (!globalCheck.allowed) {
+      console.log("[job-runtime] rejected:", globalCheck.reason);
+      return { rejected: { reason: globalCheck.reason || "global_limit" } };
+    }
+    
+    for (const provider of providerChain) {
+      const provCheck = checkProviderLoad(provider);
+      if (!provCheck.allowed) {
+        console.log("[job-runtime] rejected:", provCheck.reason);
+        return { rejected: { reason: provCheck.reason || "provider_busy" } };
+      }
+    }
+    
     const jobId = `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const job: Job = {
       job_id: jobId,
@@ -111,10 +133,11 @@ class JobRegistry {
     
     this.jobs.set(jobId, job);
     this.queue.push(jobId);
+    incrementUserJob(userId, false);
     appendJobToFile(job);
     this.processQueue();
     
-    return job;
+    return { job };
   }
 
   get(jobId: string): Job | undefined {
@@ -177,9 +200,17 @@ class JobRegistry {
   }
 
   private async executeJob(job: Job): Promise<void> {
-    console.log("[job-runtime] executing job:", job.job_id, job.mode);
+    const { acquireProviderSlot, releaseProviderSlot, decrementUserJob, incrementUserJob } = await import("./governor.js");
+    
+    let executionError: string | null = null;
     
     try {
+      console.log("[job-runtime] executing job:", job.job_id, job.mode);
+      
+      decrementUserJob(job.user_id, false);
+      incrementUserJob(job.user_id, true);
+      acquireProviderSlot(job.mode === "single" ? job.provider_chain[0] : job.provider_chain[0] || "qwen_web");
+      
       const { executeStrategy } = await import("./strategy-engine.js");
       
       if (!job.strategy) {
@@ -207,12 +238,18 @@ class JobRegistry {
         evidence_refs: [job.job_id],
       });
       
-    } catch (e: any) {
-      if (e.message?.includes("timeout")) {
+    } catch (err: any) {
+      executionError = err?.message || "execution_error";
+      if (executionError?.includes("timeout")) {
         this.updateStatus(job.job_id, "timeout", { error_code: "timeout" });
       } else {
-        this.updateStatus(job.job_id, "failed", { error_code: e?.message || "execution_error" });
+        this.updateStatus(job.job_id, "failed", { error_code: executionError || undefined });
       }
+    } finally {
+      const provider = job.provider_chain[0] || "qwen_web";
+      releaseProviderSlot(provider, undefined, executionError || undefined);
+      decrementUserJob(job.user_id, true);
+      incrementUserJob(job.user_id, false);
     }
   }
 
@@ -274,7 +311,7 @@ export function createJob(
   mode: Job["mode"],
   providerChain: string[],
   strategy?: Job["strategy"]
-): Job {
+): { job?: Job; rejected?: { reason: string } } {
   return jobRegistry.create(userId, chatId, message, mode, providerChain, strategy);
 }
 

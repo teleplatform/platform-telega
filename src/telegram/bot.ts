@@ -532,6 +532,34 @@ export async function startPantheonTelegramBot() {
     }
   });
 
+  bot.command("bridge_load", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const { formatGovernorState } = await import("../providers/creator/governor.js");
+      await ctx.reply(formatGovernorState());
+    } catch (e: any) {
+      console.error("[creator-control] /bridge_load failed", e?.message || e);
+    }
+  });
+
+  bot.command("provider_cooldowns", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const { formatGovernorState } = await import("../providers/creator/governor.js");
+      await ctx.reply(formatGovernorState());
+    } catch (e: any) {
+      console.error("[creator-control] /provider_cooldowns failed", e?.message || e);
+    }
+  });
+
   bot.command("job_evidence", async (ctx) => {
     try {
       const userId = String(userIdOf(ctx));
