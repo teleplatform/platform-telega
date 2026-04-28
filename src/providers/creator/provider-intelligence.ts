@@ -92,6 +92,13 @@ export const PROVIDER_INTELLIGENCE: Record<string, ProviderIntelligence> = {
     fallbackChain: ["gemini_web", "chatgpt_web", "qwen_web"],
     timeoutMs: 120000,
   },
+  poe_web: {
+    provider: "poe_web",
+    confidence: 0.7,
+    bestFor: ["aggregate", "aggregator", "compare models", "model comparison", "несколько моделей", "сравни модели", "агрегатор", "poe"],
+    fallbackChain: ["poe_web", "chatgpt_web", "qwen_web"],
+    timeoutMs: 120000,
+  },
 };
 
 export function selectProviderByIntent(message: string): SessionProviderId {
@@ -103,6 +110,10 @@ export function selectProviderByIntent(message: string): SessionProviderId {
   
   if (m.includes("image") || m.includes("vision") || m.includes("visual") || m.includes("google") || m.includes("multimodal") || m.includes("картинка") || m.includes("изображение") || m.includes("визуал") || m.includes("гугл") || m.includes("анализ картинку")) {
     return "gemini_web";
+  }
+  
+  if (m.includes("poe") || m.includes("aggregate") || m.includes("aggregator") || m.includes("compare model") || m.includes("model comparison") || m.includes("несколько моделей") || m.includes("сравни модели") || m.includes("агрегатор")) {
+    return "poe_web";
   }
   
   if (m.includes("write") || m.includes("rewrite") || m.includes("edit") || m.includes("summarize") || m.includes("document") || m.includes("текст") || m.includes("перепиши") || m.includes("резюме") || m.includes("анализ")) {

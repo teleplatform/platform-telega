@@ -12,6 +12,7 @@ export type ProviderId =
   | "perplexity_web"
   | "claude_web"
   | "gemini_web"
+  | "poe_web"
   | "openai_api"
   | "qwen_api"
   | "deepseek_api"

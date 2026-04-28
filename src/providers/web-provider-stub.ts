@@ -1,4 +1,4 @@
-export type WebProvider = 'chatgpt_web' | 'qwen_web' | 'deepseek_web' | 'grok_web' | 'kimi_web' | 'perplexity_web' | 'claude_web' | 'gemini_web';
+export type WebProvider = 'chatgpt_web' | 'qwen_web' | 'deepseek_web' | 'grok_web' | 'kimi_web' | 'perplexity_web' | 'claude_web' | 'gemini_web' | 'poe_web';
 export type WebTransport = 'cdp';
 
 export interface WebExecuteInput {

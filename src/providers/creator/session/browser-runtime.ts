@@ -81,6 +81,7 @@ const providerProfilePaths: Record<SessionProviderId, string> = {
   perplexity_web: getCreatorProfileDir("perplexity_web"),
   claude_web: getCreatorProfileDir("claude_web"),
   gemini_web: getCreatorProfileDir("gemini_web"),
+  poe_web: getCreatorProfileDir("poe_web"),
 };
 
 class ManagedBrowser {

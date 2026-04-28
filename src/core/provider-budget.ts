@@ -86,6 +86,7 @@ export function filterByBudget(
       perplexity_web: "premium",
       claude_web: "premium",
       gemini_web: "premium",
+      poe_web: "premium",
       openai_api: "premium",
       qwen_api: "cheap",
       deepseek_api: "cheap",

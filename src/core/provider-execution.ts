@@ -157,6 +157,14 @@ function toFallbackProvider(target: ProviderId): ResolvedProviderConfig {
       source: "fallback",
       rawInput: "gemini_web:gemini-2.0-flash",
     },
+    poe_web: {
+      provider: "poe_web",
+      model: "sage",
+      fallbackTo: ["chatgpt_web", "qwen_web"],
+      role: "creator",
+      source: "fallback",
+      rawInput: "poe_web:sage",
+    },
   };
   return defaults[target] || defaults.local;
 }

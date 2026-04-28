@@ -12,6 +12,7 @@ const KIMI_WEB_URL = "https://kimi.moonshot.cn";
 const PERPLEXITY_WEB_URL = "https://www.perplexity.ai";
 const CLAUDE_WEB_URL = "https://claude.ai";
 const GEMINI_WEB_URL = "https://gemini.google.com";
+const POE_WEB_URL = "https://poe.com";
 
 export class OpenAIWebAdapter implements WebAdapter {
   readonly providerId: SessionProviderId = "chatgpt_web";
@@ -488,6 +489,69 @@ export class GeminiWebAdapter implements WebAdapter {
   }
 }
 
+export class PoeWebAdapter implements WebAdapter {
+  readonly providerId: SessionProviderId = "poe_web";
+  readonly loginUrl = POE_WEB_URL;
+  readonly inputSelector = 'textarea, div[contenteditable="true"], [role="textbox"], [data-testid*="chat-input"], [data-testid*="composer"]';
+  readonly submitSelector = 'button[type="submit"], button:has-text("Send"), button:has-text("Отправить")';
+  readonly outputSelector = '[data-testid*="message"], [class*="Message"], [class*="markdown"], [class*="ChatMessage"], [role="article"]';
+  readonly loadingSelector = '[data-testid*="loading"], [class*="loading"], [aria-busy="true"]';
+  readonly maxRetries = 3;
+
+  async navigate(page: Page): Promise<void> {
+    await page.goto(this.loginUrl);
+  }
+
+  async fillPrompt(page: Page, prompt: string): Promise<void> {
+    const textarea = page.locator(this.inputSelector);
+    await textarea.fill(prompt);
+  }
+
+  async submit(page: Page): Promise<void> {
+    const button = page.locator(this.submitSelector);
+    await button.click();
+  }
+
+  async waitForResponse(page: Page): Promise<string> {
+    const loading = page.locator(this.loadingSelector);
+    
+    try {
+      await loading.waitFor({ state: "visible", timeout: 5000 });
+    } catch {
+    }
+    
+    await loading.waitFor({ state: "hidden", timeout: 25000 });
+    
+    const outputs = page.locator(this.outputSelector);
+    const count = await outputs.count();
+    
+    if (count === 0) {
+      throw new Error("No response found");
+    }
+    
+    const lastOutput = outputs.nth(count - 1);
+    const text = await lastOutput.textContent();
+    
+    return text || "";
+  }
+
+  async isLoggedIn(page: Page): Promise<boolean> {
+    const url = page.url();
+    
+    if (url.includes("/login") || url.includes("/auth")) {
+      return false;
+    }
+    
+    try {
+      const input = page.locator(this.inputSelector);
+      await input.waitFor({ state: "visible", timeout: 3000 });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 export function getWebAdapter(providerId: SessionProviderId): WebAdapter {
   switch (providerId) {
     case "chatgpt_web":
@@ -520,6 +584,8 @@ export function getWebAdapter(providerId: SessionProviderId): WebAdapter {
       return new ClaudeWebAdapter();
     case "gemini_web":
       return new GeminiWebAdapter();
+    case "poe_web":
+      return new PoeWebAdapter();
     default:
       throw new Error(`Creator Bridge provider ${providerId} is not implemented yet.`);
   }
