@@ -71,7 +71,9 @@ function getTelegramRole(userId: string | number | undefined): TelegramRole {
 
 export async function startPantheonTelegramBot() {
   const { initEvidenceStore } = await import("../providers/creator/evidence-store.js");
+  const { initJobRegistry } = await import("../providers/creator/job-runtime.js");
   await initEvidenceStore();
+  await initJobRegistry();
   
   console.log("[pantheon-tg] boot check", {
     polling: process.env.PANTHEON_TG_POLLING,
@@ -456,6 +458,75 @@ export async function startPantheonTelegramBot() {
       await ctx.reply(`📋 Evidence:\n\`\`\`\n${JSON.stringify(evidence, null, 2)}\n\`\`\``);
     } catch (e: any) {
       console.error("[creator-control] /bridge_strategy_verbose failed", e?.message || e);
+    }
+  });
+
+  bot.command("jobs", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const { listJobs, formatJobStatus } = await import("../providers/creator/job-runtime.js");
+      const jobs = listJobs(userId, 5);
+      if (jobs.length === 0) {
+        await ctx.reply("No jobs");
+        return;
+      }
+      for (const job of jobs) {
+        await ctx.reply(formatJobStatus(job));
+      }
+    } catch (e: any) {
+      console.error("[creator-control] /jobs failed", e?.message || e);
+    }
+  });
+
+  bot.command("job_status", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const jobId = args[0];
+      if (!jobId) {
+        await ctx.reply("Usage: /job_status <job_id>");
+        return;
+      }
+      const { getJob, formatJobStatus } = await import("../providers/creator/job-runtime.js");
+      const job = getJob(jobId);
+      if (!job) {
+        await ctx.reply("Job not found");
+        return;
+      }
+      if (job.user_id !== userId && getTelegramRole(userId) !== "owner") {
+        await ctx.reply("Not your job");
+        return;
+      }
+      await ctx.reply(formatJobStatus(job));
+    } catch (e: any) {
+      console.error("[creator-control] /job_status failed", e?.message || e);
+    }
+  });
+
+  bot.command("cancel_job", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const jobId = args[0];
+      if (!jobId) {
+        await ctx.reply("Usage: /cancel_job <job_id>");
+        return;
+      }
+      const { getJob, cancelJob } = await import("../providers/creator/job-runtime.js");
+      const job = getJob(jobId);
+      if (!job) {
+        await ctx.reply("Job not found");
+        return;
+      }
+      if (job.user_id !== userId && role !== "owner") {
+        await ctx.reply("Not your job");
+        return;
+      }
+      const success = cancelJob(jobId, userId);
+      await ctx.reply(success ? `✅ Job ${jobId} cancelled` : `❌ Failed to cancel`);
+    } catch (e: any) {
+      console.error("[creator-control] /cancel_job failed", e?.message || e);
     }
   });
 
