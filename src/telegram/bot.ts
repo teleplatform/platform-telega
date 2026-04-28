@@ -1404,6 +1404,185 @@ const action = await getAction(actionId);
     }
   });
 
+  // ATLAS - Growth & Distribution
+  bot.command("atlas_promote", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const actionId = args[0];
+      const channel = args[1] as any || "telegram_channel";
+      const name = args.slice(2).join(" ") || "Promotion Campaign";
+      
+      if (!actionId) {
+        await ctx.reply("Usage: /atlas_promote <action_id> [channel] [name]\nChannels: telegram_channel, internal_feed, ad_slot");
+        return;
+      }
+      
+      const { getAction } = await import("../providers/creator/action-queue.js");
+      const action = await getAction(actionId);
+      
+      if (!action) {
+        await ctx.reply("Action not found. Create an action first.");
+        return;
+      }
+      
+      const { createCampaign, formatCampaign } = await import("../providers/creator/growth-layer.js");
+      const campaign = await createCampaign(userId, actionId, name, channel);
+      
+      await ctx.reply(`📢 Campaign created:\n\n${formatCampaign(campaign)}\n\nUse /atlas_start ${campaign.campaign_id} to launch.`);
+    } catch (e: any) {
+      console.error("[atlas] /atlas_promote failed", e?.message || e);
+    }
+  });
+
+  bot.command("atlas_status", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const role = getTelegramRole(userId);
+      const { loadCampaigns, formatCampaignList } = await import("../providers/creator/growth-layer.js");
+      
+      const campaigns = role === "owner" ? await loadCampaigns(undefined, "active", 10) : await loadCampaigns(userId, undefined, 10);
+      await ctx.reply(formatCampaignList(campaigns));
+    } catch (e: any) {
+      console.error("[atlas] /atlas_status failed", e?.message || e);
+    }
+  });
+
+  bot.command("atlas_start", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const campaignId = args[0];
+      
+      if (!campaignId) {
+        await ctx.reply("Usage: /atlas_start <campaign_id>");
+        return;
+      }
+      
+      const { startCampaign, formatCampaign } = await import("../providers/creator/growth-layer.js");
+      const success = await startCampaign(campaignId, userId);
+      
+      if (success) {
+        await ctx.reply(`🟢 Campaign started!`);
+      } else {
+        await ctx.reply("Cannot start campaign. Check ownership and status.");
+      }
+    } catch (e: any) {
+      console.error("[atlas] /atlas_start failed", e?.message || e);
+    }
+  });
+
+  bot.command("atlas_stop", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const campaignId = args[0];
+      
+      if (!campaignId) {
+        await ctx.reply("Usage: /atlas_stop <campaign_id>");
+        return;
+      }
+      
+      const { stopCampaign } = await import("../providers/creator/growth-layer.js");
+      const success = await stopCampaign(campaignId, userId);
+      
+      if (success) {
+        await ctx.reply(`⏹️ Campaign stopped!`);
+      } else {
+        await ctx.reply("Cannot stop campaign.");
+      }
+    } catch (e: any) {
+      console.error("[atlas] /atlas_stop failed", e?.message || e);
+    }
+  });
+
+  // TALENT - Services
+  bot.command("talent_create_service", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const actionId = args[0];
+      const name = args.slice(1).join(" ") || "My Service";
+      
+      if (!actionId) {
+        await ctx.reply("Usage: /talent_create_service <action_id> [name]");
+        return;
+      }
+      
+      const { createService, formatService } = await import("../providers/creator/growth-layer.js");
+      const service = await createService(userId, name, "Auto-generated service from action", "general", undefined, "UZS", [actionId]);
+      
+      await ctx.reply(`🛠️ Service created:\n\n${formatService(service)}`);
+    } catch (e: any) {
+      console.error("[talent] /talent_create_service failed", e?.message || e);
+    }
+  });
+
+  bot.command("talent_profile", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const { loadServices, formatServiceList } = await import("../providers/creator/growth-layer.js");
+      
+      const services = await loadServices(userId, 20);
+      await ctx.reply(`👤 Your Services:\n\n${formatServiceList(services)}`);
+    } catch (e: any) {
+      console.error("[talent] /talent_profile failed", e?.message || e);
+    }
+  });
+
+  // GROWTH OS - Insights
+  bot.command("growth_insight", async (ctx) => {
+    try {
+      const userId = String(userIdOf(ctx));
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const targetId = args[0] || "default";
+      const targetType = args[1] as any || "product";
+      
+      const { generateInsight, generateDropAnalysis, formatInsight } = await import("../providers/creator/growth-layer.js");
+      
+      const mockMetrics = { impressions: 120, clicks: 15, conversions: 3, previousPeriod: 200 };
+      const content = generateDropAnalysis(mockMetrics);
+      
+      const insight = await generateInsight(userId, "drop_analysis", targetId, targetType as any, content, 0.75);
+      
+      await ctx.reply(formatInsight(insight));
+    } catch (e: any) {
+      console.error("[growth] /growth_insight failed", e?.message || e);
+    }
+  });
+
+  bot.command("growth_ab_test", async (ctx) => {
+    try {
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const productId = args[0] || "product";
+      
+      const { generateABTestSuggestion } = await import("../providers/creator/growth-layer.js");
+      const suggestion = generateABTestSuggestion(productId);
+      
+      await ctx.reply(`🧪 A/B Test Suggestion for "${productId}":\n\n` +
+        `VERSION A:\nTitle: ${suggestion.titleA}\nDescription: ${suggestion.descriptionA}\n\n` +
+        `VERSION B:\nTitle: ${suggestion.titleB}\nDescription: ${suggestion.descriptionB}`);
+    } catch (e: any) {
+      console.error("[growth] /growth_ab_test failed", e?.message || e);
+    }
+  });
+
+  bot.command("growth_fix", async (ctx) => {
+    try {
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const productId = args[0] || "unknown";
+      
+      await ctx.reply(`💡 Fix suggestions for "${productId}":\n\n` +
+        `1. Update product images\n` +
+        `2. Refresh title with popular keywords\n` +
+        `3. Add more detailed description\n` +
+        `4. Review competitor pricing\n` +
+        `5. Increase visibility via /atlas_promote`);
+    } catch (e: any) {
+      console.error("[growth] /growth_fix failed", e?.message || e);
+    }
+  });
+
   bot.action("menu:chat", async (ctx) => {
     try {
       console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "menu:chat" });
