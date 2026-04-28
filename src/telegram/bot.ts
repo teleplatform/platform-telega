@@ -2680,6 +2680,125 @@ bot.command("set_currency", async (ctx) => {
       );
     } catch (e: any) {
       console.error("[creator-control] provider:set failed", e?.message || e);
+     }
+  });
+
+  // ANALYTICS - v22 BI Layer
+  bot.command("analytics", async (ctx) => {
+    try {
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const date = args[0]; // YYYY-MM-DD format
+      
+      const { computeDailyAnalytics, formatAnalyticsAggregate } = await import("../providers/creator/analytics-bi.js");
+      const aggregate = await computeDailyAnalytics(date);
+      
+      await ctx.reply(formatAnalyticsAggregate(aggregate));
+    } catch (e: any) {
+      console.error("[analytics] /analytics failed", e?.message || e);
+    }
+  });
+
+  bot.command("analytics_insights", async (ctx) => {
+    try {
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const metric = args[0]; // revenue_total, orders_count, etc.
+      
+      const { getInsights, formatInsightsList } = await import("../providers/creator/analytics-bi.js");
+      const insights = await getInsights(metric);
+      
+      await ctx.reply(formatInsightsList(insights));
+    } catch (e: any) {
+      console.error("[analytics] /analytics_insights failed", e?.message || e);
+    }
+  });
+
+  bot.command("analytics_revenue", async (ctx) => {
+    try {
+      const { loadAggregates, formatAnalyticsAggregate } = await import("../providers/creator/analytics-bi.js");
+      const aggregates = await loadAggregates(7);
+      
+      if (aggregates.length === 0) {
+        await ctx.reply("No analytics data yet");
+        return;
+      }
+      
+      const totalRevenue = aggregates.reduce((sum, a) => sum + a.revenue_total, 0);
+      const totalOrders = aggregates.reduce((sum, a) => sum + a.orders_count, 0);
+      const avgRoi = aggregates.reduce((sum, a) => sum + a.roi, 0) / aggregates.length;
+      
+      const lines = [
+        "📊 Revenue Analytics (7 days):",
+        "",
+        `Total Revenue: ${totalRevenue.toLocaleString()} TN`,
+        `Total Orders: ${totalOrders}`,
+        `Avg ROI: ${avgRoi.toFixed(1)}%`,
+        "",
+        "Daily breakdown:",
+      ];
+      
+      for (const a of aggregates.slice(0, 5)) {
+        lines.push(`${a.date}: ${a.revenue_total.toLocaleString()} TN (${a.orders_count} orders)`);
+      }
+      
+      await ctx.reply(lines.join("\n"));
+    } catch (e: any) {
+      console.error("[analytics] /analytics_revenue failed", e?.message || e);
+    }
+  });
+
+  bot.command("analytics_ads", async (ctx) => {
+    try {
+      const { loadAggregates, formatAnalyticsAggregate } = await import("../providers/creator/analytics-bi.js");
+      const aggregates = await loadAggregates(7);
+      
+      if (aggregates.length === 0) {
+        await ctx.reply("No analytics data yet");
+        return;
+      }
+      
+      const totalSpend = aggregates.reduce((sum, a) => sum + a.ads_spend, 0);
+      const totalAdsRevenue = aggregates.reduce((sum, a) => sum + a.ads_revenue, 0);
+      const avgRoi = aggregates.reduce((sum, a) => sum + a.roi, 0) / aggregates.length;
+      
+      const lines = [
+        "📢 Ads Analytics (7 days):",
+        "",
+        `Total Spend: ${totalSpend.toLocaleString()} TN`,
+        `Ads Revenue: ${totalAdsRevenue.toLocaleString()} TN`,
+        `Avg ROI: ${avgRoi.toFixed(1)}%`,
+        "",
+        "Daily breakdown:",
+      ];
+      
+      for (const a of aggregates.slice(0, 5)) {
+        lines.push(`${a.date}: spend ${a.ads_spend.toLocaleString()} TN, ROI ${a.roi.toFixed(1)}%`);
+      }
+      
+      await ctx.reply(lines.join("\n"));
+    } catch (e: any) {
+      console.error("[analytics] /analytics_ads failed", e?.message || e);
+    }
+  });
+
+  bot.command("analytics_creators", async (ctx) => {
+    try {
+      const { getTopCreators, formatTopCreators } = await import("../providers/creator/analytics-bi.js");
+      const topCreators = await getTopCreators(5);
+      
+      await ctx.reply(formatTopCreators(topCreators));
+    } catch (e: any) {
+      console.error("[analytics] /analytics_creators failed", e?.message || e);
+    }
+  });
+
+  bot.command("analytics_listings", async (ctx) => {
+    try {
+      const { getTopListings, formatTopListings } = await import("../providers/creator/analytics-bi.js");
+      const topListings = await getTopListings(5);
+      
+      await ctx.reply(formatTopListings(topListings));
+    } catch (e: any) {
+      console.error("[analytics] /analytics_listings failed", e?.message || e);
     }
   });
 
