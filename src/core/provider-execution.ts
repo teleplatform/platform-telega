@@ -133,6 +133,14 @@ function toFallbackProvider(target: ProviderId): ResolvedProviderConfig {
       source: "fallback",
       rawInput: "kimi_web:kimi-k2.5",
     },
+    perplexity_web: {
+      provider: "perplexity_web",
+      model: "sonar",
+      fallbackTo: ["qwen_web", "chatgpt_web"],
+      role: "creator",
+      source: "fallback",
+      rawInput: "perplexity_web:sonar",
+    },
   };
   return defaults[target] || defaults.local;
 }

@@ -1,4 +1,4 @@
-export type WebProvider = 'chatgpt_web' | 'qwen_web' | 'deepseek_web' | 'grok_web' | 'kimi_web';
+export type WebProvider = 'chatgpt_web' | 'qwen_web' | 'deepseek_web' | 'grok_web' | 'kimi_web' | 'perplexity_web';
 export type WebTransport = 'cdp';
 
 export interface WebExecuteInput {
@@ -52,12 +52,40 @@ export const DEFAULT_WEB_CHAIN: WebProvider[] = [
 export async function executeWebProvider(
   input: WebExecuteInput
 ): Promise<WebExecuteResult> {
-  return {
-    ok: false,
-    provider: input.provider,
-    transport: 'cdp',
-    reason: 'web_provider_disabled',
-  };
+  try {
+    const { getSessionBridge } = await import("./creator/session/session-bridge.js");
+    const bridge = getSessionBridge();
+    bridge.enableProvider(input.provider);
+    
+    const result = await bridge.generate(input.prompt, {
+      provider: input.provider as any,
+      traceId: `web-${Date.now()}`,
+      creatorMode: true,
+    });
+    
+    if (result.success && result.output_text) {
+      return {
+        ok: true,
+        provider: input.provider,
+        transport: 'cdp',
+        responseText: result.output_text,
+      };
+    }
+    
+    return {
+      ok: false,
+      provider: input.provider,
+      transport: 'cdp',
+      reason: result.error_code || 'execution_failed',
+    };
+  } catch (e: any) {
+    return {
+      ok: false,
+      provider: input.provider,
+      transport: 'cdp',
+      reason: e.message || 'execution_error',
+    };
+  }
 }
 
 export async function executeWebProviderWithFallback(

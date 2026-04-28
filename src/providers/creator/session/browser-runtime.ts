@@ -78,6 +78,7 @@ const providerProfilePaths: Record<SessionProviderId, string> = {
   deepseek_web: getCreatorProfileDir("deepseek_web"),
   grok_web: getCreatorProfileDir("grok_web"),
   kimi_web: getCreatorProfileDir("kimi_web"),
+  perplexity_web: getCreatorProfileDir("perplexity_web"),
 };
 
 class ManagedBrowser {
