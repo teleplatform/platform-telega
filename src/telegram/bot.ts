@@ -633,6 +633,82 @@ export async function startPantheonTelegramBot() {
     }
   });
 
+  bot.command("patch_plan", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const { isTaskAllowed, createPatchPlan, formatPatchPlan } = await import("../providers/creator/patch-planner.js");
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const task = args.join(" ");
+      if (!task) {
+        await ctx.reply("Usage: /patch_plan <task description>\nExample: /patch_plan Add logging to the router");
+        return;
+      }
+      const check = isTaskAllowed(task);
+      if (!check.allowed) {
+        await ctx.reply(`❌ ${check.reason}`);
+        return;
+      }
+      await ctx.reply("Creating patch plan...");
+      const files = [
+        { path: "TBD", reason: task, change_summary: "Auto-generated from task", risk_level: "medium" as const },
+      ];
+      const patch = await createPatchPlan(task, files);
+      await ctx.reply(formatPatchPlan(patch));
+    } catch (e: any) {
+      console.error("[creator-control] /patch_plan failed", e?.message || e);
+    }
+  });
+
+  bot.command("patch_plans", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const { listPatchPlans, formatPatchPlan } = await import("../providers/creator/patch-planner.js");
+      const patches = await listPatchPlans("pending", 5);
+      if (patches.length === 0) {
+        await ctx.reply("No pending patch plans");
+        return;
+      }
+      for (const patch of patches) {
+        await ctx.reply(formatPatchPlan(patch));
+      }
+    } catch (e: any) {
+      console.error("[creator-control] /patch_plans failed", e?.message || e);
+    }
+  });
+
+  bot.command("patch_plan_view", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const patchId = args[0];
+      if (!patchId) {
+        await ctx.reply("Usage: /patch_plan_view <patch_id>");
+        return;
+      }
+      const { getPatchPlan, formatPatchPlan } = await import("../providers/creator/patch-planner.js");
+      const patch = await getPatchPlan(patchId);
+      if (!patch) {
+        await ctx.reply("Patch plan not found");
+        return;
+      }
+      await ctx.reply(formatPatchPlan(patch));
+    } catch (e: any) {
+      console.error("[creator-control] /patch_plan_view failed", e?.message || e);
+    }
+  });
+
   bot.command("job_evidence", async (ctx) => {
     try {
       const userId = String(userIdOf(ctx));
