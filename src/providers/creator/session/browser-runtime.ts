@@ -323,9 +323,26 @@ async function executeWithCDP(prompt: string, traceId: string): Promise<SessionB
       await page.waitForTimeout(3000);
       
       const messages = await page.evaluate(() => {
+        function getVisibleText(el: Element): string {
+          if (!el) return "";
+          try {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const sel = window.getSelection();
+            if (sel) {
+              sel.removeAllRanges();
+              sel.addRange(range);
+              const text = sel.toString();
+              sel.removeAllRanges();
+              return text.trim();
+            }
+          } catch {}
+          return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
+        }
+        
         const msgs = Array.from(document.querySelectorAll('[data-message-author-role="assistant"]'));
         const last = msgs[msgs.length - 1] as HTMLElement | undefined;
-        return last ? (last.innerText || last?.textContent || "").trim() : "";
+        return last ? getVisibleText(last) : "";
       });
       
       if (messages.length > 0) {
@@ -514,9 +531,26 @@ async function executeQwenWithCDP(prompt: string, traceId: string): Promise<Sess
       await page.waitForTimeout(3000);
       
       const messages = await page.evaluate(() => {
+        function getVisibleText(el: Element): string {
+          if (!el) return "";
+          try {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const sel = window.getSelection();
+            if (sel) {
+              sel.removeAllRanges();
+              sel.addRange(range);
+              const text = sel.toString();
+              sel.removeAllRanges();
+              return text.trim();
+            }
+          } catch {}
+          return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
+        }
+        
         const msgs = Array.from(document.querySelectorAll('[class*="message-assistant"]'));
         const last = msgs[msgs.length - 1] as HTMLElement | undefined;
-        return last ? (last.innerText || last?.textContent || "").trim() : "";
+        return last ? getVisibleText(last) : "";
       });
       
       if (messages.length > 0) {
@@ -704,13 +738,30 @@ async function executeDeepSeekWithCDP(prompt: string, traceId: string): Promise<
       await page.waitForTimeout(3000);
       
       const messages = await page.evaluate(() => {
+        function getVisibleText(el: Element): string {
+          if (!el) return "";
+          try {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const sel = window.getSelection();
+            if (sel) {
+              sel.removeAllRanges();
+              sel.addRange(range);
+              const text = sel.toString();
+              sel.removeAllRanges();
+              return text.trim();
+            }
+          } catch {}
+          return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
+        }
+        
         const msgs = Array.from(document.querySelectorAll('[class*="message"]'));
         const assistantMsgs = msgs.filter((m: Element) => {
           const text = m.textContent || "";
           return text.length > 20 && !m.querySelector('input, textarea, button');
         });
         const last = assistantMsgs[assistantMsgs.length - 1] as HTMLElement | undefined;
-        return last ? (last.innerText || last?.textContent || "").trim() : "";
+        return last ? getVisibleText(last) : "";
       });
       
       if (messages.length > 0) {
@@ -903,9 +954,26 @@ async function executeGrokWithCDP(prompt: string, traceId: string): Promise<Sess
       await page.waitForTimeout(3000);
       
       const messages = await page.evaluate(() => {
+        function getVisibleText(el: Element): string {
+          if (!el) return "";
+          try {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const sel = window.getSelection();
+            if (sel) {
+              sel.removeAllRanges();
+              sel.addRange(range);
+              const text = sel.toString();
+              sel.removeAllRanges();
+              return text.trim();
+            }
+          } catch {}
+          return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
+        }
+        
         const msgs = Array.from(document.querySelectorAll('[data-testid="message"], [class*="message"], [class*="markdown"], [role="article"]'));
         const last = msgs[msgs.length - 1] as HTMLElement | undefined;
-        return last ? (last.innerText || last?.textContent || "").trim() : "";
+        return last ? getVisibleText(last) : "";
       });
       
       if (messages.length > 0) {
