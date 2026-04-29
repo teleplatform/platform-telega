@@ -5985,6 +5985,29 @@ await ctx.reply("❌ Voice processing failed");
     }
   });
 
+  bot.command("help", async (ctx) => {
+    try {
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+      const { renderTeleGPTCommands, renderForgeCommands } = await import("../lib/commands.js");
+      const output = renderTeleGPTCommands(lang) + "\n\n" + renderForgeCommands(lang);
+      await ctx.reply(output);
+    } catch (e: any) {
+      console.error("[telegram] /help failed", e?.message || e);
+    }
+  });
+
+  bot.command("commands", async (ctx) => {
+    try {
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+      const { renderForgeCommands } = await import("../lib/commands.js");
+      await ctx.reply(renderForgeCommands(lang));
+    } catch (e: any) {
+      console.error("[telegram] /commands failed", e?.message || e);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
