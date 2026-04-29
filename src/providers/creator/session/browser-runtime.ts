@@ -340,36 +340,81 @@ async function executeWithCDP(prompt: string, traceId: string): Promise<SessionB
           return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
         }
         
-        const selectors = [
-          '[data-message-author-role="assistant"]',
-          '[class*="message-assistant"]',
-          '[data-testid*="message"]',
-          '[role="article"]',
-        ];
-        
-        const candidates: { selector: string; text: string }[] = [];
-        
-        for (const sel of selectors) {
-          try {
-            const els = Array.from(document.querySelectorAll(sel));
-            for (const el of els) {
-              const text = getVisibleText(el as HTMLElement);
-              if (text.length > 10) {
-                candidates.push({ selector: sel, text });
+        function getConversationTurns(): Element[] {
+          const selectors = [
+            'article[data-testid*="conversation-turn"]',
+            'article[data-testid*="conversation"]',
+            "[data-testid=conversation-turn]",
+          ];
+          const turns: Element[] = [];
+          for (const sel of selectors) {
+            try {
+              const els = document.querySelectorAll(sel);
+              for (const el of els) {
+                if (!turns.includes(el as Element)) turns.push(el as Element);
               }
+            } catch {}
+          }
+          return turns;
+        }
+        
+        function extractAllTextNodes(root: Element): string[] {
+          const texts: string[] = [];
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          let node: Node | null;
+          while ((node = walker.nextNode())) {
+            const value = node.textContent?.trim() || "";
+            if (value.length > 5 && !value.match(/^(Copy|Edit|Regenerate|Stop)$/)) {
+              texts.push(value);
             }
-          } catch {}
+          }
+          return texts;
         }
         
-        if (candidates.length === 0) {
-          return "";
+        function deduplicateTexts(texts: string[]): string[] {
+          const seen = new Set<string>();
+          const unique: string[] = [];
+          for (const t of texts) {
+            if (!seen.has(t)) {
+              seen.add(t);
+              unique.push(t);
+            }
+          }
+          return unique;
         }
         
-        const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
+        const turns = getConversationTurns();
+        const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
         
-        console.log(`[creator-bridge] extraction_v8_max_candidate: candidates=${candidates.length} best=${best.text.length} sel=${best.selector}`);
+        if (!lastTurn) {
+          const selectors = [
+            '[data-message-author-role="assistant"]',
+            '[class*="message-assistant"]',
+            '[data-testid*="message"]',
+          ];
+          const candidates: { selector: string; text: string }[] = [];
+          for (const sel of selectors) {
+            try {
+              const els = Array.from(document.querySelectorAll(sel));
+              for (const el of els) {
+                const text = getVisibleText(el as HTMLElement);
+                if (text.length > 10) candidates.push({ selector: sel, text });
+              }
+            } catch {}
+          }
+          if (candidates.length === 0) return "";
+          const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
+          console.log(`[creator-bridge] extraction_v9: fallback candidates=${candidates.length} best=${best.text.length}`);
+          return best.text;
+        }
         
-        return best.text;
+        const allTexts = extractAllTextNodes(lastTurn);
+        const uniqueTexts = deduplicateTexts(allTexts);
+        const fullText = uniqueTexts.join("\n\n");
+        
+        console.log(`[creator-bridge] extraction_v9: turns=${turns.length} nodes=${allTexts.length} full=${fullText.length}`);
+        
+        return fullText;
       });
       
       if (messages.length > 0) {
@@ -501,16 +546,16 @@ async function executeQwenWithCDP(prompt: string, traceId: string): Promise<Sess
     await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     
-    // Qwen input selectors
+// Qwen input selectors
     const inputSelectors = [
-      'textarea[placeholder*="输入"]',
-      'textarea',
+      'textarea[placeholder*="message"]',
+      "textarea",
       'div[contenteditable="true"]',
     ];
-    
+
     let inputLocator: ReturnType<typeof page.locator> | null = null;
     let inputFound = false;
-    
+
     for (const selector of inputSelectors) {
       const locator = page.locator(selector);
       const count = await locator.count();
@@ -521,7 +566,7 @@ async function executeQwenWithCDP(prompt: string, traceId: string): Promise<Sess
         break;
       }
     }
-    
+
     if (!inputFound || !inputLocator) {
       console.log(`[creator-bridge] execution_failed: input_selector_not_found`);
       return {
@@ -534,30 +579,73 @@ async function executeQwenWithCDP(prompt: string, traceId: string): Promise<Sess
         duration_ms: Date.now() - startTime,
       };
     }
-    
+
     await inputLocator.click({ force: true });
     await page.waitForTimeout(500);
     await inputLocator.fill("");
     await page.waitForTimeout(200);
-    
+
     await inputLocator.type(prompt, { delay: 10 });
     console.log("[creator-bridge] typing prompt...");
     evidence.push("prompt_typed");
-    
+
     await inputLocator.press("Enter");
     console.log("[creator-bridge] ENTER pressed");
     evidence.push("submit:enter");
-    
+
     console.log(`[creator-bridge] response_wait_started: timeout=${DEFAULT_RESPONSE_TIMEOUT_MS}ms`);
-    
+
     const responseWaitStart = Date.now();
     let outputText = "";
     let responseReceived = false;
-    
+
     while ((Date.now() - responseWaitStart) < DEFAULT_RESPONSE_TIMEOUT_MS) {
       await page.waitForTimeout(3000);
-      
+
       const messages = await page.evaluate(() => {
+        function getConversationTurns(): Element[] {
+          const selectors = [
+            'article[data-testid*="conversation-turn"]',
+            'article[data-testid*="conversation"]',
+            "[data-testid=conversation-turn]",
+          ];
+          const turns: Element[] = [];
+          for (const sel of selectors) {
+            try {
+              const els = document.querySelectorAll(sel);
+              for (const el of els) {
+                if (!turns.includes(el as Element)) turns.push(el as Element);
+              }
+            } catch {}
+          }
+          return turns;
+        }
+
+        function extractAllTextNodes(root: Element): string[] {
+          const texts: string[] = [];
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          let node: Node | null;
+          while ((node = walker.nextNode())) {
+            const value = node.textContent?.trim() || "";
+            if (value.length > 5 && !value.match(/^(Copy|Edit|Regenerate|Stop)$/)) {
+              texts.push(value);
+            }
+          }
+          return texts;
+        }
+
+        function deduplicateTexts(texts: string[]): string[] {
+          const seen = new Set<string>();
+          const unique: string[] = [];
+          for (const t of texts) {
+            if (!seen.has(t)) {
+              seen.add(t);
+              unique.push(t);
+            }
+          }
+          return unique;
+        }
+
         function getVisibleText(el: Element): string {
           if (!el) return "";
           try {
@@ -574,35 +662,35 @@ async function executeQwenWithCDP(prompt: string, traceId: string): Promise<Sess
           } catch {}
           return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
         }
-        
-        const selectors = [
-          '[data-message-author-role="assistant"]',
-          '[class*="message-assistant"]',
-          '[data-testid*="message"]',
-          '[role="article"]',
-        ];
-        
-        const candidates: { selector: string; text: string }[] = [];
-        
-        for (const sel of selectors) {
-          try {
-            const els = Array.from(document.querySelectorAll(sel));
-            for (const el of els) {
-              const text = getVisibleText(el as HTMLElement);
-              if (text.length > 10) {
-                candidates.push({ selector: sel, text });
+
+        const turns = getConversationTurns();
+        const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
+
+        if (!lastTurn) {
+          const selectors = [
+            '[data-message-author-role="assistant"]',
+            '[class*="message-assistant"]',
+            '[data-testid*="message"]',
+          ];
+          const candidates: { selector: string; text: string }[] = [];
+          for (const sel of selectors) {
+            try {
+              const els = Array.from(document.querySelectorAll(sel));
+              for (const el of els) {
+                const text = getVisibleText(el as HTMLElement);
+                if (text.length > 10) candidates.push({ selector: sel, text });
               }
-            }
-          } catch {}
+            } catch {}
+          }
+          if (candidates.length === 0) return "";
+          const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
+          return best.text;
         }
-        
-        if (candidates.length === 0) {
-          return "";
-        }
-        
-        const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
-        
-        return best.text;
+
+        const allTexts = extractAllTextNodes(lastTurn);
+        const uniqueTexts = deduplicateTexts(allTexts);
+
+        return uniqueTexts.join("\n\n");
       });
       
       if (messages.length > 0) {
