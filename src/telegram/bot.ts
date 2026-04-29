@@ -6186,6 +6186,74 @@ await ctx.reply("❌ Voice processing failed");
     }
   });
 
+  bot.command("watchdog_status", async (ctx) => {
+    const uid = String((ctx as any)?.from?.id || "");
+    if (getAccountLabel(uid) !== "★") return;
+    try {
+      const { isWatchdogRunning, getWatchdogState, checkWatchdog } = await import("./watchdog.js");
+      const checks = await checkWatchdog();
+      const s = getWatchdogState();
+      const lines = [
+        `🐕 WATCHDOG`,
+        `Running: ${isWatchdogRunning() ? "YES" : "NO"}`,
+        `Paused: ${s.paused ? "YES" : "NO"}`,
+        `Last Check: ${s.lastCheck ? new Date(s.lastCheck).toLocaleTimeString() : "never"}`,
+        `Alerts Triggered: ${s.alertsTriggered}`,
+        `Alerts Sent: ${s.alertsSent}`,
+        "",
+        ...checks.map((c) => `${c.status} ${c.section}: ${c.issue || "OK"}`),
+      ];
+      await ctx.reply(lines.join("\n"));
+    } catch (e: any) {
+      console.error("[watchdog_status] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("watchdog_pause", async (ctx) => {
+    const uid = String((ctx as any)?.from?.id || "");
+    if (getAccountLabel(uid) !== "★") return;
+    try {
+      const { pauseWatchdog } = await import("./watchdog.js");
+      await pauseWatchdog();
+      await ctx.reply("⏸️ Watchdog paused");
+    } catch (e: any) {
+      console.error("[watchdog_pause] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("watchdog_resume", async (ctx) => {
+    const uid = String((ctx as any)?.from?.id || "");
+    if (getAccountLabel(uid) !== "★") return;
+    try {
+      const { resumeWatchdog } = await import("./watchdog.js");
+      await resumeWatchdog();
+      await ctx.reply("▶️ Watchdog resumed");
+    } catch (e: any) {
+      console.error("[watchdog_resume] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("watchdog_logs", async (ctx) => {
+    const uid = String((ctx as any)?.from?.id || "");
+    if (getAccountLabel(uid) !== "★") return;
+    try {
+      const { getWatchdogAlerts } = await import("./watchdog.js");
+      const alerts = await getWatchdogAlerts();
+      const lines = alerts.map((a: any) => `${a.type} ${a.section}: ${a.issue}`);
+      if (lines.length === 0) {
+        await ctx.reply("No watchdog logs yet");
+      } else {
+        await ctx.reply("🐕 WATCHDOG LOGS\n\n" + lines.join("\n"));
+      }
+    } catch (e: any) {
+      console.error("[watchdog_logs] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
