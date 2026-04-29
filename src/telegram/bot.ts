@@ -93,6 +93,9 @@ import {
   listWorkflows,
   STAGES,
   WorkflowStage,
+  validateGate,
+  checkGates,
+  formatValidationReport,
 } from "./forge-workflow.js";
 
 function getTelegaRoot(): string {
@@ -4760,6 +4763,69 @@ bot.command("set_currency", async (ctx) => {
       await ctx.reply(formatted);
     } catch (e: any) {
       console.error("[telegram] /forge_list failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_gates", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const workflowId = args.join(" ").trim();
+
+      if (!workflowId) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_gates <workflow_id>"
+          : "Usage: /forge_gates <workflow_id>");
+        return;
+      }
+
+      console.log("[telegram] /forge_gates", { user_id: uid, workflow_id: workflowId });
+
+      const report = await checkGates(workflowId, lang);
+      await ctx.reply(report, { parse_mode: "Markdown" });
+    } catch (e: any) {
+      console.error("[telegram] /forge_gates failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_validate", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const workflowId = args.join(" ").trim();
+
+      if (!workflowId) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_validate <workflow_id>"
+          : "Usage: /forge_validate <workflow_id>");
+        return;
+      }
+
+      const workflow = await getWorkflow(workflowId);
+      if (!workflow) {
+        await ctx.reply(lang === "ru" ? "Workflow не найден" : "Workflow not found");
+        return;
+      }
+
+      const currentStage = workflow.current_stage;
+      const gate = await validateGate(workflowId, currentStage, workflow, lang);
+      const report = formatValidationReport(gate, lang);
+
+      await ctx.reply(report, { parse_mode: "Markdown" });
+
+      if (!gate.passed && (currentStage === "apply" || currentStage === "verify")) {
+        await ctx.reply(lang === "ru"
+          ? "⚠️ Gate не пройден - переход заблокирован"
+          : "⚠️ Gate not passed - transition blocked");
+      }
+    } catch (e: any) {
+      console.error("[telegram] /forge_validate failed", e?.message || e);
     }
   });
 

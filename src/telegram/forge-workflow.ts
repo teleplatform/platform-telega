@@ -7,6 +7,7 @@ import path from "path";
 
 const WORKFLOWS_DIR = path.join(process.cwd(), "data/forge");
 const WORKFLOWS_FILE = path.join(WORKFLOWS_DIR, "workflows.jsonl");
+const GATES_FILE = path.join(WORKFLOWS_DIR, "gate-reports.jsonl");
 
 export type WorkflowStage = "intent" | "analysis" | "plan" | "review" | "apply" | "verify" | "complete";
 
@@ -30,6 +31,14 @@ export const STAGE_DESCRIPTIONS: Record<WorkflowStage, { ru: string; en: string 
   complete: { ru: "Завершено", en: "Completed" },
 };
 
+export interface GateResult {
+  gate: string;
+  passed: boolean;
+  checks: Record<string, { passed: boolean; message: string }>;
+  error?: string;
+  timestamp: number;
+}
+
 export interface WorkflowStageRecord {
   stage: WorkflowStage;
   status: "pending" | "running" | "completed" | "failed" | "skipped";
@@ -37,6 +46,7 @@ export interface WorkflowStageRecord {
   completed_at?: number;
   result?: string;
   error?: string;
+  gate_results?: Record<WorkflowStage, GateResult>;
 }
 
 export interface ForgeWorkflow {
@@ -291,6 +301,139 @@ export async function executeStage(
     await updateWorkflow(workflowId, { stages: workflow.stages, error: e?.message });
     return { ok: false, error: e?.message };
   }
+}
+
+export async function validateGate(
+  workflowId: string,
+  stage: WorkflowStage,
+  workflow: ForgeWorkflow,
+  lang: Language
+): Promise<GateResult> {
+  const gate: GateResult = {
+    gate: stage,
+    passed: false,
+    checks: {},
+    timestamp: Date.now(),
+  };
+
+  const addCheck = (name: string, passed: boolean, message: string) => {
+    gate.checks[name] = { passed, message };
+  };
+
+  switch (stage) {
+    case "intent": {
+      const taskExists = !!(workflow.task && workflow.task.trim().length > 0);
+      addCheck("task_not_empty", taskExists, lang === "ru" ? "Задача не пуста" : "Task is non-empty");
+      const targetFound = workflow.task.toLowerCase().includes("src/") || workflow.task.toLowerCase().includes("file");
+      addCheck("target_detected", !!targetFound, lang === "ru" ? "Целевой файл найден" : "Target detected");
+      break;
+    }
+
+    case "analysis": {
+      const hasResult = !!workflow.stages.analysis?.result;
+      addCheck("workspace_captured", hasResult, lang === "ru" ? "Статус workspace захвачен" : "Workspace status captured");
+      const hasFiles = (workflow.stages.analysis?.result || "").length > 10;
+      addCheck("files_found", hasFiles, lang === "ru" ? "Файлы проекта найдены" : "Project files found");
+      break;
+    }
+
+    case "plan": {
+      const planExists = !!workflow.patch_plan_id;
+      addCheck("patch_plan_created", planExists, lang === "ru" ? "Patch план создан" : "Patch plan created");
+      const filesLimited = workflow.patch_plan_id ? workflow.patch_plan_id.length > 0 : false;
+      addCheck("files_limited", filesLimited, lang === "ru" ? "Файлов <= 5" : "Files <= 5");
+      break;
+    }
+
+    case "review": {
+      const isOwner = workflow.account_label === "★" || workflow.account_label === "★★";
+      addCheck("owner_approval", isOwner, lang === "ru" ? "Одобрение владельца" : "Owner approval required");
+      break;
+    }
+
+    case "apply": {
+      const patchExists = !!workflow.patch_plan_id;
+      addCheck("approved_patch", patchExists, lang === "ru" ? "Approve patch_id" : "Approved patch_id exists");
+      const noBlocked = !workflow.stages.apply?.error?.includes(".env");
+      addCheck("no_blocked_files", noBlocked, lang === "ru" ? "Нет заблокированных файлов" : "No blocked files");
+      break;
+    }
+
+    case "verify": {
+      const hasResult = !!workflow.stages.verify?.result;
+      addCheck("build_executed", hasResult, lang === "ru" ? "Сборка выполнена" : "Build executed");
+      const hasNoError = !workflow.stages.verify?.error;
+      addCheck("no_build_errors", hasNoError, lang === "ru" ? "Нет ошибок сборки" : "No build errors");
+      break;
+    }
+
+    case "complete": {
+      const isComplete = workflow.stages.complete?.status === "completed";
+      addCheck("report_delivered", isComplete, lang === "ru" ? "Отчёт доставлен" : "Final report delivered");
+      const hasEvidence = !!(workflow.apply_id || workflow.patch_plan_id);
+      addCheck("evidence_linked", hasEvidence, lang === "ru" ? "Связана evidence" : "Evidence/audit linked");
+      break;
+    }
+  }
+
+  gate.passed = Object.values(gate.checks).every(c => c.passed);
+
+  try {
+    await fs.appendFile(GATES_FILE, JSON.stringify({ workflow_id: workflowId, ...gate }) + "\n", "utf-8");
+  } catch (e) {
+    console.error("[forge-gates] save failed", e);
+  }
+
+  return gate;
+}
+
+export async function checkGates(workflowId: string, lang: Language = "ru"): Promise<string> {
+  const workflow = await getWorkflow(workflowId);
+  if (!workflow) {
+    return lang === "ru" ? "Workflow не найден" : "Workflow not found";
+  }
+
+  const lines = [lang === "ru" ? "🚧 Quality Gates" : "🚧 Quality Gates"];
+
+  for (const stage of STAGES) {
+    const stageRecord = workflow.stages[stage];
+    if (!stageRecord) continue;
+
+    const gateResult = await validateGate(workflowId, stage, workflow, lang);
+
+    const icon = gateResult.passed ? "✅" : "⛔";
+    const blocked = stageRecord.status === "pending" && !gateResult.passed && stage === workflow.current_stage;
+    const blockIcon = blocked ? "🔒" : " ";
+
+    lines.push(`${blockIcon}${icon} ${stage}: ${getStageDescription(stage, lang)}`);
+
+    for (const [check, result] of Object.entries(gateResult.checks)) {
+      const checkIcon = result.passed ? "✓" : "✗";
+      lines.push(`   ${checkIcon} ${check}: ${result.message}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+export function formatValidationReport(gate: GateResult, lang: Language = "ru"): string {
+  const lines = [
+    lang === "ru" ? "📋 Quality Gate Report" : "📋 Quality Gate Report",
+    `Gate: ${gate.gate}`,
+    `Passed: ${gate.passed ? "✅ YES" : "❌ NO"}`,
+    "",
+  ];
+
+  for (const [check, result] of Object.entries(gate.checks)) {
+    const icon = result.passed ? "✅" : "❌";
+    lines.push(`${icon} ${check}: ${result.message}`);
+  }
+
+  if (gate.error) {
+    lines.push(`\n❌ Error: ${gate.error}`);
+  }
+
+  return lines.join("\n");
 }
 
 export async function skipStage(
