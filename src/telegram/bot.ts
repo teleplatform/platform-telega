@@ -6967,19 +6967,17 @@ Only extract when stable`
     try {
       const uid = String((ctx as any)?.from?.id || "");
       if (getAccountLabel(uid) !== "★") return;
-      const { DEFAULT_MULTIBLOCK_CONFIG: CONFIG } = await import("./multi-block-extraction.js");
       await ctx.reply(
-        `🔍 EXTRACTION v9 — TEXT NODES TREEWALKER
+        `🔍 EXTRACTION v10 — BEST TURN SELECTION
 
 Algorithm:
-1. Find LAST conversation turn (article)
-2. Walk ENTIRE DOM tree via TreeWalker
-3. Extract ALL text nodes inside turn
-4. Deduplicate + filter UI (Copy, Edit)
-5. Join all texts
+1. Get ALL conversation turns
+2. Extract text nodes for each turn
+3. Calculate: length, nodes count
+4. Select BEST turn = MAX text length
+5. Aggregate all text nodes from best turn
 
-Key: Text nodes = all actual rendered text.
-Not selector-based. Full tree traversal.`
+Key: Not LAST turn. BEST turn = longest text.`
       );
     } catch (e: any) {
       console.error("[extraction_test] fail", e?.message);
