@@ -6859,6 +6859,64 @@ Reason: ${result.reason}`
     }
   });
 
+  bot.command("launch_checklist", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      await ctx.reply("🔍 Running launch checklist...");
+      const { runLaunchCheck } = await import("./launch-control.js");
+      const report = await runLaunchCheck();
+      const lines = [
+        `🚀 LAUNCH CHECKLIST`,
+        `Overall: **${report.overall.toUpperCase()}**`,
+        "",
+      ];
+      for (const c of report.checks) {
+        const icon = c.status === "ready" ? "✅" : c.status === "warning" ? "⚠️" : "❌";
+        lines.push(`${icon} ${c.name}: ${c.message}`);
+      }
+      await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
+    } catch (e: any) {
+      console.error("[launch_checklist] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("launch_ready", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      const { isLaunchReady, runLaunchCheck } = await import("./launch-control.js");
+      const ready = await isLaunchReady();
+      const report = await runLaunchCheck();
+      await ctx.reply(
+        ready
+          ? "🚀 LAUNCH READY!\n\nAll checks pass. System ready for real launch."
+          : `⚠️ NOT READY\n\n${report.checks.filter((c) => c.status !== "ready").length} issues blocking.`
+      );
+    } catch (e: any) {
+      console.error("[launch_ready] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("launch_blockers", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      const { getLaunchBlockers } = await import("./launch-control.js");
+      const blockers = await getLaunchBlockers();
+      if (blockers.length === 0) {
+        await ctx.reply("✅ No blockers! System ready.");
+      } else {
+        await ctx.reply("❌ BLOCKERS:\n\n" + blockers.join("\n"));
+      }
+    } catch (e: any) {
+      console.error("[launch_blockers] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
