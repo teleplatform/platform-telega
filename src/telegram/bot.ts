@@ -130,6 +130,16 @@ import {
   formatHealPlan,
   formatDiagnosis,
 } from "./forge-heal.js";
+import {
+  buildWorkflowKeyboard,
+  buildTimelineKeyboard,
+  formatWorkflowCard,
+  formatProgressBar,
+  formatGraphCard,
+  formatErrorCard,
+  canUseControl,
+  parseCallback,
+} from "./forge-ui.js";
 
 function getTelegaRoot(): string {
   const root = (process.env.TELEGA_ROOT || "").trim();
@@ -5353,26 +5363,88 @@ bot.command("set_currency", async (ctx) => {
       }
     } catch (e: any) {
       console.error("[telegram] voice handler failed", e?.message || e);
-      await ctx.reply("❌ Voice processing failed");
+await ctx.reply("❌ Voice processing failed");
     }
   });
 
-  process.once("SIGINT", () => bot.stop("SIGINT"));
+  bot.action(/^forge:(refresh|gates|timeline|diagnose|heal|restart):(.+)$/, async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+      const match = (ctx as any)?.match;
 
-          const buttons = items.map((it, i) =>
-            Markup.button.callback(`📦 #${i + 1} ${it.pack}`, `br:${it.id}`)
-          );
-          const rows: any[] = [];
-          for (let i = 0; i < buttons.length; i += 2) rows.push(buttons.slice(i, i + 2));
-          rows.push([Markup.button.callback("🗑 Clear", "brc:1")]);
-          rows.push([Markup.button.callback(`↩️ Назад к результатам (стр. ${page})`, `brback:${page}`)]);
+      if (!match) return;
 
-          await ctx.reply(
-            `🔍 Найдено (топ ${items.length}) по \"${text}\"\n${lines.join("\n")}\n\nНажми чтобы открыть:`,
-            Markup.inlineKeyboard(rows)
-          );
-          return;
+      const action = match[1];
+      const workflowId = match[2];
+
+      console.log("[forge-ui] callback", { user_id: uid, action, workflow_id: workflowId });
+
+      switch (action) {
+        case "refresh": {
+          const workflow = await getWorkflow(workflowId);
+          if (workflow) {
+            const { text, keyboard } = formatWorkflowCard(workflow, lang);
+            await ctx.editMessageText(text, { reply_markup: keyboard as any });
+          }
+          break;
         }
+        case "gates": {
+          const gateReport = await checkGates(workflowId, lang);
+          await ctx.reply(gateReport);
+          break;
+        }
+        case "timeline": {
+          const timeline = await getWorkflowTimeline(workflowId, lang);
+          await ctx.reply(timeline);
+          break;
+        }
+        case "diagnose": {
+          const diagnosis = formatDiagnosis(workflowId, "unknown", "Manual diagnosis requested", lang);
+          await ctx.reply(diagnosis);
+          break;
+        }
+        case "heal": {
+          const plan = await createHealPlan(workflowId, "unknown", "Manual heal requested", uid, lang);
+          const formatted = formatHealPlan(plan, lang);
+          await ctx.reply(formatted, { parse_mode: "Markdown" });
+          break;
+        }
+        case "restart": {
+          const result = await restartWorkflow(workflowId, "intent");
+          if (result.ok) {
+            const workflow = await getWorkflow(workflowId);
+            if (workflow) {
+              const { text, keyboard } = formatWorkflowCard(workflow, lang);
+              await ctx.editMessageText(text, { reply_markup: keyboard as any });
+            }
+          } else {
+            await ctx.answerCbQuery(result.error || "Error", { show_alert: true });
+          }
+          break;
+        }
+      }
+
+      await ctx.answerCbQuery("OK");
+    } catch (e: any) {
+      console.error("[forge-ui] callback failed", e?.message || e);
+    }
+  });
+
+  bot.on("edited_message", async (ctx) => {
+    // Handle message edits if needed
+  });
+
+  process.once("SIGINT", () => bot.stop("SIGINT"));
+  process.once("SIGTERM", () => bot.stop("SIGTERM"));
+
+  await bot.launch();
+  console.log("[pantheon-tg] bot launched (polling)");
+
+  return bot;
+}
       }
     } catch {
       // ignore
