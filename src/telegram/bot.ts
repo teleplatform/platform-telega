@@ -540,6 +540,25 @@ export async function startPantheonTelegramBot() {
     }
   });
 
+  bot.command("bridge_status", async (ctx) => {
+    try {
+      const role = getTelegramRole(userIdOf(ctx));
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+      const { getProviderStatus } = await import("../providers/creator/stability.js");
+      const status = getProviderStatus();
+      const lines = Object.entries(status).map(([provider, data]: [string, any]) => {
+        return `• ${provider}: ${data.success_rate} rate, ${data.avg_latency_ms}ms avg, ${data.status}`;
+      });
+      const msg = lines.length > 0 ? lines.join("\n") : "No provider data yet";
+      await ctx.reply(`🌀 Bridge Status\n\n${msg}`);
+    } catch (e: any) {
+      console.error("[creator-control] /bridge_status failed", e?.message || e);
+    }
+  });
+
   bot.command("bridge_reset_provider", async (ctx) => {
     try {
       const role = getTelegramRole(userIdOf(ctx));

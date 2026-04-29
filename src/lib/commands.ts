@@ -16,9 +16,42 @@ export interface CommandDefinition {
   usage_ru: string;
   usage_en: string;
   roles: string[];
-  category: "core" | "forge" | "kilo" | "mcp" | "system";
+  category: "core" | "forge" | "kilo" | "mcp" | "system" | "bridge";
   ui: CommandUI;
 }
+
+export const CREATOR_BRIDGE_COMMANDS: CommandDefinition[] = [
+  {
+    name: "/bridge_status",
+    args: "",
+    description: { ru: "статус провайдеров моста", en: "bridge providers status" },
+    usage_ru: "/bridge_status",
+    usage_en: "/bridge_status",
+    roles: ["★", "★★", "★★★"],
+    category: "bridge",
+    ui: { showInHelp: true, showInCommands: true, showInButtons: false },
+  },
+  {
+    name: "/bridge_reset_provider",
+    args: "<provider_name>",
+    description: { ru: "сбросить состояние провайдера", en: "reset provider state" },
+    usage_ru: "/bridge_reset_provider openai",
+    usage_en: "/bridge_reset_provider openai",
+    roles: ["★"],
+    category: "bridge",
+    ui: { showInHelp: true, showInCommands: true, showInButtons: false },
+  },
+  {
+    name: "/bridge_failures",
+    args: "",
+    description: { ru: "последние ошибки", en: "recent failures" },
+    usage_ru: "/bridge_failures",
+    usage_en: "/bridge_failures",
+    roles: ["★"],
+    category: "bridge",
+    ui: { showInHelp: true, showInCommands: true, showInButtons: false },
+  },
+];
 
 export const TELEGPT_COMMANDS: CommandDefinition[] = [
   {
