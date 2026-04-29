@@ -6012,6 +6012,37 @@ await ctx.reply("❌ Voice processing failed");
     }
   });
 
+  bot.command("storage_status", async (ctx) => {
+    const uid = String((ctx as any)?.from?.id || "");
+    if (getAccountLabel(uid) !== "★") return;
+    try {
+      const { getStorageStats } = await import("../server/storage-indexer.js");
+      const s = await getStorageStats();
+      await ctx.reply("📊 " + s.files.map((f: any) => `${f.file}: ${f.line_count}`).join("\n"));
+    } catch (e) { console.error(e); }
+  });
+
+  bot.command("storage_rebuild_indexes", async (ctx) => {
+    const uid = String((ctx as any)?.from?.id || "");
+    if (getAccountLabel(uid) !== "★") return;
+    try {
+      await ctx.reply("🔄");
+      const { rebuildAllIndexes } = await import("../server/storage-indexer.js");
+      const r = await rebuildAllIndexes();
+      await ctx.reply(`✅ ${r.rebuilt.length}`);
+    } catch (e) { console.error(e); }
+  });
+
+  bot.command("storage_validate", async (ctx) => {
+    const uid = String((ctx as any)?.from?.id || "");
+    if (getAccountLabel(uid) !== "★") return;
+    try {
+      const { validateStorage } = await import("../server/storage-indexer.js");
+      const v = await validateStorage();
+      await ctx.reply(`✅ ${v.valid_dirs.length} dirs, ${v.total_corrupt} corrupt`);
+    } catch (e) { console.error(e); }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
