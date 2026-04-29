@@ -54,6 +54,15 @@ import {
   MCP_REQUIRED_TOOLS,
   checkRequiredTools,
 } from "./mcp-bridge.js";
+import {
+  kiloPing,
+  kiloWorkspace,
+  kiloRead,
+  kiloGrep,
+  kiloStatus,
+  KILO_READONLY_TOOLS,
+  KILO_BLOCKED_TOOLS,
+} from "./kilo-live.js";
 
 function getTelegaRoot(): string {
   const root = (process.env.TELEGA_ROOT || "").trim();
@@ -4035,6 +4044,120 @@ bot.command("set_currency", async (ctx) => {
       await ctx.reply(formatted);
     } catch (e: any) {
       console.error("[telegram] /kilo_tools failed", e?.message || e);
+    }
+  });
+
+  bot.command("kilo_ping", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const role = getTelegramRole(uid);
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+      const label = getAccountLabel(uid);
+
+      console.log("[telegram] /kilo_ping", { user_id: uid, label });
+
+      const result = await kiloPing(uid, label, lang);
+      await ctx.reply(result);
+    } catch (e: any) {
+      console.error("[telegram] /kilo_ping failed", e?.message || e);
+    }
+  });
+
+  bot.command("kilo_workspace", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const role = getTelegramRole(uid);
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+      const label = getAccountLabel(uid);
+
+      console.log("[telegram] /kilo_workspace", { user_id: uid, label });
+
+      await ctx.reply(lang === "ru" ? "📁 Проверяю workspace..." : "📁 Checking workspace...");
+
+      const result = await kiloWorkspace(uid, label, lang);
+      await ctx.reply(result);
+    } catch (e: any) {
+      console.error("[telegram] /kilo_workspace failed", e?.message || e);
+    }
+  });
+
+  bot.command("kilo_read", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const role = getTelegramRole(uid);
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const filePath = args.join(" ").trim();
+
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+      const label = getAccountLabel(uid);
+
+      console.log("[telegram] /kilo_read", { user_id: uid, label, path: filePath });
+
+      if (!filePath) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /kilo_read <путь>\nПример: /kilo_read src/index.ts"
+          : "Usage: /kilo_read <path>\nExample: /kilo_read src/index.ts");
+        return;
+      }
+
+      await ctx.reply(lang === "ru" ? "📖 Читаю файл..." : "📖 Reading file...");
+
+      const result = await kiloRead(uid, label, filePath, lang);
+      await ctx.reply(result, { parse_mode: "Markdown" });
+    } catch (e: any) {
+      console.error("[telegram] /kilo_read failed", e?.message || e);
+    }
+  });
+
+  bot.command("kilo_grep", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const role = getTelegramRole(uid);
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const pattern = args.join(" ").trim();
+
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+      const label = getAccountLabel(uid);
+
+      console.log("[telegram] /kilo_grep", { user_id: uid, label, pattern });
+
+      if (!pattern) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /kilo_grep <pattern> [path]\nПример: /kilo_grep function"
+          : "Usage: /kilo_grep <pattern> [path]\nExample: /kilo_grep function");
+        return;
+      }
+
+      await ctx.reply(lang === "ru" ? "🔍 Ищу..." : "🔍 Searching...");
+
+      const result = await kiloGrep(uid, label, pattern, lang);
+      await ctx.reply(result, { parse_mode: "Markdown" });
+    } catch (e: any) {
+      console.error("[telegram] /kilo_grep failed", e?.message || e);
     }
   });
 
