@@ -6917,6 +6917,29 @@ Reason: ${result.reason}`
     }
   });
 
+  bot.command("full_test", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      await ctx.reply("🧪 Running full integration test...");
+      const { runFullIntegrationTest } = await import("./full-integration-test.js");
+      const report = await runFullIntegrationTest();
+      const lines = [
+        `🧪 FULL INTEGRATION TEST`,
+        `ID: ${report.id}`,
+        `Pass: ${report.summary.pass} | Warn: ${report.summary.warn} | Fail: ${report.summary.fail}`,
+        "",
+        "Owner Tests: " + report.results.filter((r) => r.role === "owner").length,
+        "Arisha Tests: " + report.results.filter((r) => r.role === "★★★").length,
+        "Public Tests: " + report.results.filter((r) => r.role === "public").length,
+      ];
+      await ctx.reply(lines.join("\n"));
+    } catch (e: any) {
+      console.error("[full_test] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
