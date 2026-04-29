@@ -44,6 +44,16 @@ import {
   formatUserImages,
   getImageCommands,
 } from "./image-layer.js";
+import {
+  checkMCPHealth,
+  checkKiloStatus,
+  callMCPTool,
+  formatMCPStatus,
+  formatKiloStatus,
+  formatMCPTestResult,
+  MCP_REQUIRED_TOOLS,
+  checkRequiredTools,
+} from "./mcp-bridge.js";
 
 function getTelegaRoot(): string {
   const root = (process.env.TELEGA_ROOT || "").trim();
@@ -3914,6 +3924,117 @@ bot.command("set_currency", async (ctx) => {
       await ctx.reply(formatted);
     } catch (e: any) {
       console.error("[telegram] /images failed", e?.message || e);
+    }
+  });
+
+  bot.command("mcp_status", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const role = getTelegramRole(uid);
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      console.log("[telegram] /mcp_status", { user_id: uid });
+
+      const status = await checkMCPHealth();
+      const formatted = formatMCPStatus(status, lang);
+      await ctx.reply(formatted);
+    } catch (e: any) {
+      console.error("[telegram] /mcp_status failed", e?.message || e);
+    }
+  });
+
+  bot.command("mcp_tools", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const role = getTelegramRole(uid);
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      console.log("[telegram] /mcp_tools", { user_id: uid });
+
+      const status = await checkMCPHealth();
+      const formatted = formatMCPStatus(status, lang);
+      await ctx.reply(formatted);
+    } catch (e: any) {
+      console.error("[telegram] /mcp_tools failed", e?.message || e);
+    }
+  });
+
+  bot.command("mcp_test", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const role = getTelegramRole(uid);
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+      const label = getAccountLabel(uid);
+
+      console.log("[telegram] /mcp_test", { user_id: uid, label });
+
+      const result = await callMCPTool("telegpt_health", {}, uid, label);
+      const formatted = formatMCPTestResult(result, lang);
+      await ctx.reply(formatted);
+    } catch (e: any) {
+      console.error("[telegram] /mcp_test failed", e?.message || e);
+    }
+  });
+
+  bot.command("kilo_status", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const role = getTelegramRole(uid);
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      console.log("[telegram] /kilo_status", { user_id: uid });
+
+      const status = await checkKiloStatus();
+      const formatted = formatKiloStatus(status, lang);
+      await ctx.reply(formatted);
+    } catch (e: any) {
+      console.error("[telegram] /kilo_status failed", e?.message || e);
+    }
+  });
+
+  bot.command("kilo_tools", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const role = getTelegramRole(uid);
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      console.log("[telegram] /kilo_tools", { user_id: uid });
+
+      const status = await checkKiloStatus();
+      const formatted = formatKiloStatus(status, lang);
+      await ctx.reply(formatted);
+    } catch (e: any) {
+      console.error("[telegram] /kilo_tools failed", e?.message || e);
     }
   });
 
