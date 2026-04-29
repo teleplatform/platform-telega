@@ -6967,25 +6967,18 @@ Only extract when stable`
     try {
       const uid = String((ctx as any)?.from?.id || "");
       if (getAccountLabel(uid) !== "★") return;
-      const { DEFAULT_MULTIBLOCK_CONFIG: CONFIG, extractFullResponse } = await import("./multi-block-extraction.js");
+const { DEFAULT_MULTIBLOCK_CONFIG: CONFIG, extractFullResponse } = await import("./multi-block-extraction.js");
       await ctx.reply(
-        `🔍 CONVERSATION TURN EXTRACTION v6
+        `🔍 RENDERED CONTENT EXTRACTION v7
 
-Target: Assistant container inside LAST conversation turn.
+Target: Visible text (what user sees), not raw DOM.
 
-Algorithm:
-1. Select ALL conversation turns (article)
-2. Take LAST turn
-3. Inside turn, find assistant message
-4. Extract full innerText
-5. Extract images from same container
-6. DO NOT iterate blocks or use global query
+Method:
+1. getSelection().toString() = rendered text
+2. Fallback to innerText on error
+3. Applied to all 4 extraction points
 
-Settings:
-- Min valid: ${CONFIG.minValidLength} chars
-- Min text (normal): ${CONFIG.minTextLength} chars
-
-Key: Use conversation turn as ROOT, not blocks.`
+Key: DOM ≠ final text. Selection API reads what browser renders.`
       );
     } catch (e: any) {
       console.error("[extraction_test] fail", e?.message);
