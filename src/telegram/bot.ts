@@ -63,6 +63,38 @@ type UserRuntimeSettings = {
   creatorMode?: boolean;
 };
 
+export type AccountLabel = "★" | "★★" | "★★★" | "";
+
+export function getAccountLabel(userId: string | number | undefined): AccountLabel {
+  const id = String(userId || "");
+  if (id === "267246987") return "★";
+  if (id === "1166943180") return "★★";
+  if (id === "591948691") return "★★★";
+  return "";
+}
+
+export function getAccountName(userId: string | number | undefined): string {
+  const label = getAccountLabel(userId);
+  if (label === "★") return "Nikita (main)";
+  if (label === "★★") return "Nikita (secondary)";
+  if (label === "★★★") return "Arisha";
+  return "User";
+}
+
+export function isArisha(userId: string | number | undefined): boolean {
+  return getAccountLabel(userId) === "★★★";
+}
+
+export function canUseDangerousFeature(userId: string | number | undefined): boolean {
+  const label = getAccountLabel(userId);
+  return label === "★" || label === "★★";
+}
+
+export function formatMessageWithLabel(userId: string | number | undefined, message: string): string {
+  const label = getAccountLabel(userId);
+  return label ? `${label} ${message}` : message;
+}
+
 function getTelegramRole(userId: string | number | undefined): TelegramRole {
   const id = String(userId || "");
   if (id === "267246987" || id === "1166943180") return "owner";
