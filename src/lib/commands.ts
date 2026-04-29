@@ -473,3 +473,107 @@ export function renderSuggestions(context: CommandContext, lang: "ru" | "en"): s
 
   return toRender.map(c => c.name).join(" • ");
 }
+
+export type ActionSeverity = "info" | "warning" | "danger" | "success";
+
+export interface ActionCard {
+  card_id: string;
+  title_ru: string;
+  title_en: string;
+  description_ru: string;
+  description_en: string;
+  severity: ActionSeverity;
+  commands: string[];
+  context_match: Partial<CommandContext>;
+  expires_at?: number;
+  created_at: number;
+}
+
+export const ACTION_CARDS: ActionCard[] = [
+  {
+    card_id: "stalled_workflow",
+    title_ru: "Workflow приостановлен",
+    title_en: "Workflow stalled",
+    description_ru: "Обнаружен приостановленный workflow. Требуется диагностика.",
+    description_en: "Stalled workflow detected. Diagnostics required.",
+    severity: "danger",
+    commands: ["/forge_diagnose", "/forge_heal_plan", "/forge_report"],
+    context_match: { has_stalled_workflow: true },
+    created_at: 0,
+  },
+  {
+    card_id: "pending_apply",
+    title_ru: "Patch ожидает одобрения",
+    title_en: "Patch awaiting approval",
+    description_ru: "Patch готов к применению. Требуется одобрение ★",
+    description_en: "Patch ready to apply. Requires ★ approval.",
+    severity: "warning",
+    commands: ["/kilo_patch_preview", "/kilo_patch_apply", "/kilo_patch_reject"],
+    context_match: { has_pending_heal: true },
+    created_at: 0,
+  },
+  {
+    card_id: "provider_failed",
+    title_ru: "Провайдер недоступен",
+    title_en: "Provider failed",
+    description_ru: "Последний запрос не прошёл. Проверьте статус провайдера.",
+    description_en: "Last request failed. Check provider status.",
+    severity: "danger",
+    commands: ["/mcp_status", "/mcp_test", "/provider_health"],
+    context_match: { last_error: "" },
+    created_at: 0,
+  },
+  {
+    card_id: "active_workflow",
+    title_ru: "Workflow выполняется",
+    title_en: "Workflow running",
+    description_ru: "Активный workflow. Мониторинг выполнения.",
+    description_en: "Active workflow. Monitoring execution.",
+    severity: "info",
+    commands: ["/forge_next", "/forge_report", "/forge_timeline", "/forge_pause"],
+    context_match: { has_active_workflow: true },
+    created_at: 0,
+  },
+  {
+    card_id: "gates_failed",
+    title_ru: "Gates не пройдены",
+    title_en: "Gates failed",
+    description_ru: "Quality gates не пройдены. Проверьте и исправьте.",
+    description_en: "Quality gates failed. Check and fix.",
+    severity: "danger",
+    commands: ["/forge_validate", "/forge_diagnose", "/forge_heal_plan"],
+    context_match: { last_error: "gate" },
+    created_at: 0,
+  },
+];
+
+export function findActionCards(context: CommandContext): ActionCard[] {
+  return ACTION_CARDS.filter((card) => {
+    if (!card.context_match) return false;
+    for (const [key, value] of Object.entries(card.context_match)) {
+      if (context[key as keyof CommandContext] === value) return true;
+      if (typeof value === "string" && value === "") {
+        if (context[key as keyof CommandContext]) return true;
+      }
+    }
+    return false;
+  });
+}
+
+export function getSeverityColor(severity: ActionSeverity): string {
+  switch (severity) {
+    case "info": return "🔵";
+    case "warning": return "🟡";
+    case "danger": return "🔴";
+    case "success": return "🟢";
+    default: return "⚪";
+  }
+}
+
+export function renderActionCard(card: ActionCard, lang: "ru" | "en"): string {
+  const title = lang === "ru" ? card.title_ru : card.title_en;
+  const description = lang === "ru" ? card.description_ru : card.description_en;
+  const severityIcon = getSeverityColor(card.severity);
+
+  return `${severityIcon} ${title}\n${description}\n\n${card.commands.join(" • ")}`;
+}
