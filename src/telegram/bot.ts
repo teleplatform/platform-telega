@@ -6084,6 +6084,27 @@ await ctx.reply("❌ Voice processing failed");
     }
   });
 
+  bot.command("e2e_validate", async (ctx) => {
+    const uid = String((ctx as any)?.from?.id || "");
+    if (getAccountLabel(uid) !== "★") return;
+    try {
+      await ctx.reply("🧪 Running E2E validation...");
+      const { runE2EValidation } = await import("./e2e-validation.js");
+      const report = await runE2EValidation();
+      const lines = [
+        `📋 E2E VALIDATION v2`,
+        `Overall: **${report.summary.pass + report.summary.warn > 0 ? "PASS" : "FAIL"}**`,
+        `Pass: ${report.summary.pass} | Warn: ${report.summary.warn} | Fail: ${report.summary.fail}`,
+        "",
+        ...report.results.slice(0, 8).map((r: any) => `${r.status} ${r.test_name}`),
+      ];
+      await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
+    } catch (e: any) {
+      console.error("[e2e] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 

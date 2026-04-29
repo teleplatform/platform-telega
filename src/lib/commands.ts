@@ -105,6 +105,16 @@ export const TELEGPT_COMMANDS: CommandDefinition[] = [
     ui: { showInHelp: true, showInCommands: false, showInButtons: true },
   },
   {
+    name: "/e2e_validate",
+    args: "",
+    description: { ru: "E2E валидация системы", en: "run E2E validation" },
+    usage_ru: "/e2e_validate",
+    usage_en: "/e2e_validate",
+    roles: ["★"],
+    category: "system",
+    ui: { showInHelp: true, showInCommands: true, showInButtons: false },
+  },
+  {
     name: "/image",
     args: "<prompt>",
     description: { ru: "сгенерировать изображение", en: "generate image" },
