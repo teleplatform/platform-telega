@@ -6385,6 +6385,26 @@ Status: ${product.status}
     }
   });
 
+  bot.command("real_usage_loop", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      await ctx.reply("🔄 Running real usage loop...");
+      const { runRealUsageLoop } = await import("./real-usage-loop.js");
+      const loop = await runRealUsageLoop();
+      const lines = [
+        `🔄 REAL USAGE LOOP`,
+        `Overall: **${loop.overall}**`,
+        "",
+        ...loop.steps.map((s: any) => `${s.status} ${s.step_name}`),
+      ];
+      await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
+    } catch (e: any) {
+      console.error("[real_usage_loop] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 

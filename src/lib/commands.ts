@@ -255,6 +255,16 @@ export const TELEGPT_COMMANDS: CommandDefinition[] = [
     ui: { showInHelp: true, showInCommands: true, showInButtons: false },
   },
   {
+    name: "/real_usage_loop",
+    args: "",
+    description: { ru: "прогнать реальный flow", en: "run real usage loop" },
+    usage_ru: "/real_usage_loop",
+    usage_en: "/real_usage_loop",
+    roles: ["★"],
+    category: "system",
+    ui: { showInHelp: true, showInCommands: true, showInButtons: false },
+  },
+  {
     name: "/image",
     args: "<prompt>",
     description: { ru: "сгенерировать изображение", en: "generate image" },
