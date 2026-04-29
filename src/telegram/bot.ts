@@ -6764,6 +6764,36 @@ Oblivion: ${status.oblivion_count} entries`
     }
   });
 
+  bot.command("memory_context", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const query = args.join(" ");
+      if (!query) {
+        await ctx.reply("Usage: /memory_context <query>");
+        return;
+      }
+      const { fusionMemoryContext, buildPromptWithMemory } = await import("./memory-integration.js");
+      const context = await fusionMemoryContext(query);
+      const enhancedPrompt = buildPromptWithMemory("Base response", context);
+      await ctx.reply(
+        `🧠 MEMORY CONTEXT
+        
+Query: ${query}
+Knowledge: ${context.knowledge.length}
+Experience: ${context.experience.length}
+Memory Used: ${context.memory_used ? "YES" : "NO"}
+
+Preview:
+${enhancedPrompt.substring(0, 200)}...`
+      );
+    } catch (e: any) {
+      console.error("[memory_context] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 

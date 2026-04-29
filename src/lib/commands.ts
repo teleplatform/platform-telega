@@ -435,6 +435,16 @@ export const TELEGPT_COMMANDS: CommandDefinition[] = [
     ui: { showInHelp: true, showInCommands: true, showInButtons: false },
   },
   {
+    name: "/memory_context",
+    args: "<query>",
+    description: { ru: "контекст памяти", en: "memory context" },
+    usage_ru: "/memory_context tattoo pricing",
+    usage_en: "/memory_context tattoo pricing",
+    roles: ["★"],
+    category: "system",
+    ui: { showInHelp: true, showInCommands: true, showInButtons: false },
+  },
+  {
     name: "/image",
     args: "<prompt>",
     description: { ru: "сгенерировать изображение", en: "generate image" },
