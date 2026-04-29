@@ -6963,6 +6963,37 @@ Only extract when stable`
     }
   });
 
+  bot.command("extraction_test", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      const { DEFAULT_MULTI_BLOCK_CONFIG, extractMultiBlockWithImages } = await import("./multi-block-extraction.js");
+      await ctx.reply(
+        `🔍 MULTI-BLOCK EXTRACTION v4
+        
+Config:
+- Collects ALL assistant blocks
+- Ignores UI elements (buttons, etc.)
+- Deduplicates content
+- Extracts images
+
+Settings:
+- Min text (normal): ${DEFAULT_MULTI_BLOCK_CONFIG.minTextLength} chars
+- Max wait: ${DEFAULT_MULTI_BLOCK_CONFIG.maxWaitMs}ms
+- Include streaming: ${DEFAULT_MULTI_BLOCK_CONFIG.includeStreaming}
+
+Method:
+1. querySelectorAll for assistant blocks
+2. Concatenate all blocks
+3. Extract images from document
+4. Return full text + images`
+      );
+    } catch (e: any) {
+      console.error("[extraction_test] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 

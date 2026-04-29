@@ -525,6 +525,16 @@ export const TELEGPT_COMMANDS: CommandDefinition[] = [
     ui: { showInHelp: true, showInCommands: true, showInButtons: false },
   },
   {
+    name: "/extraction_test",
+    args: "",
+    description: { ru: "тест извлечения", en: "extraction test" },
+    usage_ru: "/extraction_test",
+    usage_en: "/extraction_test",
+    roles: ["★"],
+    category: "system",
+    ui: { showInHelp: true, showInCommands: true, showInButtons: false },
+  },
+  {
     name: "/image",
     args: "<prompt>",
     description: { ru: "сгенерировать изображение", en: "generate image" },
