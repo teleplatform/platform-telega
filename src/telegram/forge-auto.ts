@@ -7,6 +7,11 @@ const FORGE_DIR = path.join(process.cwd(), "data/forge");
 const AUTO_MODES_FILE = path.join(FORGE_DIR, "auto-modes.jsonl");
 const AUTO_LOGS_FILE = path.join(FORGE_DIR, "auto-evidence.jsonl");
 
+const MAX_AUTO_PER_USER = 1;
+const MAX_LOOP_DEPTH = 3;
+const COOLDOWN_MS = 30000;
+const SAFETY_STAGES = ["review", "apply"];
+
 export type ForgeMode = "manual" | "assisted" | "autonomous";
 
 export interface AutoModeRecord {
@@ -80,6 +85,20 @@ export async function setAutoMode(
 ): Promise<{ ok: boolean; error?: string }> {
   await ensureDir();
 
+  const existingRecords = await readAutoModes();
+  const userActive = existingRecords.filter(
+    (r) => r.user_id === userId && r.status === "active"
+  );
+
+  if (userActive.length >= MAX_AUTO_PER_USER) {
+    return {
+      ok: false,
+      error: lang === "ru"
+        ? `Максимум ${MAX_AUTO_PER_USER} авто-режим на пользователя`
+        : `Max ${MAX_AUTO_PER_USER} auto mode per user`,
+    };
+  }
+
   const record: AutoModeRecord = {
     record_id: makeId("auto"),
     workflow_id: workflowId,
@@ -89,7 +108,7 @@ export async function setAutoMode(
     status: "active",
     current_stage: "intent",
     loop_count: 0,
-    max_loops: mode === "autonomous" ? 10 : mode === "assisted" ? 5 : 1,
+    max_loops: mode === "autonomous" ? MAX_LOOP_DEPTH : mode === "assisted" ? 5 : 1,
     auto_approve: autoApprove && mode === "autonomous",
     wait_approval: false,
     created_at: Date.now(),
@@ -162,6 +181,7 @@ async function writeAutoModes(records: AutoModeRecord[]): Promise<void> {
 
 async function runAutoLoop(recordId: string): Promise<void> {
   try {
+    const now = Date.now();
     const records = await readAutoModes();
     const idx = records.findIndex((r) => r.record_id === recordId);
     if (idx < 0) return;
@@ -169,26 +189,48 @@ async function runAutoLoop(recordId: string): Promise<void> {
     const record = records[idx];
 
     if (record.status !== "active") return;
+
     if (record.loop_count >= record.max_loops) {
       record.status = "completed";
-      record.updated_at = Date.now();
+      record.updated_at = now;
       await writeAutoModes(records);
       await logEvent(record, "forge_auto_completed", "Max loops reached");
       return;
     }
 
+    if (record.loop_count > 0) {
+      const timeSinceLastUpdate = now - (record.updated_at ?? record.created_at);
+      if (timeSinceLastUpdate < COOLDOWN_MS) {
+        await logEvent(record, "forge_auto_cooldown", `Waiting ${COOLDOWN_MS}ms before next step`);
+        setTimeout(() => runAutoLoop(recordId), COOLDOWN_MS);
+        return;
+      }
+    }
+
     const settings = AUTO_STAGES[record.current_stage];
     if (!settings) {
       record.status = "completed";
-      record.updated_at = Date.now();
+      record.updated_at = now;
       await writeAutoModes(records);
       return;
+    }
+
+    if (SAFETY_STAGES.includes(record.current_stage) && record.mode === "autonomous") {
+      if (!record.auto_approve) {
+        if (!record.wait_approval) {
+          record.wait_approval = true;
+          record.updated_at = now;
+          await writeAutoModes(records);
+          await logEvent(record, "forge_auto_safety_stop", `Safety stop at ${record.current_stage}`);
+          return;
+        }
+      }
     }
 
     if (settings.requires_approval && !record.auto_approve && record.mode === "autonomous") {
       if (!record.wait_approval) {
         record.wait_approval = true;
-        record.updated_at = Date.now();
+        record.updated_at = now;
         await writeAutoModes(records);
         await logEvent(record, "forge_auto_waiting_approval", `Stage: ${record.current_stage}`);
       }
@@ -205,7 +247,7 @@ async function runAutoLoop(recordId: string): Promise<void> {
 
     if (!nextStage) {
       record.status = "completed";
-      record.updated_at = Date.now();
+      record.updated_at = now;
       await writeAutoModes(records);
       await logEvent(record, "forge_auto_completed", "Workflow completed");
       return;
@@ -213,7 +255,7 @@ async function runAutoLoop(recordId: string): Promise<void> {
 
     record.current_stage = nextStage;
     record.loop_count++;
-    record.updated_at = Date.now();
+    record.updated_at = now;
 
     await writeAutoModes(records);
     await logEvent(record, "forge_auto_step", `${oldStage} → ${nextStage}`);
