@@ -6556,6 +6556,108 @@ Refunds: ${report.total_refunds}`
     }
   });
 
+  bot.command("seller_start", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      await ctx.reply(
+        `🏪 SELLER START
+        
+Let's create your shop!
+
+Send me:
+• Shop name
+• Category (tattoo/art/service/etc)
+• Short description`
+      );
+      const { createSellerProfile } = await import("./seller-engine.js");
+      const profile = await createSellerProfile("My Shop", "Quality services", "general", uid);
+      await ctx.reply(`✅ Shop created: ${profile.id}\nTier: ${profile.tier} (3 products free)`);
+    } catch (e: any) {
+      console.error("[seller_start] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("seller_profile", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const { getSellerByUser } = await import("./seller-engine.js");
+      const profile = await getSellerByUser(uid);
+      if (!profile) {
+        await ctx.reply("You are not a seller. Use /seller_start");
+        return;
+      }
+      await ctx.reply(
+        `🏪 ${profile.name}
+        
+Description: ${profile.description}
+Category: ${profile.category}
+Tier: ${profile.tier}
+Products: ${profile.products_count}
+Orders: ${profile.total_orders}
+Revenue: ${profile.total_revenue}₽
+Rating: ${profile.rating}★`
+      );
+    } catch (e: any) {
+      console.error("[seller_profile] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("seller_dashboard", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const { getSellerByUser, getSellerDashboard } = await import("./seller-engine.js");
+      const profile = await getSellerByUser(uid);
+      if (!profile) {
+        await ctx.reply("Use /seller_start first");
+        return;
+      }
+      const dash = await getSellerDashboard(profile.id);
+      if (!dash) return;
+      await ctx.reply(
+        `📊 SELLER DASHBOARD
+        
+${dash.profile?.name}
+Products: ${dash.products}
+Orders: ${dash.orders}
+Revenue: ${dash.revenue}₽`
+      );
+    } catch (e: any) {
+      console.error("[seller_dashboard] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("seller_add_product", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const { getSellerByUser, createSellerProduct, canAddProduct } = await import("./seller-engine.js");
+      const profile = await getSellerByUser(uid);
+      if (!profile) {
+        await ctx.reply("Use /seller_start first");
+        return;
+      }
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      if (args.length < 2) {
+        await ctx.reply("Usage: /seller_add_product <title> <price>");
+        return;
+      }
+      const price = parseInt(args[args.length - 1], 10);
+      const title = args.slice(0, -1).join(" ");
+      const canAdd = await canAddProduct(profile.id);
+      if (!canAdd.allowed) {
+        await ctx.reply(canAdd.reason || "Cannot add product");
+        return;
+      }
+      const product = await createSellerProduct(profile.id, title, "Seller product", price);
+      await ctx.reply(`✅ Product: ${product?.id}\nPrice: ${price}₽`);
+    } catch (e: any) {
+      console.error("[seller_add_product] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
