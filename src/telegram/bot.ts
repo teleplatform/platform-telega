@@ -71,6 +71,16 @@ import {
   rollbackApply,
   formatPatchList,
 } from "./kilo-controlled-write.js";
+import {
+  createForgeTask,
+  getForgeTask,
+  updateForgeTask,
+  listForgeTasks,
+  handleForgeTask,
+  formatForgeTask,
+  formatForgeTaskList,
+  canManageForgeTask,
+} from "./forge-shell.js";
 
 function getTelegaRoot(): string {
   const root = (process.env.TELEGA_ROOT || "").trim();
@@ -4335,6 +4345,191 @@ bot.command("set_currency", async (ctx) => {
       await ctx.reply(`✅ ${lang === "ru" ? "Откат выполнен" : "Rollback complete"}`);
     } catch (e: any) {
       console.error("[telegram] /kilo_patch_rollback failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_task", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const perms = await canManageForgeTask(label);
+      if (!perms.create) {
+        await ctx.reply(lang === "ru"
+          ? "❌ Создание task только для ★/★★★"
+          : "❌ Task creation only for ★/★★★");
+        return;
+      }
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const taskDesc = args.join(" ").trim();
+
+      if (!taskDesc) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_task <задача>\nПример: /forge_task добавить валидацию в форму"
+          : "Usage: /forge_task <task>\nExample: /forge_task add validation to form");
+        return;
+      }
+
+      console.log("[telegram] /forge_task", { user_id: uid, label, task: taskDesc.slice(0, 50) });
+
+      const titleMatch = taskDesc.match(/^([^\n]+)/);
+      const title = titleMatch ? titleMatch[1].slice(0, 50) : taskDesc.slice(0, 50);
+
+      await ctx.reply(lang === "ru" ? "🔨 Создаю task..." : "🔨 Creating task...");
+
+      const result = await createForgeTask(uid, label, title, taskDesc, lang);
+
+      if (result.error) {
+        await ctx.reply(`❌ ${result.error}`);
+        return;
+      }
+
+      await ctx.reply(`✅ ${lang === "ru" ? "Task создан" : "Task created"}: ${result.task_id}`);
+
+      if (perms.apply) {
+        await ctx.reply(lang === "ru"
+          ? "Применяю task..."
+          : "Applying task...");
+
+        const execResult = await handleForgeTask(result.task_id!, uid, label, lang);
+        if (execResult.ok) {
+          await ctx.reply(lang === "ru" ? "✅ Task выполнен!" : "✅ Task completed!");
+        } else {
+          await ctx.reply(`⚠️ ${execResult.error}`);
+        }
+      }
+    } catch (e: any) {
+      console.error("[telegram] /forge_task failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_status", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const taskId = args.join(" ").trim();
+
+      if (taskId) {
+        const task = await getForgeTask(taskId);
+        if (!task) {
+          await ctx.reply(lang === "ru" ? "Task не найден" : "Task not found");
+          return;
+        }
+        const formatted = formatForgeTask(task, lang);
+        await ctx.reply(formatted);
+        return;
+      }
+
+      const label = getAccountLabel(uid);
+      const tasks = await listForgeTasks(uid, label);
+      const formatted = formatForgeTaskList(tasks, lang);
+      await ctx.reply(formatted);
+    } catch (e: any) {
+      console.error("[telegram] /forge_status failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_apply", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const perms = await canManageForgeTask(label);
+      if (!perms.apply) {
+        await ctx.reply(lang === "ru"
+          ? "❌ Применение только для ★"
+          : "❌ Apply only for ★");
+        return;
+      }
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const taskId = args.join(" ").trim();
+
+      if (!taskId) {
+        await ctx.reply(lang === "ru" ? "Использование: /forge_apply <task_id>" : "Usage: /forge_apply <task_id>");
+        return;
+      }
+
+      console.log("[telegram] /forge_apply", { user_id: uid, label, task_id: taskId });
+
+      await ctx.reply(lang === "ru" ? "🔨 Применяю task..." : "🔨 Applying task...");
+
+      const result = await handleForgeTask(taskId, uid, label, lang);
+
+      if (result.ok) {
+        await ctx.reply(lang === "ru" ? "✅ Task выполнен!" : "✅ Task completed!");
+      } else {
+        await ctx.reply(`❌ ${result.error}`);
+      }
+    } catch (e: any) {
+      console.error("[telegram] /forge_apply failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_rollback", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const perms = await canManageForgeTask(label);
+      if (!perms.rollback) {
+        await ctx.reply(lang === "ru"
+          ? "❌ Rollback только для ★"
+          : "❌ Rollback only for ★");
+        return;
+      }
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const taskId = args.join(" ").trim();
+
+      if (!taskId) {
+        await ctx.reply(lang === "ru" ? "Использование: /forge_rollback <task_id>" : "Usage: /forge_rollback <task_id>");
+        return;
+      }
+
+      const task = await getForgeTask(taskId);
+      if (!task?.apply_id) {
+        await ctx.reply(lang === "ru" ? "Нет apply для отката" : "No apply to rollback");
+        return;
+      }
+
+      console.log("[telegram] /forge_rollback", { user_id: uid, label, task_id: taskId });
+
+      const result = await rollbackApply(task.apply_id, uid, label, lang);
+
+      if (result.ok) {
+        await updateForgeTask(taskId, { status: "rolled_back" });
+        await ctx.reply(lang === "ru" ? "↩️ Task откачен" : "↩️ Task rolled back");
+      } else {
+        await ctx.reply(`❌ ${result.error}`);
+      }
+    } catch (e: any) {
+      console.error("[telegram] /forge_rollback failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_history", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const tasks = await listForgeTasks(uid, label, 20);
+      const formatted = formatForgeTaskList(tasks, lang);
+      await ctx.reply(formatted);
+    } catch (e: any) {
+      console.error("[telegram] /forge_history failed", e?.message || e);
     }
   });
 
