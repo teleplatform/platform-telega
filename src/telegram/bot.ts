@@ -121,6 +121,15 @@ import {
   formatCheckpointList,
   formatRecoveryReport,
 } from "./forge-checkpoints.js";
+import {
+  classifyFailure,
+  createHealPlan,
+  getHealPlan,
+  getWorkflowHealPlans,
+  updateHealPlanStatus,
+  formatHealPlan,
+  formatDiagnosis,
+} from "./forge-heal.js";
 
 function getTelegaRoot(): string {
   const root = (process.env.TELEGA_ROOT || "").trim();
@@ -5142,6 +5151,138 @@ bot.command("set_currency", async (ctx) => {
       }
     } catch (e: any) {
       console.error("[telegram] /forge_recover failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_diagnose", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const workflowId = args.join(" ").trim();
+
+      if (!workflowId) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_diagnose <workflow_id> [error_message]"
+          : "Usage: /forge_diagnose <workflow_id> [error_message]");
+        return;
+      }
+
+      const parts = workflowId.split(" ");
+      const actualWorkflowId = parts[0];
+      const errorMessage = parts.length > 1 ? parts.slice(1).join(" ") : "Workflow failed";
+
+      console.log("[telegram] /forge_diagnose", { user_id: uid, workflow_id: actualWorkflowId });
+
+      const failureType = classifyFailure(errorMessage);
+      const diagnosis = formatDiagnosis(actualWorkflowId, failureType, errorMessage, lang);
+
+      await ctx.reply(diagnosis);
+    } catch (e: any) {
+      console.error("[telegram] /forge_diagnose failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_heal_plan", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const workflowId = args.join(" ").trim();
+
+      if (!workflowId) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_heal_plan <workflow_id>"
+          : "Usage: /forge_heal_plan <workflow_id>");
+        return;
+      }
+
+      const canCreate = label === "★" || label === "★★" || label === "★★★";
+      if (!canCreate && label === "") {
+        await ctx.reply(lang === "ru" ? "Только для ★/★★★" : "Only for ★/★★★");
+        return;
+      }
+
+      console.log("[telegram] /forge_heal_plan", { user_id: uid, workflow_id: workflowId, label });
+
+      const plan = await createHealPlan(workflowId, "unknown", "Diagnostic scan", uid, lang);
+
+      const formatted = formatHealPlan(plan, lang);
+      await ctx.reply(formatted, { parse_mode: "Markdown" });
+
+      if (plan.risk_level === "critical" || plan.risk_level === "high") {
+        await ctx.reply(lang === "ru"
+          ? "⚠️ Требуется одобрение владельца"
+          : "⚠️ Owner approval required");
+      }
+    } catch (e: any) {
+      console.error("[telegram] /forge_heal_plan failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_heal_apply", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const canApply = label === "★" || label === "★★";
+      if (!canApply) {
+        await ctx.reply(lang === "ru"
+          ? "❌ Heal apply только для ★"
+          : "❌ Heal apply only for ★");
+        return;
+      }
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const healId = args.join(" ").trim();
+
+      if (!healId) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_heal_apply <heal_id>"
+          : "Usage: /forge_heal_apply <heal_id>");
+        return;
+      }
+
+      console.log("[telegram] /forge_heal_apply", { user_id: uid, heal_id: healId, label });
+
+      const plan = await getHealPlan(healId);
+      if (!plan) {
+        await ctx.reply(lang === "ru" ? "Heal план не найден" : "Heal plan not found");
+        return;
+      }
+
+      if (plan.status === "applied") {
+        await ctx.reply(lang === "ru" ? "Уже применено" : "Already applied");
+        return;
+      }
+
+      if (plan.requires_owner_approval && !canApply) {
+        await ctx.reply(lang === "ru"
+          ? "❌ Требуется одобрение ★"
+          : "❌ Requires ★ approval");
+        return;
+      }
+
+      await updateHealPlanStatus(healId, "approved", label);
+
+      await ctx.reply(lang === "ru"
+        ? "✅ Heal план одобрен"
+        : "✅ Heal plan approved");
+
+      await updateHealPlanStatus(healId, "applied");
+
+      await ctx.reply(lang === "ru"
+        ? "✅ Heal применён"
+        : "✅ Heal applied");
+    } catch (e: any) {
+      console.error("[telegram] /forge_heal_apply failed", e?.message || e);
     }
   });
 
