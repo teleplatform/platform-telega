@@ -1,8 +1,10 @@
 import { useParams, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
-import { Play, Pause, AlertTriangle, Clock, ArrowLeft } from "lucide-react";
+import { Play, Pause, AlertTriangle, Clock, ArrowLeft, CheckCircle } from "lucide-react";
 import { useForgeWorkflows } from "../hooks/useForge";
 import type { ForgeWorkflow, WorkflowStageRecord } from "../types/forge";
+
+import { useForgeAction } from "../hooks/useForge";
 
 const STAGES = ["intent", "analysis", "plan", "review", "apply", "verify", "complete"];
 
@@ -30,7 +32,9 @@ function getStageStatus(stages: Record<string, WorkflowStageRecord> | undefined,
 export function ForgeWorkflowScreen() {
   const { id } = useParams<{ id: string }>();
   const { workflows } = useForgeWorkflows();
+  const { execute, loading: actionLoading } = useForgeAction();
   const [workflow, setWorkflow] = useState<ForgeWorkflow | null>(null);
+  const [actionResult, setActionResult] = useState<string | null>(null);
 
   useEffect(() => {
     if (id && workflows.length) {
@@ -38,6 +42,14 @@ export function ForgeWorkflowScreen() {
       setWorkflow(found ?? null);
     }
   }, [id, workflows]);
+
+  const handleAction = async (action: string) => {
+    const result = await execute(action, { workflow_id: id });
+    if (result?.success) {
+      setActionResult(result.command_hint ?? result.message);
+      setTimeout(() => setActionResult(null), 3000);
+    }
+  };
 
   if (!workflow) {
     return (
@@ -142,10 +154,24 @@ export function ForgeWorkflowScreen() {
                 </div>
                 {isCurrent && (
                   <div className="flex gap-2">
-                    <button className="p-2 rounded bg-primary/20 hover:bg-primary/30" title="Next">
-                      <Play className="w-4 h-4" />
+                    <button
+                      onClick={() => handleAction("forge_next")}
+                      disabled={actionLoading}
+                      className="p-2 rounded bg-primary/20 hover:bg-primary/30 disabled:opacity-50"
+                      title="Next Stage"
+                    >
+                      {actionLoading ? (
+                        <Clock className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Play className="w-4 h-4" />
+                      )}
                     </button>
-                    <button className="p-2 rounded bg-yellow-500/20 hover:bg-yellow-500/30" title="Pause">
+                    <button
+                      onClick={() => handleAction("forge_pause")}
+                      disabled={actionLoading}
+                      className="p-2 rounded bg-yellow-500/20 hover:bg-yellow-500/30 disabled:opacity-50"
+                      title="Pause"
+                    >
                       <Pause className="w-4 h-4" />
                     </button>
                   </div>
@@ -179,7 +205,21 @@ export function ForgeWorkflowScreen() {
         >
           Report
         </Link>
+        <button
+          onClick={() => handleAction("forge_validate")}
+          disabled={actionLoading}
+          className="px-3 py-2 bg-primary/20 rounded hover:bg-primary/30 disabled:opacity-50"
+        >
+          Validate
+        </button>
       </div>
+
+      {actionResult && (
+        <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+          <CheckCircle className="w-5 h-5 text-green-400" />
+          <span className="text-green-300 text-sm">{actionResult}</span>
+        </div>
+      )}
     </div>
   );
 }

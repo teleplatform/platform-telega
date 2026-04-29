@@ -10,8 +10,9 @@ import {
   Shield,
   ShieldAlert,
   ShieldCheck,
+  Play,
 } from "lucide-react";
-import { useForgePatch, useForgePatches } from "../hooks/useForge";
+import { useForgePatch, useForgePatches, useForgeAction } from "../hooks/useForge";
 import type { KiloPatchPlan } from "../types/forge";
 
 const RISK_COLORS = {
@@ -61,13 +62,31 @@ function getRiskIcon(risk: string) {
 export function ForgeDiffScreen() {
   const { id } = useParams<{ id: string }>();
   const { patch, loading, error } = useForgePatch(id ?? "");
+  const { execute, loading: actionLoading } = useForgeAction();
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [actionResult, setActionResult] = useState<string | null>(null);
 
   useEffect(() => {
     if (patch?.files?.length && !selectedFile) {
       setSelectedFile(patch.files[0]);
     }
   }, [patch, selectedFile]);
+
+  const handleApply = async () => {
+    const result = await execute("patch_apply_request", { patch_id: id });
+    if (result?.success) {
+      setActionResult(result.command_hint ?? result.message);
+      setTimeout(() => setActionResult(null), 5000);
+    }
+  };
+
+  const handleRollback = async () => {
+    const result = await execute("patch_rollback_request", { patch_id: id });
+    if (result?.success) {
+      setActionResult(result.command_hint ?? result.message);
+      setTimeout(() => setActionResult(null), 5000);
+    }
+  };
 
   if (loading && !patch) {
     return (
@@ -177,14 +196,40 @@ export function ForgeDiffScreen() {
       </div>
 
       {patch.status === "pending" && (
-        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
-          <p className="text-yellow-300 text-sm">
-            To apply this patch, use the command:{" "}
-            <code className="font-mono">/kilo_patch_apply {patch.plan_id}</code>
-          </p>
-          <p className="text-yellow-300 text-xs mt-1">
-            Requires owner (★) role approval
-          </p>
+        <div className="flex flex-col gap-2">
+          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
+            <p className="text-yellow-300 text-sm">
+              To apply this patch, use the command:{" "}
+              <code className="font-mono">/kilo_patch_apply {patch.plan_id}</code>
+            </p>
+            <p className="text-yellow-300 text-xs mt-1">
+              Requires owner (★) role approval via Telegram
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleApply}
+              disabled={actionLoading}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-500/20 hover:bg-green-500/30 rounded disabled:opacity-50"
+            >
+              <Play className="w-4 h-4" />
+              <span>Request Apply</span>
+            </button>
+            <button
+              onClick={handleRollback}
+              disabled={actionLoading}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 rounded disabled:opacity-50"
+            >
+              <XCircle className="w-4 h-4" />
+              <span>Request Rollback</span>
+            </button>
+          </div>
+          {actionResult && (
+            <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+              <CheckCircle className="w-5 h-5 text-green-400" />
+              <span className="text-green-300 text-sm">{actionResult}</span>
+            </div>
+          )}
         </div>
       )}
     </div>

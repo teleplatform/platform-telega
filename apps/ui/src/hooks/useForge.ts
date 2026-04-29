@@ -16,6 +16,16 @@ async function fetchJson<T>(url: string): Promise<T> {
   return res.json();
 }
 
+export async function postJson<T>(url: string, body: any): Promise<T> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 export function useForgeDashboard() {
   const [dashboard, setDashboard] = useState<ForgeDashboard | null>(null);
   const [loading, setLoading] = useState(true);
@@ -203,4 +213,34 @@ export function useForgePatch(id: string) {
   }, [refresh]);
 
   return { patch, loading, error, refresh };
+}
+
+export function useForgeAction() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<any>(null);
+
+  const execute = useCallback(
+    async (action: string, params?: { workflow_id?: string; patch_id?: string }) => {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await postJson<any>(`${API_BASE}/api/forge/action`, {
+          action,
+          ...params,
+        });
+        setResult(data);
+        return data;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Action failed";
+        setError(msg);
+        return { success: false, error: msg };
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  return { execute, loading, error, result };
 }
