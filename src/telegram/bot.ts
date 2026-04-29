@@ -26,6 +26,8 @@ import { retryBuildTask } from "../intel/retryBuildTask.js";
 import { MSG } from "#i18n/messages";
 import type { SessionProviderId } from "../providers/creator/session/adapters.js";
 import { deliverFullOutput } from "../providers/creator/output-delivery.js";
+import { detectLanguage } from "../providers/creator/i18n.js";
+import { buildReplyExtra, saveResponse as saveActionResponse, getLastResponse, logAction } from "./action-buttons.js";
 
 function getTelegaRoot(): string {
   const root = (process.env.TELEGA_ROOT || "").trim();
@@ -3840,7 +3842,25 @@ bot.command("set_currency", async (ctx) => {
       const output = String(data?.output || data?.reply || data?.answer || "").trim();
       if (!output) throw new Error("Empty /v1/chat response");
 
+      const uid = String(userIdOf(ctx));
+      const chatIdStr = String(chatId(ctx));
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+      const label = getAccountLabel(uid);
+
       await ctx.reply(output);
+
+      await saveActionResponse(
+        chatIdStr,
+        uid,
+        text,
+        output,
+        selectedProvider,
+        data?.request_id || String(Date.now())
+      );
+
+      const extra = buildReplyExtra(lang) as any;
+      await ctx.reply("━━━━━━━━━━━━━━━━━━━━━━", extra);
     } catch (e: any) {
       const errMsg = e?.message || String(e);
       const activeSettings = settingsOf(ctx);
@@ -3856,6 +3876,212 @@ bot.command("set_currency", async (ctx) => {
       
       console.error("[pantheon-tg] /v1/chat text handler failed", errMsg);
       await ctx.reply(replyMsg);
+    }
+  });
+
+  bot.action("action_repeat", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      console.log("[telegram-action] action_repeat clicked", { user_id: uid, chat_id: chatIdStr, label });
+
+      const lastResponse = await getLastResponse(chatIdStr, uid);
+      if (!lastResponse) {
+        await ctx.answerCbQuery(lang === "ru" ? "Нет предыдущего ответа" : "No previous response", { show_alert: true });
+        return;
+      }
+
+      await ctx.answerCbQuery(lang === "ru" ? "Повторяю..." : "Repeating...");
+      await ctx.reply(`🔁 ${lastResponse.message}`);
+
+      const res = await fetch("http://127.0.0.1:8787/v1/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: AbortSignal.timeout(65000),
+        body: JSON.stringify({
+          message: lastResponse.message,
+          model: providerToModel(lastResponse.provider as TelegramProvider),
+          task: { type: "chat" },
+          meta: {
+            source: "telegram",
+            telegram_user_id: uid,
+            selected_provider: lastResponse.provider,
+            bridge_enabled: false,
+            creator_mode: label === "★" || label === "★★",
+            chat_id: chatIdStr,
+            from: uid,
+            action: "repeat",
+          },
+        }),
+      });
+
+      const data = (await res.json().catch(() => ({}))) as any;
+      const output = String(data?.output || data?.reply || data?.answer || "").trim();
+
+      if (output) {
+        await ctx.reply(output);
+        await saveActionResponse(chatIdStr, uid, lastResponse.message, output, lastResponse.provider, data?.request_id || String(Date.now()));
+      } else {
+        await ctx.reply(lang === "ru" ? "❌ Повтор не удался" : "❌ Repeat failed");
+      }
+
+      await logAction(chatIdStr, uid, label, "repeat", output ? "completed" : "failed");
+    } catch (e: any) {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const label = getAccountLabel(uid);
+      console.error("[telegram-action] action_repeat failed", e?.message || e);
+      await logAction(chatIdStr, uid, label, "repeat", "failed", e?.message);
+      await ctx.answerCbQuery("Error: " + (e?.message || "unknown"), { show_alert: true });
+    }
+  });
+
+  bot.action("action_clarify", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      console.log("[telegram-action] action_clarify clicked", { user_id: uid, chat_id: chatIdStr, label });
+
+      const lastResponse = await getLastResponse(chatIdStr, uid);
+      if (!lastResponse) {
+        await ctx.answerCbQuery(lang === "ru" ? "Нет предыдущего ответа" : "No previous response", { show_alert: true });
+        return;
+      }
+
+      await ctx.answerCbQuery(lang === "ru" ? "Уточняю..." : "Clarifying...");
+
+      const clarifyPrompt = lang === "ru"
+        ? `Уточни и сделай понятнее след��ющий ответ:\n\n${lastResponse.response_text}`
+        : `Make the following answer clearer and more concise:\n\n${lastResponse.response_text}`;
+
+      const res = await fetch("http://127.0.0.1:8787/v1/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: AbortSignal.timeout(65000),
+        body: JSON.stringify({
+          message: clarifyPrompt,
+          model: providerToModel(lastResponse.provider as TelegramProvider),
+          task: { type: "chat" },
+          meta: {
+            source: "telegram",
+            telegram_user_id: uid,
+            selected_provider: lastResponse.provider,
+            bridge_enabled: false,
+            creator_mode: label === "★" || label === "★★",
+            chat_id: chatIdStr,
+            from: uid,
+            action: "clarify",
+          },
+        }),
+      });
+
+      const data = (await res.json().catch(() => ({}))) as any;
+      const output = String(data?.output || data?.reply || data?.answer || "").trim();
+
+      if (output) {
+        await ctx.reply(output);
+      } else {
+        await ctx.reply(lang === "ru" ? "❌ Уточнение не удалось" : "❌ Clarify failed");
+      }
+
+      await logAction(chatIdStr, uid, label, "clarify", output ? "completed" : "failed");
+    } catch (e: any) {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const label = getAccountLabel(uid);
+      console.error("[telegram-action] action_clarify failed", e?.message || e);
+      await logAction(chatIdStr, uid, label, "clarify", "failed", e?.message);
+      await ctx.answerCbQuery("Error: " + (e?.message || "unknown"), { show_alert: true });
+    }
+  });
+
+  bot.action("action_file", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const label = getAccountLabel(uid);
+
+      console.log("[telegram-action] action_file clicked", { user_id: uid, chat_id: chatIdStr, label });
+
+      const lastResponse = await getLastResponse(chatIdStr, uid);
+      if (!lastResponse) {
+        await ctx.answerCbQuery("No previous response", { show_alert: true });
+        return;
+      }
+
+      await ctx.answerCbQuery("Sending as file...");
+
+      const filename = `response_${lastResponse.request_id}.txt`;
+      const content = `# Response ${lastResponse.request_id}\n# Provider: ${lastResponse.provider}\n# Date: ${new Date(lastResponse.timestamp).toISOString()}\n\n${lastResponse.response_text}`;
+
+      await ctx.replyWithDocument({
+        source: Buffer.from(content, "utf-8"),
+        filename,
+      });
+
+      await logAction(chatIdStr, uid, label, "file", "completed");
+    } catch (e: any) {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const label = getAccountLabel(uid);
+      console.error("[telegram-action] action_file failed", e?.message || e);
+      await logAction(chatIdStr, uid, label, "file", "failed", e?.message);
+      await ctx.answerCbQuery("Error: " + (e?.message || "unknown"), { show_alert: true });
+    }
+  });
+
+  bot.action("action_read_aloud", async (ctx) => {
+    await ctx.answerCbQuery("Voice Layer coming soon!", { show_alert: true });
+  });
+
+  bot.action("action_image", async (ctx) => {
+    await ctx.answerCbQuery("Image Layer coming soon!", { show_alert: true });
+  });
+
+  bot.action("action_provider", async (ctx) => {
+    await ctx.answerCbQuery("Open provider menu", { show_alert: true });
+    const uid = String((ctx as any)?.from?.id || "");
+    const role = getTelegramRole(uid);
+    if (role === "owner" || role === "partner") {
+      await ctx.reply("🧠 Select provider:", compactMenuKeyboard(role));
+    }
+  });
+
+  bot.action("action_save", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      console.log("[telegram-action] action_save clicked", { user_id: uid, chat_id: chatIdStr, label });
+
+      const lastResponse = await getLastResponse(chatIdStr, uid);
+      if (!lastResponse) {
+        await ctx.answerCbQuery(lang === "ru" ? "Нет предыдущего ответа" : "No previous response", { show_alert: true });
+        return;
+      }
+
+      await ctx.answerCbQuery(lang === "ru" ? "Сохранено!" : "Saved!");
+      await ctx.reply(lang === "ru" ? "✅ Ответ сохранён!" : "✅ Response saved!");
+
+      await logAction(chatIdStr, uid, label, "save", "completed");
+    } catch (e: any) {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const label = getAccountLabel(uid);
+      console.error("[telegram-action] action_save failed", e?.message || e);
+      await logAction(chatIdStr, uid, label, "save", "failed", e?.message);
+      await ctx.answerCbQuery("Error: " + (e?.message || "unknown"), { show_alert: true });
     }
   });
 
