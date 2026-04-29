@@ -383,10 +383,16 @@ async function executeWithCDP(prompt: string, traceId: string): Promise<SessionB
           return unique;
         }
         
-        const turns = getConversationTurns();
-        const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
+        function getTurnMetrics(turn: Element): { length: number; nodes: number } {
+          const texts = extractAllTextNodes(turn);
+          const unique = deduplicateTexts(texts);
+          const full = unique.join("\n\n");
+          return { length: full.length, nodes: unique.length };
+        }
         
-        if (!lastTurn) {
+        const turns = getConversationTurns();
+        
+        if (turns.length === 0) {
           const selectors = [
             '[data-message-author-role="assistant"]',
             '[class*="message-assistant"]',
@@ -404,17 +410,24 @@ async function executeWithCDP(prompt: string, traceId: string): Promise<SessionB
           }
           if (candidates.length === 0) return "";
           const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
-          console.log(`[creator-bridge] extraction_v9: fallback candidates=${candidates.length} best=${best.text.length}`);
+          console.log(`[creator-bridge] extraction_v10: fallback candidates=${candidates.length} best=${best.text.length}`);
           return best.text;
         }
         
-        const allTexts = extractAllTextNodes(lastTurn);
+        const turnMetrics = turns.map((t, i) => ({
+          index: i,
+          ...getTurnMetrics(t),
+        }));
+        
+        const bestTurnData = turnMetrics.sort((a, b) => b.length - a.length)[0];
+        const bestTurn = turns[bestTurnData.index];
+        
+        console.log(`[creator-bridge] extraction_v10: turns=${turns.length} best_index=${bestTurnData.index} best_length=${bestTurnData.length} best_nodes=${bestTurnData.nodes}`);
+        
+        const allTexts = extractAllTextNodes(bestTurn);
         const uniqueTexts = deduplicateTexts(allTexts);
-        const fullText = uniqueTexts.join("\n\n");
         
-        console.log(`[creator-bridge] extraction_v9: turns=${turns.length} nodes=${allTexts.length} full=${fullText.length}`);
-        
-        return fullText;
+        return uniqueTexts.join("\n\n");
       });
       
       if (messages.length > 0) {
