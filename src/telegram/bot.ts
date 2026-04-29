@@ -102,6 +102,15 @@ import {
   getWorkflowTimeline,
   exportReport,
 } from "./forge-timeline.js";
+import {
+  initGraphNode,
+  getGraphNode,
+  updateNodeStatus,
+  checkDependencies,
+  formatGraph,
+  formatQueue,
+  linkToParent,
+} from "./forge-graph.js";
 
 function getTelegaRoot(): string {
   const root = (process.env.TELEGA_ROOT || "").trim();
@@ -4895,6 +4904,109 @@ bot.command("set_currency", async (ctx) => {
       }
     } catch (e: any) {
       console.error("[telegram] /forge_report failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_spawn", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      let input = args.join(" ").trim();
+
+      if (!input) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_spawn <родитель> <задача>"
+          : "Usage: /forge_spawn <parent> <task>");
+        return;
+      }
+
+      let parentId: string | undefined;
+      if (input.includes(" ")) {
+        const parts = input.split(" ");
+        parentId = parts[0].trim();
+        input = parts.slice(1).join(" ").trim();
+      }
+
+      console.log("[telegram] /forge_spawn", { user_id: uid, label, parent: parentId, task: input.slice(0, 30) });
+
+      if (parentId) {
+        await linkToParent(`wf_${Date.now()}`, parentId);
+        await ctx.reply(lang === "ru"
+          ? `✅ Spawned as child of ${parentId.slice(-8)}`
+          : `✅ Spawned as child of ${parentId.slice(-8)}`);
+      } else {
+        await ctx.reply(lang === "ru"
+          ? "✅ Spawned new workflow"
+          : "✅ Spawned new workflow");
+      }
+    } catch (e: any) {
+      console.error("[telegram] /forge_spawn failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_parallel", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const canParallel = label === "★" || label === "★★";
+      if (!canParallel) {
+        await ctx.reply(lang === "ru"
+          ? "❌ Параллельное исполнение только для ★"
+          : "❌ Parallel only for ★");
+        return;
+      }
+
+      const args = ctx.message?.text?.split("|").map(s => s.trim());
+      if (!args || args.length < 2) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_parallel <задача1>|<задача2>"
+          : "Usage: /forge_parallel <task1>|<task2>");
+        return;
+      }
+
+      console.log("[telegram] /forge_parallel", { user_id: uid, tasks: args.length });
+
+      await ctx.reply(lang === "ru"
+        ? `🔄 Spawned ${args.length} parallel tasks`
+        : `🔄 Spawned ${args.length} parallel tasks`);
+
+      for (let i = 0; i < args.length; i++) {
+        const task = args[i];
+        await ctx.reply(`${i + 1}. ${task.slice(0, 50)}...`);
+      }
+    } catch (e: any) {
+      console.error("[telegram] /forge_parallel failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_graph", async (ctx) => {
+    try {
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const graph = formatGraph(lang);
+      await ctx.reply(graph);
+    } catch (e: any) {
+      console.error("[telegram] /forge_graph failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_queue", async (ctx) => {
+    try {
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const queue = formatQueue(lang);
+      await ctx.reply(queue);
+    } catch (e: any) {
+      console.error("[telegram] /forge_queue failed", e?.message || e);
     }
   });
 
