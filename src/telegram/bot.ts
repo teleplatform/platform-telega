@@ -63,6 +63,14 @@ import {
   KILO_READONLY_TOOLS,
   KILO_BLOCKED_TOOLS,
 } from "./kilo-live.js";
+import {
+  createPatchPlan,
+  previewPatch,
+  applyPatch,
+  verifyApply,
+  rollbackApply,
+  formatPatchList,
+} from "./kilo-controlled-write.js";
 
 function getTelegaRoot(): string {
   const root = (process.env.TELEGA_ROOT || "").trim();
@@ -4158,6 +4166,175 @@ bot.command("set_currency", async (ctx) => {
       await ctx.reply(result, { parse_mode: "Markdown" });
     } catch (e: any) {
       console.error("[telegram] /kilo_grep failed", e?.message || e);
+    }
+  });
+
+  bot.command("kilo_patch_plan", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const role = getTelegramRole(uid);
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const task = args.join(" ").trim();
+
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+      const label = getAccountLabel(uid);
+
+      console.log("[telegram] /kilo_patch_plan", { user_id: uid, label, task: task.slice(0, 50) });
+
+      if (!task) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /kilo_patch_plan <задача>\nПример: /kilo_patch_plan добавить логирование в router"
+          : "Usage: /kilo_patch_plan <task>\nExample: /kilo_patch_plan add logging to router");
+        return;
+      }
+
+      await ctx.reply(lang === "ru" ? "🧠 Создаю patch план..." : "🧠 Creating patch plan...");
+
+      const result = await createPatchPlan(uid, label, task, lang);
+
+      if (result.error) {
+        await ctx.reply(`❌ ${result.error}`);
+        return;
+      }
+
+      await ctx.reply(`✅ ${lang === "ru" ? "Patch план создан" : "Patch plan created"}: ${result.plan_id}`);
+    } catch (e: any) {
+      console.error("[telegram] /kilo_patch_plan failed", e?.message || e);
+    }
+  });
+
+  bot.command("kilo_patch_preview", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const role = getTelegramRole(uid);
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const planId = args.join(" ").trim();
+
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      if (!planId) {
+        await ctx.reply(lang === "ru" ? "Использование: /kilo_patch_preview <plan_id>" : "Usage: /kilo_patch_preview <plan_id>");
+        return;
+      }
+
+      const result = await previewPatch(planId, uid, lang);
+      await ctx.reply(result, { parse_mode: "Markdown" });
+    } catch (e: any) {
+      console.error("[telegram] /kilo_patch_preview failed", e?.message || e);
+    }
+  });
+
+  bot.command("kilo_patch_apply", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const canApply = label === "★" || label === "★★";
+      if (!canApply) {
+        await ctx.reply(lang === "ru"
+          ? "❌ Только ★ и ★★ могут применять patch"
+          : "❌ Only ★ and ★★ can apply patches");
+        return;
+      }
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const planId = args.join(" ").trim();
+
+      if (!planId) {
+        await ctx.reply(lang === "ru" ? "Использование: /kilo_patch_apply <plan_id>" : "Usage: /kilo_patch_apply <plan_id>");
+        return;
+      }
+
+      console.log("[telegram] /kilo_patch_apply", { user_id: uid, label, plan_id: planId });
+
+      await ctx.reply(lang === "ru" ? "🔧 Применяю patch..." : "🔧 Applying patch...");
+
+      const result = await applyPatch(planId, uid, label, lang);
+
+      if (!result.ok) {
+        await ctx.reply(`❌ ${result.error}`);
+        return;
+      }
+
+      await ctx.reply(`✅ ${lang === "ru" ? "Patch применён" : "Patch applied"}: ${result.apply_id}`);
+
+      const verifyResult = await verifyApply(result.apply_id!, uid, label, lang);
+      await ctx.reply(verifyResult, { parse_mode: "Markdown" });
+    } catch (e: any) {
+      console.error("[telegram] /kilo_patch_apply failed", e?.message || e);
+    }
+  });
+
+  bot.command("kilo_patch_status", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const role = getTelegramRole(uid);
+      if (role !== "owner") {
+        await ctx.reply("Owner only");
+        return;
+      }
+
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const list = formatPatchList(lang);
+      await ctx.reply(list);
+    } catch (e: any) {
+      console.error("[telegram] /kilo_patch_status failed", e?.message || e);
+    }
+  });
+
+  bot.command("kilo_patch_rollback", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const canApply = label === "★" || label === "★★";
+      if (!canApply) {
+        await ctx.reply(lang === "ru"
+          ? "❌ Только ★ и ★★ могут откатывать"
+          : "❌ Only ★ and ★★ can rollback");
+        return;
+      }
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const applyId = args.join(" ").trim();
+
+      if (!applyId) {
+        await ctx.reply(lang === "ru" ? "Использование: /kilo_patch_rollback <apply_id>" : "Usage: /kilo_patch_rollback <apply_id>");
+        return;
+      }
+
+      console.log("[telegram] /kilo_patch_rollback", { user_id: uid, label, apply_id: applyId });
+
+      await ctx.reply(lang === "ru" ? "↩️ Откатываю..." : "↩️ Rolling back...");
+
+      const result = await rollbackApply(applyId, uid, label, lang);
+
+      if (!result.ok) {
+        await ctx.reply(`❌ ${result.error}`);
+        return;
+      }
+
+      await ctx.reply(`✅ ${lang === "ru" ? "Откат выполнен" : "Rollback complete"}`);
+    } catch (e: any) {
+      console.error("[telegram] /kilo_patch_rollback failed", e?.message || e);
     }
   });
 
