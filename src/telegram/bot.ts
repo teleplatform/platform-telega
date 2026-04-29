@@ -28,6 +28,15 @@ import type { SessionProviderId } from "../providers/creator/session/adapters.js
 import { deliverFullOutput } from "../providers/creator/output-delivery.js";
 import { detectLanguage } from "../providers/creator/i18n.js";
 import { buildReplyExtra, saveResponse as saveActionResponse, getLastResponse, logAction } from "./action-buttons.js";
+import {
+  handleVoiceInput,
+  handleTTSOutput,
+  toggleVoiceMode,
+  getVoiceSettings,
+  isVoiceModeEnabled,
+  formatVoiceStatus,
+  buildVoiceKeyboard,
+} from "./voice-layer.js";
 
 function getTelegaRoot(): string {
   const root = (process.env.TELEGA_ROOT || "").trim();
@@ -3759,7 +3768,168 @@ bot.command("set_currency", async (ctx) => {
             const err =
               it.status === "failed" && it.error?.message ? ` • err: ${it.error.message}` : "";
             return `${i + 1}) ${when} • ${it.pack} • ${it.status} • ${it.id}${err}`;
-          });
+});
+
+  bot.action("voice:toggle", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      console.log("[telegram-action] voice:toggle clicked", { user_id: uid, chat_id: chatIdStr, label });
+
+      const newState = await toggleVoiceMode(chatIdStr, uid);
+      const status = formatVoiceStatus(chatIdStr, uid, lang);
+
+      await ctx.answerCbQuery(newState ? (lang === "ru" ? "Голос вкл" : "Voice on") : (lang === "ru" ? "Голос выкл" : "Voice off"));
+      await ctx.reply(status);
+    } catch (e: any) {
+      console.error("[telegram-action] voice:toggle failed", e?.message || e);
+      await ctx.answerCbQuery("Error: " + (e?.message || "unknown"), { show_alert: true });
+    }
+  });
+
+  bot.action("voice:speak", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      console.log("[telegram-action] voice:speak clicked", { user_id: uid, chat_id: chatIdStr, label });
+
+      const lastResponse = await getLastResponse(chatIdStr, uid);
+      if (!lastResponse) {
+        await ctx.answerCbQuery(lang === "ru" ? "Нет предыдущего ответа" : "No previous response", { show_alert: true });
+        return;
+      }
+
+      await handleTTSOutput(ctx, chatIdStr, uid, lastResponse.response_text);
+    } catch (e: any) {
+      console.error("[telegram-action] voice:speak failed", e?.message || e);
+      await ctx.answerCbQuery("Error: " + (e?.message || "unknown"), { show_alert: true });
+    }
+  });
+
+  bot.command("voice_on", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      await toggleVoiceMode(chatIdStr, uid, true);
+      const status = formatVoiceStatus(chatIdStr, uid, lang);
+      await ctx.reply(status);
+    } catch (e: any) {
+      console.error("[telegram] /voice_on failed", e?.message || e);
+    }
+  });
+
+  bot.command("voice_off", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      await toggleVoiceMode(chatIdStr, uid, false);
+      const status = formatVoiceStatus(chatIdStr, uid, lang);
+      await ctx.reply(status);
+    } catch (e: any) {
+      console.error("[telegram] /voice_off failed", e?.message || e);
+    }
+  });
+
+  bot.command("voice_status", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const status = formatVoiceStatus(chatIdStr, uid, lang);
+      await ctx.reply(status);
+    } catch (e: any) {
+      console.error("[telegram] /voice_status failed", e?.message || e);
+    }
+  });
+
+  bot.on("voice", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      console.log("[telegram] voice message received", { user_id: uid, chat_id: chatIdStr, label });
+
+      if (!isVoiceModeEnabled(chatIdStr, uid)) {
+        await ctx.reply(lang === "ru"
+          ? "🔇 Голосовые сообщения отключены. Используйте /voice_on для активации."
+          : "🔇 Voice messages disabled. Use /voice_on to activate.");
+        return;
+      }
+
+      const voiceResult = await handleVoiceInput(ctx, chatIdStr, uid);
+      if (voiceResult && voiceResult.transcript) {
+        const text = voiceResult.transcript;
+        const settings = settingsOf(ctx);
+        const selectedProvider = settings.provider || "auto";
+        const model = settings.model || providerToModel(selectedProvider);
+
+        console.log("[pantheon-tg] routing voice to /v1/chat", {
+          chat_id: chatIdStr,
+          telegram_user_id: uid,
+          selected_provider: selectedProvider,
+          model,
+          is_voice: true,
+        });
+
+        const webProviderTimeout = (selectedProvider || "").endsWith("_web") ? 180000 : 65000;
+        const res = await fetch("http://127.0.0.1:8787/v1/chat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          signal: AbortSignal.timeout(webProviderTimeout),
+          body: JSON.stringify({
+            message: text,
+            model,
+            task: { type: "chat" },
+            meta: {
+              source: "telegram-voice",
+              telegram_user_id: uid,
+              selected_provider: selectedProvider,
+              bridge_enabled: settings.bridgeEnabled === true,
+              creator_mode: label === "★" || label === "★★",
+              chat_id: chatIdStr,
+              from: uid,
+              is_voice: true,
+            },
+          }),
+        });
+
+        const data = (await res.json().catch(() => ({}))) as any;
+        const output = String(data?.output || data?.reply || data?.answer || "").trim();
+
+        if (output) {
+          await ctx.reply(output);
+        } else {
+          await ctx.reply(lang === "ru" ? "❌ Ошибка обработки голоса" : "❌ Voice processing failed");
+        }
+      } else {
+        await ctx.reply(lang === "ru" ? "❌ Не удалось распознать голос" : "❌ Could not transcribe voice");
+      }
+    } catch (e: any) {
+      console.error("[telegram] voice handler failed", e?.message || e);
+      await ctx.reply("❌ Voice processing failed");
+    }
+  });
+
+  process.once("SIGINT", () => bot.stop("SIGINT"));
 
           const buttons = items.map((it, i) =>
             Markup.button.callback(`📦 #${i + 1} ${it.pack}`, `br:${it.id}`)
@@ -3779,9 +3949,21 @@ bot.command("set_currency", async (ctx) => {
     } catch {
       // ignore
     }
+
     const text = String((ctx as any)?.message?.text || "").trim();
     if (!text) return;
     if (text.startsWith("/")) return;
+
+    const voiceInput = await handleVoiceInput(ctx, String(chatId(ctx)), String(userIdOf(ctx)));
+    if (voiceInput) {
+      const voiceText = voiceInput.transcript || voiceInput.text;
+      console.log("[pantheon-tg] voice input transcribed", {
+        chat_id: chatId(ctx),
+        telegram_user_id: userIdOf(ctx),
+        transcript: voiceText,
+      });
+      await ctx.reply(`🎤 ${voiceText}`);
+    }
 
     try {
       const userId = userIdOf(ctx);
@@ -4039,7 +4221,29 @@ bot.command("set_currency", async (ctx) => {
   });
 
   bot.action("action_read_aloud", async (ctx) => {
-    await ctx.answerCbQuery("Voice Layer coming soon!", { show_alert: true });
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      console.log("[telegram-action] action_read_aloud clicked", { user_id: uid, chat_id: chatIdStr, label });
+
+      const lastResponse = await getLastResponse(chatIdStr, uid);
+      if (!lastResponse) {
+        await ctx.answerCbQuery(lang === "ru" ? "Нет предыдущего ответа" : "No previous response", { show_alert: true });
+        return;
+      }
+
+      await handleTTSOutput(ctx, chatIdStr, uid, lastResponse.response_text);
+    } catch (e: any) {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const label = getAccountLabel(uid);
+      console.error("[telegram-action] action_read_aloud failed", e?.message || e);
+      await ctx.answerCbQuery("Error: " + (e?.message || "unknown"), { show_alert: true });
+    }
   });
 
   bot.action("action_image", async (ctx) => {
