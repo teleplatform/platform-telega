@@ -6520,6 +6520,42 @@ Get it: 5% Teleton for you`
     }
   });
 
+  bot.command("system_load", async (ctx) => {
+    try {
+      const { getSystemLoad } = await import("./scale-control.js");
+      const load = getSystemLoad();
+      const throttled = load.throttle_until ? Date.now() < load.throttle_until : false;
+      const pct = Math.round((load.active_orders / load.max_orders) * 100);
+      await ctx.reply(
+        `⚖️ SYSTEM LOAD
+        
+Active Orders: ${load.active_orders}/${load.max_orders} (${pct}%)
+Throttled: ${throttled ? "YES" : "NO"}`
+      );
+    } catch (e: any) {
+      console.error("[system_load] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("scale_report", async (ctx) => {
+    try {
+      const { getScaleReport } = await import("./scale-control.js");
+      const report = await getScaleReport();
+      await ctx.reply(
+        `📊 SCALE REPORT
+        
+Active Orders: ${report.active_orders}/${report.max_orders}
+Throttled: ${report.throttled ? "YES" : "NO"}
+Payments: ${report.total_payments}
+Refunds: ${report.total_refunds}`
+      );
+    } catch (e: any) {
+      console.error("[scale_report] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
