@@ -215,6 +215,30 @@ export function useForgePatch(id: string) {
   return { patch, loading, error, refresh };
 }
 
+export function useForgeAutoModes() {
+  const [autoModes, setAutoModes] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    try {
+      const data = await fetchJson<{ autoModes: any[] }>(`${API_BASE}/forge/auto-modes`);
+      setAutoModes(data.autoModes ?? []);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const interval = setInterval(refresh, 3000);
+    return () => clearInterval(interval);
+  }, [refresh]);
+
+  return { autoModes, loading, refresh };
+}
+
 export function useForgeAction() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

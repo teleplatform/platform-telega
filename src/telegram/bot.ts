@@ -5288,11 +5288,141 @@ bot.command("set_currency", async (ctx) => {
 
       await updateHealPlanStatus(healId, "applied");
 
-      await ctx.reply(lang === "ru"
-        ? "✅ Heal применён"
-        : "✅ Heal applied");
+await ctx.reply(lang === "ru"
+          ? "✅ Heal применён"
+          : "✅ Heal applied");
     } catch (e: any) {
       console.error("[telegram] /forge_heal_apply failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_auto", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      console.log("[telegram] /forge_auto", { user_id: uid, label });
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const task = args.join(" ").trim().replace("--auto-approve", "").trim();
+      const autoApprove = ctx.message?.text?.includes("--auto-approve") ?? false;
+
+      if (!task) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_auto <задача> [--auto-approve]"
+          : "Usage: /forge_auto <task> [--auto-approve]");
+        return;
+      }
+
+      const { createWorkflow } = await import("./forge-workflow.js");
+      const result = await createWorkflow(uid, label, task, task, lang);
+
+      if (result.error) {
+        await ctx.reply(`❌ ${result.error}`);
+        return;
+      }
+
+      const { setAutoMode } = await import("./forge-auto.js");
+      const autoResult = await setAutoMode(result.workflow_id!, "autonomous", uid, label, autoApprove, lang);
+
+      if (!autoResult.ok) {
+        await ctx.reply(`❌ ${autoResult.error}`);
+        return;
+      }
+
+      await ctx.reply(lang === "ru"
+        ? `🤖 АВТО-РЕЖИМ ВКЛЮЧЕН\nWorkflow: ${result.workflow_id}\nMax loops: 10\nЗапускаю loop...`
+        : `🤖 AUTO MODE ENABLED\nWorkflow: ${result.workflow_id}\nMax loops: 10\nStarting loop...`);
+    } catch (e: any) {
+      console.error("[telegram] /forge_auto failed", e?.message || e);
+      await ctx.reply("❌ Auto mode failed");
+    }
+  });
+
+  bot.command("forge_mode", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      console.log("[telegram] /forge_mode", { user_id: uid, label });
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const workflowId = args[0];
+      const mode = args[1] as any;
+
+      if (!workflowId) {
+        const { getAllAutoModes } = await import("./forge-auto.js");
+        const records = await getAllAutoModes();
+        const active = records.filter((r) => r.status === "active");
+
+        if (active.length === 0) {
+          await ctx.reply(lang === "ru"
+            ? "Нет активных auto modes"
+            : "No active auto modes");
+          return;
+        }
+
+        const text = active.map((r) =>
+          `${r.workflow_id}: ${r.mode} | ${r.current_stage} | loop ${r.loop_count}/${r.max_loops}`
+        ).join("\n");
+
+        await ctx.reply(text);
+        return;
+      }
+
+      if (!["manual", "assisted", "autonomous"].includes(mode)) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_mode <workflow_id> <manual|assisted|autonomous>"
+          : "Usage: /forge_mode <workflow_id> <manual|assisted|autonomous>");
+        return;
+      }
+
+      const { setAutoMode } = await import("./forge-auto.js");
+      const result = await setAutoMode(workflowId, mode, uid, label, false, lang);
+
+      await ctx.reply(result.ok
+        ? lang === "ru"
+          ? `✅ Режим изменён на ${mode}`
+          : `✅ Mode changed to ${mode}`
+        : `❌ ${result.error}`);
+    } catch (e: any) {
+      console.error("[telegram] /forge_mode failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_stop", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      console.log("[telegram] /forge_stop", { user_id: uid, label });
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const workflowId = args.join(" ").trim();
+
+      if (!workflowId) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_stop <workflow_id>"
+          : "Usage: /forge_stop <workflow_id>");
+        return;
+      }
+
+      const { stopAutoMode } = await import("./forge-auto.js");
+      const result = await stopAutoMode(workflowId, uid, label);
+
+      await ctx.reply(result.ok
+        ? lang === "ru"
+          ? "✅ Auto mode остановлен"
+          : "✅ Auto mode stopped"
+        : `❌ ${result.error}`);
+    } catch (e: any) {
+      console.error("[telegram] /forge_stop failed", e?.message || e);
     }
   });
 

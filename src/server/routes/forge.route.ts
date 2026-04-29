@@ -156,4 +156,11 @@ export async function registerForgeRoute(server: any) {
       recentWorkflows: workflows.slice(-10).reverse(),
     };
   });
+
+  server.get("/forge/auto-modes", async (_req: any, _reply: any) => {
+    const autoModes = await readJsonl<any>(
+      path.join(WORKFLOWS_DIR, "auto-modes.jsonl")
+    );
+    return { autoModes };
+  });
 }
