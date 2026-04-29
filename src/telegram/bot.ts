@@ -6405,6 +6405,47 @@ Status: ${product.status}
     }
   });
 
+  bot.command("real_market", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      await ctx.reply("🚀 Activating real market...");
+      const { activateRealMarket } = await import("./real-market.js");
+      const result = await activateRealMarket();
+      await ctx.reply(
+        `🚀 REAL MARKET ACTIVATED
+        
+First Offer: ${result.first_offer ? "✅" : "❌"}
+Published: ${result.first_publish ? "✅" : "❌"}
+First Order: ${result.first_order ? "✅" : "❌"}
+First Payment: ${result.first_payment ? "✅" : "❌"}
+
+📊 Use /market_stats to check progress`
+      );
+    } catch (e: any) {
+      console.error("[real_market] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("market_stats", async (ctx) => {
+    try {
+      const { getRealMarketStats } = await import("./real-market.js");
+      const stats = await getRealMarketStats();
+      await ctx.reply(
+        `📊 MARKET STATS
+        
+Offers: ${stats.total_offers}
+Orders: ${stats.total_orders}
+Payments: ${stats.total_payments}
+Revenue: ${stats.revenue}₽`
+      );
+    } catch (e: any) {
+      console.error("[market_stats] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
