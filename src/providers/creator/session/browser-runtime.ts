@@ -424,19 +424,97 @@ async function executeWithCDP(prompt: string, traceId: string): Promise<SessionB
         
         console.log(`[creator-bridge] extraction_v10: turns=${turns.length} best_index=${bestTurnData.index} best_length=${bestTurnData.length} best_nodes=${bestTurnData.nodes}`);
         
-        const allTexts = extractAllTextNodes(bestTurn);
+const allTexts = extractAllTextNodes(bestTurn);
         const uniqueTexts = deduplicateTexts(allTexts);
         
         return uniqueTexts.join("\n\n");
       });
-      
-      if (messages.length > 0) {
-        outputText = messages;
-        console.log(`[creator-bridge] response_wait: got ${messages.length} chars after ${Date.now() - responseWaitStart}ms`);
-        responseReceived = true;
-        break;
-      }
-    }
+       
+       if (messages.length > 0) {
+         outputText = messages;
+         console.log(`[creator-bridge] response_wait: got ${messages.length} chars, waiting 3s post-stabilization...`);
+         await page.waitForTimeout(3000);
+         
+         const stabilized = await page.evaluate(() => {
+           function getConversationTurns(): Element[] {
+             const selectors = [
+               'article[data-testid*="conversation-turn"]',
+               'article[data-testid*="conversation"]',
+               "[data-testid=conversation-turn]",
+             ];
+             const turns: Element[] = [];
+             for (const sel of selectors) {
+               try {
+               const els = document.querySelectorAll(sel);
+               for (const el of els) {
+                 if (!turns.includes(el as Element)) turns.push(el as Element);
+               }
+               } catch {}
+             }
+             return turns;
+           }
+           
+           function extractAllTextNodes(root: Element): string[] {
+             const texts: string[] = [];
+             const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+             let node: Node | null;
+             while ((node = walker.nextNode())) {
+               const value = node.textContent?.trim() || "";
+               if (value.length > 5 && !value.match(/^(Copy|Edit|Regenerate|Stop)$/)) {
+                 texts.push(value);
+               }
+             }
+             return texts;
+           }
+           
+           function deduplicateTexts(texts: string[]): string[] {
+             const seen = new Set<string>();
+             const unique: string[] = [];
+             for (const t of texts) {
+               if (!seen.has(t)) {
+                 seen.add(t);
+                 unique.push(t);
+               }
+             }
+             return unique;
+           }
+           
+           function getTurnMetrics(turn: Element): { length: number; nodes: number } {
+             const texts = extractAllTextNodes(turn);
+             const unique = deduplicateTexts(texts);
+             const full = unique.join("\n\n");
+             return { length: full.length, nodes: unique.length };
+           }
+           
+           const turns = getConversationTurns();
+           if (turns.length === 0) return { length: 0, nodes: 0, text: "" };
+           
+           const turnMetrics = turns.map((t, i) => ({
+             index: i,
+             ...getTurnMetrics(t),
+           }));
+           
+           const best = turnMetrics.sort((a, b) => b.length - a.length)[0];
+           const bestTurn = turns[best.index];
+           
+           return {
+             length: best.length,
+             nodes: best.nodes,
+             text: deduplicateTexts(extractAllTextNodes(bestTurn)).join("\n\n"),
+           };
+         });
+         
+         console.log(`[creator-bridge] post_stabilization: final ${stabilized.length} chars, ${stabilized.nodes} nodes`);
+         
+         if (stabilized.length > outputText.length) {
+           outputText = stabilized.text;
+           console.log(`[creator-bridge] post_stabilization: updated to ${stabilized.length} chars`);
+         }
+         
+         responseReceived = true;
+         break;
+       }
+     }
     
     if (!responseReceived) {
       console.log(`[creator-bridge] execution_timeout: no_response`);
