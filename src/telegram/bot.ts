@@ -6105,6 +6105,67 @@ await ctx.reply("❌ Voice processing failed");
     }
   });
 
+  bot.command("provider_verify", async (ctx) => {
+    const uid = String((ctx as any)?.from?.id || "");
+    if (getAccountLabel(uid) !== "★") return;
+    try {
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const provider = args[0];
+      if (!provider) {
+        await ctx.reply("Usage: /provider_verify <provider>\nExamples: chatgpt_web, qwen_web, deepseek_web");
+        return;
+      }
+      await ctx.reply(`🔍 Verifying ${provider}...`);
+      const { verifyProvider, saveProviderVerificationReport } = await import("./provider-verification.js");
+      const result = await verifyProvider(provider);
+      await saveProviderVerificationReport([result]);
+      await ctx.reply(
+        `📡 ${result.provider}\nStatus: ${result.status}\nLatency: ${result.latency_ms}ms\nLength: ${result.response_length}\nPartial: ${result.is_partial}\nFallback: ${result.fallback_used}`
+      );
+    } catch (e: any) {
+      console.error("[provider_verify] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("provider_verify_all", async (ctx) => {
+    const uid = String((ctx as any)?.from?.id || "");
+    if (getAccountLabel(uid) !== "★") return;
+    try {
+      await ctx.reply("🔍 Verifying all providers... (this may take a while)");
+      const { verifyAllProviders, saveProviderVerificationReport } = await import("./provider-verification.js");
+      const results = await verifyAllProviders();
+      await saveProviderVerificationReport(results);
+      const lines = [
+        "📡 PROVIDER VERIFICATION",
+        ...results.map((r: any) => `${r.status} ${r.provider} (${r.latency_ms}ms)`),
+      ];
+      await ctx.reply(lines.join("\n"));
+    } catch (e: any) {
+      console.error("[provider_verify_all] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("provider_verify_report", async (ctx) => {
+    const uid = String((ctx as any)?.from?.id || "");
+    if (getAccountLabel(uid) !== "★") return;
+    try {
+      const { getProviderVerificationReport } = await import("./provider-verification.js");
+      const report = await getProviderVerificationReport();
+      const lines = [
+        "📡 PROVIDER REPORT",
+        `Pass: ${report.summary.pass} | Warn: ${report.summary.warn} | Fail: ${report.summary.fail}`,
+        "",
+        ...report.results.map((r: any) => `${r.status} ${r.provider} ${r.latency_ms}ms`),
+      ];
+      await ctx.reply(lines.join("\n"));
+    } catch (e: any) {
+      console.error("[provider_verify_report] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
