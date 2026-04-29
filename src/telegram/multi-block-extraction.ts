@@ -3,208 +3,177 @@ export interface MultiBlockConfig {
   minTextLength: number;
   maxWaitMs: number;
   includeStreaming: boolean;
+  minValidLength: number;
 }
 
 export const DEFAULT_MULTIBLOCK_CONFIG: MultiBlockConfig = {
   ignoreUISelectors: [
-    "button",
-    "svg",
-    "[role=button]",
-    "[data-button]",
-    ".loading",
-    ".spinner",
-    "[data-state=loading]",
+    "button", "svg", "[role=button]", "[data-button]",
+    ".loading", ".spinner", "[data-state=loading]",
   ],
-  minTextLength: 2000,
+  minTextLength: 20000,
   maxWaitMs: 60000,
   includeStreaming: true,
+  minValidLength: 500,
 };
 
-const LONG_PROMPT_MIN_LENGTH = 2500;
-const NORMAL_PROMPT_MIN_LENGTH = 1000;
+const LONG_PROMPT_KEYWORDS = ["3000", "article", "статья", "long", "подробно", "развернуто", "detailed", "comprehensive"];
 
 function isLongPrompt(prompt: string): boolean {
-  const keywords = ["3000", "article", "статья", "long", "подробно", "развернуто", "detailed", "comprehensive"];
-  return keywords.some((kw) => prompt.toLowerCase().includes(kw));
+  return LONG_PROMPT_KEYWORDS.some((kw) => prompt.toLowerCase().includes(kw));
 }
 
-function getMinTextLength(prompt: string): number {
-  return isLongPrompt(prompt) ? LONG_PROMPT_MIN_LENGTH : NORMAL_PROMPT_MIN_LENGTH;
+function getMinLength(prompt: string): number {
+  return isLongPrompt(prompt) ? 25000 : 1000;
 }
 
-function cleanBlockText(text: string, ignoreSelectors: string[]): string {
+function cleanText(text: string, ignore: string[]): string {
   text = text.trim();
-  
-  for (const sel of ignoreSelectors) {
+  for (const sel of ignore) {
     text = text.replace(new RegExp(sel, "gi"), "");
   }
-  
-  text = text.replace(/\n{3,}/g, "\n\n");
-  text = text.replace(/^[ \t]+/gm, "");
-  
+  text = text.replace(/\n{3,}/g, "\n\n").replace(/^[ \t]+/gm, "");
   return text.trim();
 }
 
-function deduplicateBlocks(blocks: string[]): string[] {
+function deduplicate(blocks: string[]): string[] {
   const seen = new Set<string>();
   const unique: string[] = [];
-  
   for (const block of blocks) {
-    const normalized = block.trim();
-    if (normalized && !seen.has(normalized)) {
-      seen.add(normalized);
-      unique.push(normalized);
+    const n = block.trim();
+    if (n && n.length > 10 && !seen.has(n)) {
+      seen.add(n);
+      unique.push(n);
     }
   }
-  
   return unique;
 }
 
-export function extractMultiBlockResponse(
-  document: Document,
-  prompt: string,
-  config: MultiBlockConfig = DEFAULT_MULTIBLOCK_CONFIG
-): {
-  text: string;
-  blocksCount: number;
-  isComplete: boolean;
-  meetsMinLength: boolean;
-  reason: string;
-} {
-  const allBlocks: string[] = [];
-  
-  const assistantSelectors = [
-    "[data-message-author-role=assistant]",
-    "[data-role=assistant]",
-    "[class*=assistant]",
-    '[class*="message-assistant"]',
-    ".assistant-message",
-    "[data-testid=assistant-message]",
+function getAssistantBlocks(document: Document): Element[] {
+  const selectors = [
+    '[data-message-author-role="assistant"]',
+    '[data-msg-author="assistant"]',
+    '[data-role="assistant"]',
+    '[class*="assistant"]',
+    ".assistant-msg",
   ];
-  
-  for (const selector of assistantSelectors) {
+  const results: Element[] = [];
+  for (const sel of selectors) {
     try {
-      const elements = document.querySelectorAll(selector);
-      for (const el of elements) {
-        const text = el.textContent?.trim() || "";
-        if (text && text.length > 10) {
-          allBlocks.push(cleanBlockText(text, config.ignoreUISelectors));
-        }
+      const els = document.querySelectorAll(sel);
+      for (const el of els) {
+        if (!results.includes(el)) results.push(el);
       }
     } catch {}
   }
+  return results;
+}
+
+function getLastResponseGroup(document: Document): string[] {
+  const blocks = getAssistantBlocks(document);
+  if (blocks.length === 0) return [];
   
-  if (config.includeStreaming) {
-    const streamingContainers = document.querySelectorAll("[data-state=streaming], .streaming, [data-streaming=true]");
-    for (const el of streamingContainers) {
-      const text = el.textContent?.trim() || "";
-      if (text && text.length > 10) {
-        allBlocks.push(cleanBlockText(text, config.ignoreUISelectors));
+  const groups: string[][] = [];
+  let currentGroup: string[] = [];
+  
+  for (const block of blocks) {
+    const text = cleanText(block.textContent || "", DEFAULT_MULTIBLOCK_CONFIG.ignoreUISelectors);
+    if (text && text.length > 10) {
+      currentGroup.push(text);
+    } else {
+      if (currentGroup.length > 0) {
+        groups.push(currentGroup);
+        currentGroup = [];
       }
     }
   }
   
-  const uniqueBlocks = deduplicateBlocks(allBlocks);
+  if (currentGroup.length > 0) {
+    groups.push(currentGroup);
+  }
   
-  const lastBlock = uniqueBlocks.length > 0 
-    ? uniqueBlocks[uniqueBlocks.length - 1] 
-    : "";
-  
-  const isComplete = uniqueBlocks.length > 0;
-  const minLength = getMinTextLength(prompt);
-  const meetsMinLength = lastBlock.length >= minLength;
-  
+  return groups.length > 0 ? groups[groups.length - 1] : [];
+}
+
+export function extractAssistantResponse(document: Document, prompt: string): {
+  text: string;
+  blocksCount: number;
+  groupsCount: number;
+  isValid: boolean;
+  reason: string;
+} {
+  const lastGroup = getLastResponseGroup(document);
+  if (lastGroup.length === 0) {
+    console.log(JSON.stringify({ event: "extraction_failed", reason: "no_blocks" }));
+    return { text: "", blocksCount: 0, groupsCount: 0, isValid: false, reason: "no assistant blocks found" };
+  }
+  const uniqueBlocks = deduplicate(lastGroup);
+  const fullText = uniqueBlocks.join("\n\n");
+  const minLen = getMinLength(prompt);
+  const isValid = fullText.length >= minLen && fullText.length >= DEFAULT_MULTIBLOCK_CONFIG.minValidLength;
   console.log(JSON.stringify({
-    event: "extraction_v4_1",
-    total_blocks: uniqueBlocks.length,
-    extracted_length: lastBlock.length,
-    using_last_block: true,
+    event: "extraction_v5",
+    groups_count: 1,
+    group_blocks: lastGroup.length,
+    unique_blocks: uniqueBlocks.length,
+    extracted_length: fullText.length,
+    min_required: minLen,
+    is_valid: isValid,
   }));
-  
   return {
-    text: lastBlock,
+    text: fullText,
     blocksCount: uniqueBlocks.length,
-    isComplete,
-    meetsMinLength,
-    reason: isComplete 
-      ? `last of ${uniqueBlocks.length} blocks, ${lastBlock.length} chars`
-      : "no assistant blocks found",
+    groupsCount: 1,
+    isValid,
+    reason: isValid
+      ? `group with ${uniqueBlocks.length} blocks, ${fullText.length} chars`
+      : `too short: ${fullText.length} < ${minLen}`,
   };
 }
 
-export interface ImageExtractionResult {
-  images: Array<{
-    src: string;
-    alt?: string;
-    width?: number;
-    height?: number;
-  }>;
-  detectedCount: number;
-  validCount: number;
+export interface ExtractedImages {
+  urls: string[];
+  count: number;
 }
 
-function isValidImageSrc(src: string): boolean {
-  if (!src) return false;
-  return src.startsWith("https://") || 
-         src.startsWith("http://") || 
-         src.startsWith("blob:") ||
-         src.startsWith("data:image/");
+function isValidImageUrl(url: string): boolean {
+  if (!url) return false;
+  return url.startsWith("https://") || url.startsWith("blob:") || url.startsWith("data:image/");
 }
 
-export function extractImagesFromDocument(document: Document): ImageExtractionResult {
-  const images: ImageExtractionResult["images"] = [];
-  const imageSelectors = [
-    "img[src]",
-    "[data-message-author-role=assistant] img",
-    ".assistant-message img",
-    "[class*=assistant] img",
+export function extractImages(document: Document): ExtractedImages {
+  const urls: string[] = [];
+  const selectors = [
+    '[data-message-author-role="assistant"] img',
+    ".assistant-msg img",
+    "[class*=\"assistant\"] img",
   ];
-  
-  for (const selector of imageSelectors) {
+  for (const sel of selectors) {
     try {
-      const elements = document.querySelectorAll(selector);
-      for (const el of elements) {
-        const src = (el as HTMLImageElement).src;
-        const alt = el.getAttribute("alt") || undefined;
-        
-        if (isValidImageSrc(src)) {
-          const width = (el as HTMLImageElement).width || undefined;
-          const height = (el as HTMLImageElement).height || undefined;
-          
-          if (!images.some((i) => i.src === src)) {
-            images.push({ src, alt, width, height });
-          }
+      const imgs = document.querySelectorAll(sel);
+      for (const img of imgs) {
+        const src = (img as HTMLImageElement).src;
+        if (isValidImageUrl(src) && !urls.includes(src)) {
+          urls.push(src);
         }
       }
     } catch {}
   }
-  
-  return {
-    images,
-    detectedCount: images.length,
-    validCount: images.length,
-  };
+  return { urls, count: urls.length };
 }
 
-export function extractMultiBlockWithImages(
-  document: Document,
-  prompt: string,
-  config: MultiBlockConfig = DEFAULT_MULTIBLOCK_CONFIG
-): {
+export function extractFullResponse(document: Document, prompt: string): {
   text: string;
-  images: ImageExtractionResult;
+  images: ExtractedImages;
   blocksCount: number;
-  meetsMinLength: boolean;
-  isComplete: boolean;
+  isValid: boolean;
 } {
-  const textResult = extractMultiBlockResponse(document, prompt, config);
-  const imagesResult = extractImagesFromDocument(document);
-  
+  const textResult = extractAssistantResponse(document, prompt);
+  const imagesResult = extractImages(document);
   return {
     text: textResult.text,
     images: imagesResult,
     blocksCount: textResult.blocksCount,
-    meetsMinLength: textResult.meetsMinLength,
-    isComplete: textResult.isComplete,
+    isValid: textResult.isValid,
   };
 }

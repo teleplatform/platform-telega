@@ -6967,28 +6967,28 @@ Only extract when stable`
     try {
       const uid = String((ctx as any)?.from?.id || "");
       if (getAccountLabel(uid) !== "★") return;
-      const { DEFAULT_MULTIBLOCK_CONFIG: CONFIG, extractMultiBlockWithImages } = await import("./multi-block-extraction.js");
+      const { DEFAULT_MULTIBLOCK_CONFIG: CONFIG, extractFullResponse } = await import("./multi-block-extraction.js");
       await ctx.reply(
-        `🔍 MULTI-BLOCK EXTRACTION v4
-        
-Config:
-- Collects ALL assistant blocks
-- Uses LAST block (not first)
-- Ignores UI elements (buttons, etc.)
-- Deduplicates content
-- Extracts images
+        `🔍 ASSISTANT RESPONSE EXTRACTION v5
+
+Target: Rebuild full response from LAST GROUP of assistant blocks.
+
+Algorithm:
+1. Get ALL assistant blocks (multiple selectors)
+2. Group consecutive blocks into responses
+3. Take LAST group (latest response)
+4. Join all blocks with \n\n
+5. Deduplicate
+6. Validate length
 
 Settings:
+- Min valid: ${CONFIG.minValidLength} chars
 - Min text (normal): ${CONFIG.minTextLength} chars
 - Max wait: ${CONFIG.maxWaitMs}ms
-- Include streaming: ${CONFIG.includeStreaming}
 
-Method:
-1. querySelectorAll for assistant blocks
-2. Take LAST block (not first)
-3. Extract full innerText
-4. Extract images from document
-5. Return full text + images`
+Groups:
+- Multiple consecutive assistant blocks = one response group
+- LAST group = latest complete answer`
       );
     } catch (e: any) {
       console.error("[extraction_test] fail", e?.message);
