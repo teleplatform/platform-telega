@@ -145,6 +145,16 @@ export const TELEGPT_COMMANDS: CommandDefinition[] = [
     ui: { showInHelp: true, showInCommands: true, showInButtons: false },
   },
   {
+    name: "/runtime_status",
+    args: "",
+    description: { ru: "статус рантайма", en: "runtime status dashboard" },
+    usage_ru: "/runtime_status",
+    usage_en: "/runtime_status",
+    roles: ["★"],
+    category: "system",
+    ui: { showInHelp: true, showInCommands: true, showInButtons: false },
+  },
+  {
     name: "/image",
     args: "<prompt>",
     description: { ru: "сгенерировать изображение", en: "generate image" },

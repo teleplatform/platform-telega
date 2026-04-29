@@ -6166,6 +6166,26 @@ await ctx.reply("❌ Voice processing failed");
     }
   });
 
+  bot.command("runtime_status", async (ctx) => {
+    const uid = String((ctx as any)?.from?.id || "");
+    if (getAccountLabel(uid) !== "★") return;
+    try {
+      await ctx.reply("📊 Loading runtime status...");
+      const { getRuntimeStatus } = await import("./runtime-status.js");
+      const report = await getRuntimeStatus();
+      const lines = [
+        `📊 RUNTIME STATUS`,
+        `Overall: **${report.overall}**`,
+        "",
+        ...report.sections.map((s) => `${s.status} ${s.name}: ${s.message}`),
+      ];
+      await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
+    } catch (e: any) {
+      console.error("[runtime_status] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
