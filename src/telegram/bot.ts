@@ -6969,15 +6969,17 @@ Only extract when stable`
       if (getAccountLabel(uid) !== "★") return;
       const { DEFAULT_MULTIBLOCK_CONFIG: CONFIG } = await import("./multi-block-extraction.js");
       await ctx.reply(
-        `🔍 EXTRACTION v8 — MAX VISIBLE CANDIDATE
+        `🔍 EXTRACTION v9 — TEXT NODES TREEWALKER
 
 Algorithm:
-1. Scan ALL assistant candidates
-2. Get visible text for each (Selection API)
-3. Select MAX length (not last, not first)
-4. Validate length
+1. Find LAST conversation turn (article)
+2. Walk ENTIRE DOM tree via TreeWalker
+3. Extract ALL text nodes inside turn
+4. Deduplicate + filter UI (Copy, Edit)
+5. Join all texts
 
-No guessing. No last/first. Just max visible text.`
+Key: Text nodes = all actual rendered text.
+Not selector-based. Full tree traversal.`
       );
     } catch (e: any) {
       console.error("[extraction_test] fail", e?.message);
