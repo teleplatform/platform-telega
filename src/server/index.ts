@@ -14,6 +14,7 @@ import { registerJsonRoute } from "./routes/json.route.js";
 import { registerChatRoute } from "./routes/chat.route.js";
 import { registerAgentRoute } from "./routes/agent.route.js";
 import { registerForgeRoute } from "./routes/forge.route.js";
+import { registerPatchRoute } from "./routes/patch.route.js";
 import { startTelegramBotIfEnabled } from "../telegram/bot.js";
 import { registerPolicyGate } from "../apps/http/registerPolicyGate.js";
 import {
@@ -72,6 +73,7 @@ await registerChatRoute(app);
 await registerPolicyGate(app);
 await registerAgentRoute(app);
 await registerForgeRoute(app);
+await registerPatchRoute(app);
 
 const MAX_CONCURRENCY = Math.max(
   1,

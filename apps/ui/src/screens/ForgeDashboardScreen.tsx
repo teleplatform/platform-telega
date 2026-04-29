@@ -191,6 +191,12 @@ export function ForgeDashboardScreen() {
         >
           Graph
         </Link>
+        <Link
+          to="/forge/patches"
+          className="px-3 py-2 bg-primary/20 rounded hover:bg-primary/30"
+        >
+          Patches
+        </Link>
       </div>
     </div>
   );

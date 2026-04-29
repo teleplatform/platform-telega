@@ -90,3 +90,18 @@ export interface ForgeDashboard {
   };
   recentWorkflows: ForgeWorkflow[];
 }
+
+export interface KiloPatchPlan {
+  plan_id: string;
+  user_id: string;
+  account_label: string;
+  task: string;
+  files: string[];
+  diffs: Record<string, string>;
+  status: "pending" | "approved" | "applied" | "failed" | "rolled_back";
+  risk_level?: "low" | "medium" | "high";
+  blocked_files?: string[];
+  created_at: number;
+  applied_at?: number;
+  error?: string;
+}

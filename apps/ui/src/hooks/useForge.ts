@@ -5,6 +5,7 @@ import type {
   ForgeTimeline,
   ForgeGraph,
   ForgeDashboard,
+  KiloPatchPlan,
 } from "../types/forge";
 
 const API_BASE = "";
@@ -144,4 +145,62 @@ export function useForgeGraph(workflowId?: string) {
   }, [refresh]);
 
   return { graphs, loading, refresh };
+}
+
+export function useForgePatches() {
+  const [patches, setPatches] = useState<KiloPatchPlan[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    try {
+      const data = await fetchJson<{ patches: KiloPatchPlan[] }>(`${API_BASE}/forge/patches`);
+      setPatches(data.patches);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const interval = setInterval(refresh, 3000);
+    return () => clearInterval(interval);
+  }, [refresh]);
+
+  return { patches, loading, refresh };
+}
+
+export function useForgePatch(id: string) {
+  const [patch, setPatch] = useState<KiloPatchPlan | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await fetchJson<{ patch?: KiloPatchPlan; error?: string }>(
+        `${API_BASE}/forge/patch/${id}`
+      );
+      if (data.error) {
+        setError(data.error);
+        setPatch(null);
+      } else {
+        setPatch(data.patch ?? null);
+        setError(null);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    refresh();
+    const interval = setInterval(refresh, 3000);
+    return () => clearInterval(interval);
+  }, [refresh]);
+
+  return { patch, loading, error, refresh };
 }
