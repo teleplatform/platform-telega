@@ -14,6 +14,7 @@ import { ForgeGraphScreen } from './screens/ForgeGraphScreen';
 import { ForgeReportScreen } from './screens/ForgeReportScreen';
 import { ForgeDiffScreen, ForgePatchesScreen } from './screens/ForgeDiffScreen';
 import { ForgeOperatorScreen } from './screens/ForgeOperatorScreen';
+import { ForgeActionCardsPanel } from './screens/ForgeActionCardsPanel';
 import { useApp } from './context/AppContext';
 
 function App() {
@@ -59,6 +60,7 @@ function App() {
           <Route path="/forge/diff/:id" element={<ForgeDiffScreen />} />
           <Route path="/forge/patches" element={<ForgePatchesScreen />} />
           <Route path="/forge/operator" element={<ForgeOperatorScreen />} />
+          <Route path="/forge/action-cards" element={<ForgeActionCardsPanel />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

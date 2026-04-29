@@ -239,6 +239,30 @@ export function useForgeAutoModes() {
   return { autoModes, loading, refresh };
 }
 
+export function useForgeActionCards() {
+  const [cards, setCards] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    try {
+      const data = await fetchJson<{ cards: any[] }>(`${API_BASE}/forge/action-cards`);
+      setCards(data.cards ?? []);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const interval = setInterval(refresh, 5000);
+    return () => clearInterval(interval);
+  }, [refresh]);
+
+  return { cards, loading, refresh };
+}
+
 export function useForgeAction() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
