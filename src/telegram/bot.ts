@@ -81,6 +81,19 @@ import {
   formatForgeTaskList,
   canManageForgeTask,
 } from "./forge-shell.js";
+import {
+  createWorkflow,
+  getWorkflow,
+  updateWorkflow,
+  executeStage,
+  skipStage,
+  restartWorkflow,
+  formatWorkflowVisualization,
+  formatWorkflowList,
+  listWorkflows,
+  STAGES,
+  WorkflowStage,
+} from "./forge-workflow.js";
 
 function getTelegaRoot(): string {
   const root = (process.env.TELEGA_ROOT || "").trim();
@@ -4530,6 +4543,223 @@ bot.command("set_currency", async (ctx) => {
       await ctx.reply(formatted);
     } catch (e: any) {
       console.error("[telegram] /forge_history failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_new", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      let taskDesc = args.join(" ").trim();
+
+      if (!taskDesc) {
+        const stageHelp = STAGES.map(s => s).join(", ");
+        await ctx.reply(lang === "ru"
+          ? `Использование: /forge_new <задача> [--stop-at <стадия>]\nДоступные стадии: ${stageHelp}\nПример: /forge_new добавить логирование --stop-at plan`
+          : `Usage: /forge_new <task> [--stop-at <stage>]\nStages: ${stageHelp}\nExample: /forge_new add logging --stop-at plan`);
+        return;
+      }
+
+      let stopAt: string | undefined;
+      const stopMatch = taskDesc.match(/--stop-at\s+(\w+)/);
+      if (stopMatch) {
+        stopAt = stopMatch[1] as WorkflowStage;
+        taskDesc = taskDesc.replace(/--stop-at\s+\w+/, "").trim();
+      }
+
+      console.log("[telegram] /forge_new", { user_id: uid, label, task: taskDesc.slice(0, 50), stop_at: stopAt });
+
+      const titleMatch = taskDesc.match(/^([^\n]+)/);
+      const title = titleMatch ? titleMatch[1].slice(0, 50) : taskDesc.slice(0, 50);
+
+      await ctx.reply(lang === "ru" ? "🔨 Создаю workflow..." : "🔨 Creating workflow...");
+
+      const result = await createWorkflow(uid, label, title, taskDesc, lang, { stopAt: stopAt as WorkflowStage });
+
+      if (result.error) {
+        await ctx.reply(`❌ ${result.error}`);
+        return;
+      }
+
+      await ctx.reply(`✅ ${lang === "ru" ? "Workflow создан" : "Workflow created"}: ${result.workflow_id}`);
+
+      const wf = await getWorkflow(result.workflow_id!);
+      if (wf) {
+        await ctx.reply(formatWorkflowVisualization(wf, lang));
+      }
+    } catch (e: any) {
+      console.error("[telegram] /forge_new failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_next", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const workflowId = args.join(" ").trim();
+
+      if (!workflowId) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_next <workflow_id>"
+          : "Usage: /forge_next <workflow_id>");
+        return;
+      }
+
+      console.log("[telegram] /forge_next", { user_id: uid, label, workflow_id: workflowId });
+
+      await ctx.reply(lang === "ru" ? "⏭️ Выполняю стадию..." : "⏭️ Executing stage...");
+
+      const result = await executeStage(workflowId, uid, label, lang);
+
+      if (!result.ok) {
+        await ctx.reply(`❌ ${result.error}`);
+        return;
+      }
+
+      const wf = await getWorkflow(workflowId);
+      if (wf) {
+        await ctx.reply(formatWorkflowVisualization(wf, lang));
+
+        if (wf.current_stage === "complete") {
+          await ctx.reply(lang === "ru" ? "✅ Workflow завершён!" : "✅ Workflow complete!");
+        }
+      }
+    } catch (e: any) {
+      console.error("[telegram] /forge_next failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_stage", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const workflowId = args.join(" ").trim();
+
+      if (!workflowId) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_stage <workflow_id>"
+          : "Usage: /forge_stage <workflow_id>");
+        return;
+      }
+
+      const wf = await getWorkflow(workflowId);
+      if (!wf) {
+        await ctx.reply(lang === "ru" ? "Workflow не найден" : "Workflow not found");
+        return;
+      }
+
+      await ctx.reply(formatWorkflowVisualization(wf, lang));
+    } catch (e: any) {
+      console.error("[telegram] /forge_stage failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_skip", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const workflowId = args.join(" ").trim();
+
+      if (!workflowId) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_skip <workflow_id>"
+          : "Usage: /forge_skip <workflow_id>");
+        return;
+      }
+
+      const wf = await getWorkflow(workflowId);
+      if (!wf) {
+        await ctx.reply(lang === "ru" ? "Workflow не найден" : "Workflow not found");
+        return;
+      }
+
+      const current = wf.current_stage;
+      const result = await skipStage(workflowId, current, uid, label, lang);
+
+      if (!result.ok) {
+        await ctx.reply(`❌ ${result.error}`);
+        return;
+      }
+
+      await ctx.reply(lang === "ru" ? "⏭️ Стадия пропущена" : "⏭️ Stage skipped");
+
+      const updated = await getWorkflow(workflowId);
+      if (updated) {
+        await ctx.reply(formatWorkflowVisualization(updated, lang));
+      }
+    } catch (e: any) {
+      console.error("[telegram] /forge_skip failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_restart", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      let workflowId = args.join(" ").trim();
+
+      if (!workflowId) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_restart <workflow_id> [стадия]"
+          : "Usage: /forge_restart <workflow_id> [stage]");
+        return;
+      }
+
+      let fromStage: WorkflowStage = "intent";
+      const stageMatch = workflowId.match(/\s+(\w+)$/);
+      if (stageMatch && STAGES.includes(stageMatch[1] as WorkflowStage)) {
+        fromStage = stageMatch[1] as WorkflowStage;
+        workflowId = workflowId.replace(/\s+\w+$/, "").trim();
+      }
+
+      console.log("[telegram] /forge_restart", { user_id: uid, workflow_id: workflowId, from_stage: fromStage });
+
+      const result = await restartWorkflow(workflowId, fromStage);
+
+      if (!result.ok) {
+        await ctx.reply(`❌ ${result.error}`);
+        return;
+      }
+
+      const wf = await getWorkflow(workflowId);
+      if (wf) {
+        await ctx.reply(formatWorkflowVisualization(wf, lang));
+      }
+    } catch (e: any) {
+      console.error("[telegram] /forge_restart failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_list", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const workflows = await listWorkflows(uid);
+      const formatted = formatWorkflowList(workflows, lang);
+      await ctx.reply(formatted);
+    } catch (e: any) {
+      console.error("[telegram] /forge_list failed", e?.message || e);
     }
   });
 
