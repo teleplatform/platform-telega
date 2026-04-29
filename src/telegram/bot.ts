@@ -6968,16 +6968,21 @@ Only extract when stable`
       const uid = String((ctx as any)?.from?.id || "");
       if (getAccountLabel(uid) !== "★") return;
       await ctx.reply(
-        `🔍 EXTRACTION v10 — BEST TURN SELECTION
+        `🔍 EXTRACTION v11 — POST-STABILIZATION
 
-Algorithm:
-1. Get ALL conversation turns
-2. Extract text nodes for each turn
-3. Calculate: length, nodes count
-4. Select BEST turn = MAX text length
-5. Aggregate all text nodes from best turn
+Problem: ChatGPT writes to DOM AFTER streaming ends.
 
-Key: Not LAST turn. BEST turn = longest text.`
+Solution:
+1. Detect first response
+2. Wait 3 MORE seconds (post-stabilization)
+3. Re-extract after DOM settles
+4. Use BEST turn (v10) on stabilized DOM
+5. Update if post > pre length
+
+Timing:
+- streaming ends → extract → got X chars
+- wait 3s → extract again → got Y chars
+- if Y > X, use Y`
       );
     } catch (e: any) {
       console.error("[extraction_test] fail", e?.message);
