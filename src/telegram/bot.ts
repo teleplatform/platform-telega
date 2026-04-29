@@ -6940,6 +6940,29 @@ Reason: ${result.reason}`
     }
   });
 
+  bot.command("streaming_status", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      const { DEFAULT_STREAMING_CONFIG, isPartialOutput } = await import("./streaming-completion.js");
+      await ctx.reply(
+        `📡 STREAMING COMPLETION DETECTION
+        
+Check Interval: ${DEFAULT_STREAMING_CONFIG.stableCheckIntervalMs}ms
+Stable Threshold: ${DEFAULT_STREAMING_CONFIG.stableThreshold} checks
+Min Wait: ${DEFAULT_STREAMING_CONFIG.minWaitMs}ms
+Max Wait: ${DEFAULT_STREAMING_CONFIG.maxWaitMs}ms
+Min Length: ${DEFAULT_STREAMING_CONFIG.minLengthThreshold} chars
+
+Never extract during streaming
+Only extract when stable`
+      );
+    } catch (e: any) {
+      console.error("[streaming_status] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 

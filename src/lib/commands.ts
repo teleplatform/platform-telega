@@ -515,6 +515,16 @@ export const TELEGPT_COMMANDS: CommandDefinition[] = [
     ui: { showInHelp: true, showInCommands: true, showInButtons: false },
   },
   {
+    name: "/streaming_status",
+    args: "",
+    description: { ru: "статус стриминга", en: "streaming status" },
+    usage_ru: "/streaming_status",
+    usage_en: "/streaming_status",
+    roles: ["★"],
+    category: "system",
+    ui: { showInHelp: true, showInCommands: true, showInButtons: false },
+  },
+  {
     name: "/image",
     args: "<prompt>",
     description: { ru: "сгенерировать изображение", en: "generate image" },
