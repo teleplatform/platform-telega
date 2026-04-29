@@ -105,19 +105,29 @@ export function extractMultiBlockResponse(
   }
   
   const uniqueBlocks = deduplicateBlocks(allBlocks);
-  const fullText = uniqueBlocks.join("\n\n");
+  
+  const lastBlock = uniqueBlocks.length > 0 
+    ? uniqueBlocks[uniqueBlocks.length - 1] 
+    : "";
   
   const isComplete = uniqueBlocks.length > 0;
   const minLength = getMinTextLength(prompt);
-  const meetsMinLength = fullText.length >= minLength;
+  const meetsMinLength = lastBlock.length >= minLength;
+  
+  console.log(JSON.stringify({
+    event: "extraction_v4_1",
+    total_blocks: uniqueBlocks.length,
+    extracted_length: lastBlock.length,
+    using_last_block: true,
+  }));
   
   return {
-    text: fullText,
+    text: lastBlock,
     blocksCount: uniqueBlocks.length,
     isComplete,
     meetsMinLength,
     reason: isComplete 
-      ? `extracted ${uniqueBlocks.length} blocks, ${fullText.length} chars`
+      ? `last of ${uniqueBlocks.length} blocks, ${lastBlock.length} chars`
       : "no assistant blocks found",
   };
 }
@@ -179,7 +189,7 @@ export function extractImagesFromDocument(document: Document): ImageExtractionRe
 export function extractMultiBlockWithImages(
   document: Document,
   prompt: string,
-  config: MultiBlockConfig = DEFAULT_MULTI_BLOCK_CONFIG
+  config: MultiBlockConfig = DEFAULT_MULTIBLOCK_CONFIG
 ): {
   text: string;
   images: ImageExtractionResult;
@@ -198,5 +208,3 @@ export function extractMultiBlockWithImages(
     isComplete: textResult.isComplete,
   };
 }
-
-export const DEFAULT_MULTI_BLOCK_CONFIG = DEFAULT_MULTIBLOCK_CONFIG;

@@ -6967,26 +6967,28 @@ Only extract when stable`
     try {
       const uid = String((ctx as any)?.from?.id || "");
       if (getAccountLabel(uid) !== "★") return;
-      const { DEFAULT_MULTI_BLOCK_CONFIG, extractMultiBlockWithImages } = await import("./multi-block-extraction.js");
+      const { DEFAULT_MULTIBLOCK_CONFIG: CONFIG, extractMultiBlockWithImages } = await import("./multi-block-extraction.js");
       await ctx.reply(
         `🔍 MULTI-BLOCK EXTRACTION v4
         
 Config:
 - Collects ALL assistant blocks
+- Uses LAST block (not first)
 - Ignores UI elements (buttons, etc.)
 - Deduplicates content
 - Extracts images
 
 Settings:
-- Min text (normal): ${DEFAULT_MULTI_BLOCK_CONFIG.minTextLength} chars
-- Max wait: ${DEFAULT_MULTI_BLOCK_CONFIG.maxWaitMs}ms
-- Include streaming: ${DEFAULT_MULTI_BLOCK_CONFIG.includeStreaming}
+- Min text (normal): ${CONFIG.minTextLength} chars
+- Max wait: ${CONFIG.maxWaitMs}ms
+- Include streaming: ${CONFIG.includeStreaming}
 
 Method:
 1. querySelectorAll for assistant blocks
-2. Concatenate all blocks
-3. Extract images from document
-4. Return full text + images`
+2. Take LAST block (not first)
+3. Extract full innerText
+4. Extract images from document
+5. Return full text + images`
       );
     } catch (e: any) {
       console.error("[extraction_test] fail", e?.message);
