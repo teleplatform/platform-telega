@@ -6043,6 +6043,28 @@ await ctx.reply("❌ Voice processing failed");
     } catch (e) { console.error(e); }
   });
 
+  bot.command("system_smoke", async (ctx) => {
+    const uid = String((ctx as any)?.from?.id || "");
+    if (getAccountLabel(uid) !== "★") return;
+    try {
+      await ctx.reply("🔍 Running smoke tests...");
+      const { runSystemSmoke, saveSmokeReport } = await import("./smoke-test.js");
+      const report = await runSystemSmoke();
+      await saveSmokeReport(report);
+      const lines = [
+        `📊 SYSTEM SMOKE`,
+        `Overall: **${report.overall}**`,
+        `Pass: ${report.pass_count} | Warn: ${report.warn_count} | Fail: ${report.fail_count}`,
+        "",
+        ...report.results.slice(0, 5).map((r: any) => `${r.status} ${r.check}`),
+      ];
+      await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
+    } catch (e: any) {
+      console.error("[smoke] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
