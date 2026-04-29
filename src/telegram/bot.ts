@@ -6293,6 +6293,98 @@ await ctx.reply("❌ Voice processing failed");
     }
   });
 
+  bot.command("telega_start", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      await ctx.reply(
+        `🚀 Tele•Ga Product Layer
+        
+Welcome to Tele•Ga!
+Your AI Execution OS is now ready for business.
+
+Available:
+• /telega_product_card <name> - AI product card generator
+• /market_view - Browse marketplace
+• /market_create <title> <price> - Create listing
+
+Type /help for all commands.`
+      );
+    } catch (e: any) {
+      console.error("[telega_start] fail", e?.message);
+    }
+  });
+
+  bot.command("telega_product_card", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const productName = args.join(" ") || "My Product";
+      await ctx.reply("🎫 Generating product card...");
+      const { generateProductCard } = await import("./marketplace.js");
+      const product = await generateProductCard(productName, uid);
+      await ctx.reply(
+        `📦 PRODUCT CARD
+
+ID: ${product.id}
+Title: ${product.title}
+Description: ${product.description}
+Category: ${product.category}
+Tags: ${product.tags.join(", ")}
+Price: ${product.price_suggestion}₽
+
+Status: ${product.status}
+
+[Approve] [Edit] [Regenerate]`
+      );
+    } catch (e: any) {
+      console.error("[telega_product_card] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("market_view", async (ctx) => {
+    try {
+      const { getMarketplaceProducts, getMarketplaceStats } = await import("./marketplace.js");
+      const products = await getMarketplaceProducts();
+      const stats = await getMarketplaceStats();
+      const lines = [
+        "🛒 MARKETPLACE",
+        `Total: ${stats.total_products} | Published: ${stats.published}`,
+        "",
+      ];
+      if (products.length === 0) {
+        lines.push("No products yet. Use /telega_product_card to create one.");
+      } else {
+        for (const p of products.slice(0, 5)) {
+          lines.push(`• ${p.title} - ${p.price_suggestion}₽`);
+        }
+      }
+      await ctx.reply(lines.join("\n"));
+    } catch (e: any) {
+      console.error("[market_view] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("market_create", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      if (args.length < 2) {
+        await ctx.reply("Usage: /market_create <title> <price>\nExample: /market_create My Product 999");
+        return;
+      }
+      const price = parseInt(args[args.length - 1], 10);
+      const title = args.slice(0, -1).join(" ");
+      const { createMarketplaceListing } = await import("./marketplace.js");
+      const product = await createMarketplaceListing(title, "Marketplace listing", price, uid);
+      await ctx.reply(`✅ Created: ${product.id}\nPrice: ${price}₽`);
+    } catch (e: any) {
+      console.error("[market_create] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
