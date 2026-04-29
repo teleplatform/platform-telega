@@ -407,3 +407,69 @@ export function renderAllCommands(lang: "ru" | "en", role?: string): string {
   }
   return renderCommands(commands, lang);
 }
+
+export interface CommandContext {
+  role: string;
+  current_workflow_id?: string;
+  current_patch_id?: string;
+  last_provider?: string;
+  last_error?: string;
+  last_response_length?: number;
+  has_pending_heal?: boolean;
+  has_active_workflow?: boolean;
+  has_stalled_workflow?: boolean;
+}
+
+export function suggestCommands(context: CommandContext): string[] {
+  const suggestions: string[] = [];
+  const { role, current_workflow_id, last_error, has_active_workflow, has_stalled_workflow, has_pending_heal } = context;
+
+  if (!role) return suggestions;
+
+  if (has_stalled_workflow && (role === "★" || role === "★★")) {
+    if (current_workflow_id) {
+      suggestions.push("/forge_diagnose");
+      suggestions.push("/forge_heal_plan");
+    }
+  }
+
+  if (has_active_workflow && current_workflow_id) {
+    suggestions.push("/forge_next");
+    suggestions.push("/forge_report");
+    suggestions.push("/forge_timeline");
+    if (role === "★" || role === "★★") {
+      suggestions.push("/forge_pause");
+    }
+  }
+
+  if (has_pending_heal && role === "★") {
+    suggestions.push("/forge_heal_apply");
+  }
+
+  if (last_error) {
+    if (role === "★" || role === "★★") {
+      suggestions.push("/mcp_status");
+      suggestions.push("/mcp_test");
+    }
+    suggestions.push("/forge_diagnose");
+  }
+
+  if ((role === "★" || role === "★★") && !current_workflow_id) {
+    suggestions.push("/forge_auto");
+    suggestions.push("/forge_new");
+  }
+
+  return suggestions;
+}
+
+export function renderSuggestions(context: CommandContext, lang: "ru" | "en"): string {
+  const suggestionNames = suggestCommands(context);
+  if (suggestionNames.length === 0) return "";
+
+  const available = filterByRole(ALL_COMMANDS, context.role);
+  const toRender = available.filter(c => suggestionNames.includes(c.name));
+
+  if (toRender.length === 0) return "";
+
+  return toRender.map(c => c.name).join(" • ");
+}
