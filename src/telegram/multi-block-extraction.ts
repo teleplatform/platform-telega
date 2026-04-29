@@ -11,7 +11,7 @@ export const DEFAULT_MULTIBLOCK_CONFIG: MultiBlockConfig = {
     "button", "svg", "[role=button]", "[data-button]",
     ".loading", ".spinner", "[data-state=loading]",
   ],
-  minTextLength: 20000,
+  minTextLength: 500,
   maxWaitMs: 60000,
   includeStreaming: true,
   minValidLength: 500,
@@ -24,110 +24,86 @@ function isLongPrompt(prompt: string): boolean {
 }
 
 function getMinLength(prompt: string): number {
-  return isLongPrompt(prompt) ? 25000 : 1000;
+  return isLongPrompt(prompt) ? 25000 : 500;
 }
 
-function cleanText(text: string, ignore: string[]): string {
-  text = text.trim();
-  for (const sel of ignore) {
-    text = text.replace(new RegExp(sel, "gi"), "");
-  }
-  text = text.replace(/\n{3,}/g, "\n\n").replace(/^[ \t]+/gm, "");
-  return text.trim();
-}
-
-function deduplicate(blocks: string[]): string[] {
-  const seen = new Set<string>();
-  const unique: string[] = [];
-  for (const block of blocks) {
-    const n = block.trim();
-    if (n && n.length > 10 && !seen.has(n)) {
-      seen.add(n);
-      unique.push(n);
-    }
-  }
-  return unique;
-}
-
-function getAssistantBlocks(document: Document): Element[] {
+function getConversationTurns(document: Document): Element[] {
   const selectors = [
-    '[data-message-author-role="assistant"]',
-    '[data-msg-author="assistant"]',
-    '[data-role="assistant"]',
-    '[class*="assistant"]',
-    ".assistant-msg",
+    'article[data-testid*="conversation-turn"]',
+    'article[data-testid*="conversation"]',
+    'article[class*="conversation-turn"]',
+    "[data-testid=conversation-turn]",
+    "[data-message-thread]",
   ];
-  const results: Element[] = [];
+  const turns: Element[] = [];
   for (const sel of selectors) {
     try {
       const els = document.querySelectorAll(sel);
       for (const el of els) {
-        if (!results.includes(el)) results.push(el);
+        if (!turns.includes(el)) turns.push(el);
       }
     } catch {}
   }
-  return results;
+  return turns;
 }
 
-function getLastResponseGroup(document: Document): string[] {
-  const blocks = getAssistantBlocks(document);
-  if (blocks.length === 0) return [];
-  
-  const groups: string[][] = [];
-  let currentGroup: string[] = [];
-  
-  for (const block of blocks) {
-    const text = cleanText(block.textContent || "", DEFAULT_MULTIBLOCK_CONFIG.ignoreUISelectors);
-    if (text && text.length > 10) {
-      currentGroup.push(text);
-    } else {
-      if (currentGroup.length > 0) {
-        groups.push(currentGroup);
-        currentGroup = [];
-      }
-    }
+function findAssistantInTurn(turn: Element): Element | null {
+  const selectors = [
+    '[data-message-author-role="assistant"]',
+    '[data-role="assistant"]',
+    '[data-msg-author="assistant"]',
+  ];
+  for (const sel of selectors) {
+    try {
+      const el = turn.querySelector(sel);
+      if (el) return el;
+    } catch {}
   }
-  
-  if (currentGroup.length > 0) {
-    groups.push(currentGroup);
-  }
-  
-  return groups.length > 0 ? groups[groups.length - 1] : [];
+  return null;
 }
 
 export function extractAssistantResponse(document: Document, prompt: string): {
   text: string;
-  blocksCount: number;
-  groupsCount: number;
+  turnsCount: number;
+  assistantFound: boolean;
   isValid: boolean;
   reason: string;
 } {
-  const lastGroup = getLastResponseGroup(document);
-  if (lastGroup.length === 0) {
-    console.log(JSON.stringify({ event: "extraction_failed", reason: "no_blocks" }));
-    return { text: "", blocksCount: 0, groupsCount: 0, isValid: false, reason: "no assistant blocks found" };
+  const turns = getConversationTurns(document);
+  if (turns.length === 0) {
+    console.log(JSON.stringify({ event: "extraction_v6", reason: "no_turns" }));
+    return { text: "", turnsCount: 0, assistantFound: false, isValid: false, reason: "no conversation turns found" };
   }
-  const uniqueBlocks = deduplicate(lastGroup);
-  const fullText = uniqueBlocks.join("\n\n");
+  
+  const lastTurn = turns[turns.length - 1];
+  const assistant = findAssistantInTurn(lastTurn);
+  
+  if (!assistant) {
+    console.log(JSON.stringify({ event: "extraction_v6", turns_count: turns.length, reason: "no_assistant" }));
+    return { text: "", turnsCount: turns.length, assistantFound: false, isValid: false, reason: "no assistant message in turn" };
+  }
+  
+  const text = assistant.textContent?.trim() || "";
   const minLen = getMinLength(prompt);
-  const isValid = fullText.length >= minLen && fullText.length >= DEFAULT_MULTIBLOCK_CONFIG.minValidLength;
+  const isValid = text.length >= minLen && text.length >= DEFAULT_MULTIBLOCK_CONFIG.minValidLength;
+  
   console.log(JSON.stringify({
-    event: "extraction_v5",
-    groups_count: 1,
-    group_blocks: lastGroup.length,
-    unique_blocks: uniqueBlocks.length,
-    extracted_length: fullText.length,
+    event: "extraction_v6",
+    turns_count: turns.length,
+    assistant_found: true,
+    text_length: text.length,
     min_required: minLen,
     is_valid: isValid,
   }));
+  
   return {
-    text: fullText,
-    blocksCount: uniqueBlocks.length,
-    groupsCount: 1,
+    text,
+    turnsCount: turns.length,
+    assistantFound: true,
     isValid,
     reason: isValid
-      ? `group with ${uniqueBlocks.length} blocks, ${fullText.length} chars`
-      : `too short: ${fullText.length} < ${minLen}`,
+      ? `turn ${turns.length}, ${text.length} chars`
+      : `too short: ${text.length} < ${minLen}`,
   };
 }
 
@@ -142,30 +118,32 @@ function isValidImageUrl(url: string): boolean {
 }
 
 export function extractImages(document: Document): ExtractedImages {
+  const turns = getConversationTurns(document);
+  if (turns.length === 0) return { urls: [], count: 0 };
+  
+  const lastTurn = turns[turns.length - 1];
+  const assistant = findAssistantInTurn(lastTurn);
+  
+  if (!assistant) return { urls: [], count: 0 };
+  
   const urls: string[] = [];
-  const selectors = [
-    '[data-message-author-role="assistant"] img',
-    ".assistant-msg img",
-    "[class*=\"assistant\"] img",
-  ];
-  for (const sel of selectors) {
-    try {
-      const imgs = document.querySelectorAll(sel);
-      for (const img of imgs) {
-        const src = (img as HTMLImageElement).src;
-        if (isValidImageUrl(src) && !urls.includes(src)) {
-          urls.push(src);
-        }
+  try {
+    const imgs = assistant.querySelectorAll("img");
+    for (const img of imgs) {
+      const src = (img as HTMLImageElement).src;
+      if (isValidImageUrl(src) && !urls.includes(src)) {
+        urls.push(src);
       }
-    } catch {}
-  }
+    }
+  } catch {}
+  
   return { urls, count: urls.length };
 }
 
 export function extractFullResponse(document: Document, prompt: string): {
   text: string;
   images: ExtractedImages;
-  blocksCount: number;
+  turnsCount: number;
   isValid: boolean;
 } {
   const textResult = extractAssistantResponse(document, prompt);
@@ -173,7 +151,7 @@ export function extractFullResponse(document: Document, prompt: string): {
   return {
     text: textResult.text,
     images: imagesResult,
-    blocksCount: textResult.blocksCount,
+    turnsCount: textResult.turnsCount,
     isValid: textResult.isValid,
   };
 }

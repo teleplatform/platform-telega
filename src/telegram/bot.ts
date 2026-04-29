@@ -6969,26 +6969,23 @@ Only extract when stable`
       if (getAccountLabel(uid) !== "★") return;
       const { DEFAULT_MULTIBLOCK_CONFIG: CONFIG, extractFullResponse } = await import("./multi-block-extraction.js");
       await ctx.reply(
-        `🔍 ASSISTANT RESPONSE EXTRACTION v5
+        `🔍 CONVERSATION TURN EXTRACTION v6
 
-Target: Rebuild full response from LAST GROUP of assistant blocks.
+Target: Assistant container inside LAST conversation turn.
 
 Algorithm:
-1. Get ALL assistant blocks (multiple selectors)
-2. Group consecutive blocks into responses
-3. Take LAST group (latest response)
-4. Join all blocks with \n\n
-5. Deduplicate
-6. Validate length
+1. Select ALL conversation turns (article)
+2. Take LAST turn
+3. Inside turn, find assistant message
+4. Extract full innerText
+5. Extract images from same container
+6. DO NOT iterate blocks or use global query
 
 Settings:
 - Min valid: ${CONFIG.minValidLength} chars
 - Min text (normal): ${CONFIG.minTextLength} chars
-- Max wait: ${CONFIG.maxWaitMs}ms
 
-Groups:
-- Multiple consecutive assistant blocks = one response group
-- LAST group = latest complete answer`
+Key: Use conversation turn as ROOT, not blocks.`
       );
     } catch (e: any) {
       console.error("[extraction_test] fail", e?.message);
