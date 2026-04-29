@@ -6967,21 +6967,48 @@ Only extract when stable`
     try {
       const uid = String((ctx as any)?.from?.id || "");
       if (getAccountLabel(uid) !== "★") return;
-const { DEFAULT_MULTIBLOCK_CONFIG: CONFIG, extractFullResponse } = await import("./multi-block-extraction.js");
+      const { DEFAULT_MULTIBLOCK_CONFIG: CONFIG } = await import("./multi-block-extraction.js");
       await ctx.reply(
-        `🔍 RENDERED CONTENT EXTRACTION v7
+        `🔍 EXTRACTION v8 — MAX VISIBLE CANDIDATE
 
-Target: Visible text (what user sees), not raw DOM.
+Algorithm:
+1. Scan ALL assistant candidates
+2. Get visible text for each (Selection API)
+3. Select MAX length (not last, not first)
+4. Validate length
 
-Method:
-1. getSelection().toString() = rendered text
-2. Fallback to innerText on error
-3. Applied to all 4 extraction points
-
-Key: DOM ≠ final text. Selection API reads what browser renders.`
+No guessing. No last/first. Just max visible text.`
       );
     } catch (e: any) {
       console.error("[extraction_test] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("extraction_debug", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      await ctx.reply(
+        `🔧 EXTRACTION DEBUG
+
+Run test prompt in ChatGPT, then check bridge logs:
+
+1. extraction_v8_max_candidate:
+   - candidates_scanned
+   - best_candidate_length
+   - best_selector
+   - images_count
+
+2. Check bridge output for:
+   "extraction_v8" event in console
+
+3. If still short:
+   - provider_ui_changed flag will trigger
+   - auto-redetect selectors`
+      );
+    } catch (e: any) {
+      console.error("[extraction_debug] fail", e?.message);
       await ctx.reply("❌ " + e?.message);
     }
   });

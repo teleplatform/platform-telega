@@ -340,9 +340,36 @@ async function executeWithCDP(prompt: string, traceId: string): Promise<SessionB
           return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
         }
         
-        const msgs = Array.from(document.querySelectorAll('[data-message-author-role="assistant"]'));
-        const last = msgs[msgs.length - 1] as HTMLElement | undefined;
-        return last ? getVisibleText(last) : "";
+        const selectors = [
+          '[data-message-author-role="assistant"]',
+          '[class*="message-assistant"]',
+          '[data-testid*="message"]',
+          '[role="article"]',
+        ];
+        
+        const candidates: { selector: string; text: string }[] = [];
+        
+        for (const sel of selectors) {
+          try {
+            const els = Array.from(document.querySelectorAll(sel));
+            for (const el of els) {
+              const text = getVisibleText(el as HTMLElement);
+              if (text.length > 10) {
+                candidates.push({ selector: sel, text });
+              }
+            }
+          } catch {}
+        }
+        
+        if (candidates.length === 0) {
+          return "";
+        }
+        
+        const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
+        
+        console.log(`[creator-bridge] extraction_v8_max_candidate: candidates=${candidates.length} best=${best.text.length} sel=${best.selector}`);
+        
+        return best.text;
       });
       
       if (messages.length > 0) {
@@ -548,9 +575,34 @@ async function executeQwenWithCDP(prompt: string, traceId: string): Promise<Sess
           return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
         }
         
-        const msgs = Array.from(document.querySelectorAll('[class*="message-assistant"]'));
-        const last = msgs[msgs.length - 1] as HTMLElement | undefined;
-        return last ? getVisibleText(last) : "";
+        const selectors = [
+          '[data-message-author-role="assistant"]',
+          '[class*="message-assistant"]',
+          '[data-testid*="message"]',
+          '[role="article"]',
+        ];
+        
+        const candidates: { selector: string; text: string }[] = [];
+        
+        for (const sel of selectors) {
+          try {
+            const els = Array.from(document.querySelectorAll(sel));
+            for (const el of els) {
+              const text = getVisibleText(el as HTMLElement);
+              if (text.length > 10) {
+                candidates.push({ selector: sel, text });
+              }
+            }
+          } catch {}
+        }
+        
+        if (candidates.length === 0) {
+          return "";
+        }
+        
+        const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
+        
+        return best.text;
       });
       
       if (messages.length > 0) {
@@ -755,13 +807,34 @@ async function executeDeepSeekWithCDP(prompt: string, traceId: string): Promise<
           return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
         }
         
-        const msgs = Array.from(document.querySelectorAll('[class*="message"]'));
-        const assistantMsgs = msgs.filter((m: Element) => {
-          const text = m.textContent || "";
-          return text.length > 20 && !m.querySelector('input, textarea, button');
-        });
-        const last = assistantMsgs[assistantMsgs.length - 1] as HTMLElement | undefined;
-        return last ? getVisibleText(last) : "";
+        const selectors = [
+          '[data-message-author-role="assistant"]',
+          '[class*="message-assistant"]',
+          '[data-testid*="message"]',
+          '[role="article"]',
+        ];
+        
+        const candidates: { selector: string; text: string }[] = [];
+        
+        for (const sel of selectors) {
+          try {
+            const els = Array.from(document.querySelectorAll(sel));
+            for (const el of els) {
+              const text = getVisibleText(el as HTMLElement);
+              if (text.length > 10) {
+                candidates.push({ selector: sel, text });
+              }
+            }
+          } catch {}
+        }
+        
+        if (candidates.length === 0) {
+          return "";
+        }
+        
+        const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
+        
+        return best.text;
       });
       
       if (messages.length > 0) {
@@ -971,9 +1044,34 @@ async function executeGrokWithCDP(prompt: string, traceId: string): Promise<Sess
           return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
         }
         
-        const msgs = Array.from(document.querySelectorAll('[data-testid="message"], [class*="message"], [class*="markdown"], [role="article"]'));
-        const last = msgs[msgs.length - 1] as HTMLElement | undefined;
-        return last ? getVisibleText(last) : "";
+        const selectors = [
+          '[data-message-author-role="assistant"]',
+          '[class*="message-assistant"]',
+          '[data-testid*="message"]',
+          '[role="article"]',
+        ];
+        
+        const candidates: { selector: string; text: string }[] = [];
+        
+        for (const sel of selectors) {
+          try {
+            const els = Array.from(document.querySelectorAll(sel));
+            for (const el of els) {
+              const text = getVisibleText(el as HTMLElement);
+              if (text.length > 10) {
+                candidates.push({ selector: sel, text });
+              }
+            }
+          } catch {}
+        }
+        
+        if (candidates.length === 0) {
+          return "";
+        }
+        
+        const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
+        
+        return best.text;
       });
       
       if (messages.length > 0) {
