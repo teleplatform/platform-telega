@@ -81,6 +81,14 @@ export const Header: React.FC<HeaderProps> = ({
               ⚡ FORGE
             </NavLink>
           )}
+          {isForge && (
+            <NavLink
+              to="/forge/operator"
+              className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
+            >
+              👁 OPERATOR
+            </NavLink>
+          )}
         </div>
       </div>
 
