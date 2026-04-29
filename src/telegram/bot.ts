@@ -97,6 +97,11 @@ import {
   checkGates,
   formatValidationReport,
 } from "./forge-workflow.js";
+import {
+  addTimelineEvent,
+  getWorkflowTimeline,
+  exportReport,
+} from "./forge-timeline.js";
 
 function getTelegaRoot(): string {
   const root = (process.env.TELEGA_ROOT || "").trim();
@@ -4826,6 +4831,70 @@ bot.command("set_currency", async (ctx) => {
       }
     } catch (e: any) {
       console.error("[telegram] /forge_validate failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_timeline", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const workflowId = args.join(" ").trim();
+
+      if (!workflowId) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_timeline <workflow_id>"
+          : "Usage: /forge_timeline <workflow_id>");
+        return;
+      }
+
+      const timeline = await getWorkflowTimeline(workflowId, lang);
+      if (!timeline) {
+        await ctx.reply(lang === "ru" ? "Timeline не найден" : "Timeline not found");
+        return;
+      }
+
+      await ctx.reply(timeline);
+    } catch (e: any) {
+      console.error("[telegram] /forge_timeline failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_report", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const workflowId = args.join(" ").trim();
+
+      if (!workflowId) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_report <workflow_id>"
+          : "Usage: /forge_report <workflow_id>");
+        return;
+      }
+
+      console.log("[telegram] /forge_report", { user_id: uid, workflow_id: workflowId });
+
+      const workflow = await getWorkflow(workflowId);
+      if (!workflow) {
+        await ctx.reply(lang === "ru" ? "Workflow не найден" : "Workflow not found");
+        return;
+      }
+
+      const { content, isLong } = await exportReport(workflowId, workflow, lang);
+
+      if (isLong) {
+        await ctx.reply(content, { parse_mode: "Markdown" });
+      } else {
+        await ctx.reply(content);
+      }
+    } catch (e: any) {
+      console.error("[telegram] /forge_report failed", e?.message || e);
     }
   });
 
