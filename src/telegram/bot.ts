@@ -37,6 +37,13 @@ import {
   formatVoiceStatus,
   buildVoiceKeyboard,
 } from "./voice-layer.js";
+import {
+  generateImage,
+  sendImageToTelegram,
+  getUserImages,
+  formatUserImages,
+  getImageCommands,
+} from "./image-layer.js";
 
 function getTelegaRoot(): string {
   const root = (process.env.TELEGA_ROOT || "").trim();
@@ -3858,6 +3865,58 @@ bot.command("set_currency", async (ctx) => {
     }
   });
 
+  bot.command("image", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const prompt = args.join(" ").trim();
+
+      if (!prompt) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /image <описание>\nПример: /image закат солнца на пляже"
+          : "Usage: /image <description>\nExample: /image sunset on the beach");
+        return;
+      }
+
+      console.log("[telegram] /image command", { user_id: uid, chat_id: chatIdStr, label, prompt: prompt.slice(0, 50) });
+
+      await ctx.reply(lang === "ru" ? "🎨 Генерирую изображение..." : "🎨 Generating image...");
+
+      const result = await generateImage(ctx, uid, chatIdStr, prompt);
+
+      if (result.success && result.urls) {
+        await sendImageToTelegram(ctx, result.urls, lang);
+        await ctx.reply(lang === "ru" ? "✅ Готово!" : "✅ Done!");
+      } else {
+        await ctx.reply(`❌ ${result.error || (lang === "ru" ? "Ошибка" : "Error")}`);
+      }
+    } catch (e: any) {
+      console.error("[telegram] /image failed", e?.message || e);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+      await ctx.reply(lang === "ru" ? "❌ Ошибка генерации" : "❌ Generation failed");
+    }
+  });
+
+  bot.command("images", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const images = await getUserImages(uid);
+      const formatted = formatUserImages(images, lang);
+      await ctx.reply(formatted);
+    } catch (e: any) {
+      console.error("[telegram] /images failed", e?.message || e);
+    }
+  });
+
   bot.on("voice", async (ctx) => {
     try {
       const uid = String((ctx as any)?.from?.id || "");
@@ -4247,7 +4306,35 @@ bot.command("set_currency", async (ctx) => {
   });
 
   bot.action("action_image", async (ctx) => {
-    await ctx.answerCbQuery("Image Layer coming soon!", { show_alert: true });
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const chatIdStr = String(chatId(ctx));
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      console.log("[telegram-action] action_image clicked", { user_id: uid, chat_id: chatIdStr, label });
+
+      const lastResponse = await getLastResponse(chatIdStr, uid);
+      if (!lastResponse) {
+        await ctx.answerCbQuery(lang === "ru" ? "Нет предыдущего ответа" : "No previous response", { show_alert: true });
+        return;
+      }
+
+      await ctx.answerCbQuery(lang === "ru" ? "Генерирую..." : "Generating...");
+
+      const result = await generateImage(ctx, uid, chatIdStr, "", lastResponse.response_text, true);
+
+      if (result.success && result.urls) {
+        await sendImageToTelegram(ctx, result.urls, lang);
+        await ctx.reply(lang === "ru" ? "✅ Готово!" : "✅ Done!");
+      } else {
+        await ctx.reply(`❌ ${result.error || (lang === "ru" ? "Ошибка" : "Error")}`);
+      }
+    } catch (e: any) {
+      console.error("[telegram-action] action_image failed", e?.message || e);
+      await ctx.answerCbQuery("Error: " + (e?.message || "unknown"), { show_alert: true });
+    }
   });
 
   bot.action("action_provider", async (ctx) => {
