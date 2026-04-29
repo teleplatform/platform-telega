@@ -6446,6 +6446,80 @@ Revenue: ${stats.revenue}₽`
     }
   });
 
+  bot.command("order_repeat", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const productId = args[0] || "default";
+      await ctx.reply("🔄 Creating repeat order...");
+      const { createRepeatOrder } = await import("./growth-loop.js");
+      const order = await createRepeatOrder(productId, uid, 10);
+      await ctx.reply(`✅ Repeat order: ${order.id}\nAmount: ${order.amount}₽ (10% off)`);
+    } catch (e: any) {
+      console.error("[order_repeat] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("review", async (ctx) => {
+    try {
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      if (args.length < 2) {
+        await ctx.reply("Usage: /review <order_id> <rating> [comment]\nExample: /review order_abc123 5 Great!");
+        return;
+      }
+      const orderId = args[0];
+      const rating = parseInt(args[1], 10);
+      const comment = args.slice(2).join(" ");
+      const { submitReview } = await import("./growth-loop.js");
+      const ok = await submitReview(orderId, rating, comment);
+      await ctx.reply(ok ? `✅ Review submitted (${rating}★, ${rating >= 4 ? "public" : "private"})` : "❌ Invalid rating");
+    } catch (e: any) {
+      console.error("[review] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("referral_link", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const { generateReferralLink } = await import("./growth-loop.js");
+      const code = await generateReferralLink(uid);
+      await ctx.reply(
+        `🔗 REFERRAL LINK
+        
+Share: /join ${code}
+
+Reward: 5% discount for referrer
+Get it: 5% Teleton for you`
+      );
+    } catch (e: any) {
+      console.error("[referral_link] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("customer_stats", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      const { getCustomerStats } = await import("./growth-loop.js");
+      const customers = await getCustomerStats();
+      const lines = [
+        `👥 CUSTOMER STATS`,
+        `Total: ${customers.length}`,
+        "",
+      ];
+      for (const c of customers.slice(0, 5)) {
+        lines.push(`• Orders: ${c.order_count}, Spent: ${c.total_spent}₽, Rating: ${c.rating || "-"}★`);
+      }
+      await ctx.reply(lines.join("\n"));
+    } catch (e: any) {
+      console.error("[customer_stats] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
