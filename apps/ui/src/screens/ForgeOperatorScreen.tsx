@@ -16,7 +16,7 @@ import {
   Mic,
   Wifi,
 } from "lucide-react";
-import { useForgeDashboard, useForgeAction, useForgePatches } from "../hooks/useForge";
+import { useForgeDashboard, useForgeAction, useForgePatches, useForgeAutoModes } from "../hooks/useForge";
 import { useEffect, useState } from "react";
 
 function formatTime(ts: number) {
@@ -43,6 +43,7 @@ function getStatusIcon(status: string) {
 export function ForgeOperatorScreen() {
   const { dashboard, refresh } = useForgeDashboard();
   const { patches } = useForgePatches();
+  const { autoModes } = useForgeAutoModes();
   const { execute, loading: actionLoading } = useForgeAction();
   const [selectedWorkflow, setSelectedWorkflow] = useState<string | null>(null);
   const [status, setStatus] = useState<Record<string, string>>({
@@ -70,6 +71,7 @@ export function ForgeOperatorScreen() {
     (w) => w.error || w.stages?.[w.current_stage]?.status === "failed"
   );
   const pendingPatches = patches.filter((p) => p.status === "pending");
+  const activeAutoModes = autoModes?.filter((m) => m.status === "active") ?? [];
 
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -139,10 +141,11 @@ export function ForgeOperatorScreen() {
         <div className="bg-card border border-border rounded-lg p-3">
           <div className="flex items-center gap-2 text-muted mb-1">
             <ListChecks className="w-4 h-4" />
-            <span className="text-xs">Active</span>
+            <span className="text-xs">Active / Auto</span>
           </div>
           <p className="text-2xl font-bold">
             {dashboard?.stats?.activeWorkflows ?? 0}
+            <span className="text-green-400 text-lg"> / {activeAutoModes.length}</span>
           </p>
         </div>
       </div>
@@ -277,6 +280,39 @@ export function ForgeOperatorScreen() {
           </div>
         </div>
       </div>
+
+      {activeAutoModes.length > 0 && (
+        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg overflow-hidden">
+          <div className="flex items-center gap-2 p-3 border-b border-yellow-500/20">
+            <Zap className="w-5 h-5 text-yellow-400 animate-pulse" />
+            <span className="font-semibold text-yellow-300">Auto Modes ({activeAutoModes.length})</span>
+          </div>
+          <div className="flex flex-col">
+            {activeAutoModes.slice(0, 5).map((mode) => (
+              <div
+                key={mode.record_id}
+                className="flex items-center justify-between p-3 border-b border-yellow-500/10 last:border-0"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="font-mono text-sm truncate">
+                    {mode.workflow_id.slice(0, 16)}
+                  </p>
+                  <p className="text-xs text-yellow-400">
+                    {mode.mode} · {mode.current_stage} · loop {mode.loop_count}/{mode.max_loops}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {mode.wait_approval && (
+                    <span className="text-xs px-2 py-1 bg-yellow-500/20 text-yellow-300 rounded">
+                      WAITING APPROVAL
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {selectedWorkflow && (
         <div className="bg-card border border-border rounded-lg p-4">
