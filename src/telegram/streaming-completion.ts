@@ -4,27 +4,65 @@ export interface StreamingConfig {
   minWaitMs: number;
   maxWaitMs: number;
   minLengthThreshold: number;
+  longPromptMinWaitMs: number;
+  longPromptMinLengthChars: number;
+  growthWindowMs: number;
 }
 
 export const DEFAULT_STREAMING_CONFIG: StreamingConfig = {
   stableCheckIntervalMs: 500,
   stableThreshold: 4,
-  minWaitMs: 3000,
+  minWaitMs: 5000,
   maxWaitMs: 90000,
   minLengthThreshold: 1000,
+  longPromptMinWaitMs: 25000,
+  longPromptMinLengthChars: 2500,
+  growthWindowMs: 10000,
 };
 
+const LONG_PROMPT_KEYWORDS = [
+  "3000",
+  "4000",
+  "5000",
+  "слов",
+  "words",
+  "article",
+  "статья",
+  "long",
+  "подробно",
+  "развернуто",
+  "detailed",
+  "comprehensive",
+  "essay",
+  "research",
+];
+
+function isLongPrompt(prompt: string): boolean {
+  const lower = prompt.toLowerCase();
+  return LONG_PROMPT_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+function getMinLength(prompt: string, defaultThreshold: number): number {
+  return isLongPrompt(prompt) ? 2500 : defaultThreshold;
+}
+
+function getMinWait(prompt: string, defaultWait: number, longWait: number): number {
+  return isLongPrompt(prompt) ? longWait : defaultWait;
+}
+
 export interface ExtractionState {
-  status: "waiting" | "stable" | "completed" | "timeout";
+  status: "waiting" | "stable" | "completed" | "timeout" | "partial";
   text: string;
   previousText: string;
   stableCount: number;
   startTime: number;
   lastUpdateTime: number;
+  firstTextTime: number;
   attempts: number;
+  prompt: string;
 }
 
-export function createExtractionState(): ExtractionState {
+export function createExtractionState(prompt: string = ""): ExtractionState {
   return {
     status: "waiting",
     text: "",
@@ -32,7 +70,9 @@ export function createExtractionState(): ExtractionState {
     stableCount: 0,
     startTime: Date.now(),
     lastUpdateTime: Date.now(),
+    firstTextTime: 0,
     attempts: 0,
+    prompt,
   };
 }
 
@@ -45,37 +85,83 @@ export function checkStreamingComplete(
   status: ExtractionState["status"];
   text: string;
   reason: string;
+  metadata?: Record<string, any>;
 } {
   const now = Date.now();
   const elapsed = now - state.startTime;
   const timeSinceUpdate = now - state.lastUpdateTime;
 
-  if (state.status === "completed" || state.status === "timeout") {
+  if (state.firstTextTime === 0 && currentText.length > 0) {
+    state.firstTextTime = now;
+  }
+
+  const minLength = getMinLength(state.prompt, config.minLengthThreshold);
+  const minWait = getMinWait(state.prompt, config.minWaitMs, config.longPromptMinWaitMs);
+  const hasGrowthWindow = state.firstTextTime > 0 && (now - state.firstTextTime) < config.growthWindowMs;
+
+  if (state.status === "completed" || state.status === "timeout" || state.status === "partial") {
     return {
       complete: true,
       status: state.status,
       text: state.text,
       reason: "already " + state.status,
+      metadata: { minLength, minWait, elapsed },
     };
   }
 
   if (elapsed > config.maxWaitMs) {
+    const isTooShort = currentText.length < minLength;
+    if (isTooShort) {
+      state.status = "partial";
+      state.text = currentText;
+      return {
+        complete: true,
+        status: "partial",
+        text: currentText,
+        reason: "timeout but PARTIAL: " + currentText.length + " < " + minLength,
+        metadata: { extracted_length: currentText.length, min_expected: minLength },
+      };
+    }
     state.status = "timeout";
     return {
       complete: true,
       status: "timeout",
       text: currentText,
       reason: "max timeout reached",
+      metadata: { elapsed, extracted_length: currentText.length },
     };
   }
 
-  if (elapsed < config.minWaitMs) {
+  if (elapsed < minWait) {
     state.previousText = currentText;
     return {
       complete: false,
       status: "waiting",
       text: currentText,
-      reason: "min wait not reached",
+      reason: "min wait not reached: " + elapsed + " < " + minWait,
+      metadata: { minWait, elapsed },
+    };
+  }
+
+  if (hasGrowthWindow) {
+    state.previousText = currentText;
+    return {
+      complete: false,
+      status: "waiting",
+      text: currentText,
+      reason: "growth window active: " + (config.growthWindowMs - (now - state.firstTextTime)) + "ms left",
+      metadata: { growthWindowRemaining: config.growthWindowMs - (now - state.firstTextTime) },
+    };
+  }
+
+  if (currentText.length < minLength) {
+    state.previousText = currentText;
+    return {
+      complete: false,
+      status: "waiting",
+      text: currentText,
+      reason: "too short: " + currentText.length + " < " + minLength,
+      metadata: { current_length: currentText.length, min_expected: minLength },
     };
   }
 
@@ -90,16 +176,6 @@ export function checkStreamingComplete(
   state.attempts++;
 
   if (state.stableCount >= config.stableThreshold) {
-    if (currentText.length < config.minLengthThreshold && elapsed < config.maxWaitMs * 0.5) {
-      state.previousText = currentText;
-      return {
-        complete: false,
-        status: "waiting",
-        text: currentText,
-        reason: "text too short, waiting more",
-      };
-    }
-
     state.status = "completed";
     state.text = currentText;
     return {
@@ -107,6 +183,12 @@ export function checkStreamingComplete(
       status: "completed",
       text: currentText,
       reason: "text stable",
+      metadata: {
+        extracted_length: currentText.length,
+        min_expected: minLength,
+        wait_duration_ms: elapsed,
+        attempts: state.attempts,
+      },
     };
   }
 
@@ -114,16 +196,18 @@ export function checkStreamingComplete(
     complete: false,
     status: "waiting",
     text: currentText,
-    reason: `stable count ${state.stableCount}/${config.stableThreshold}`,
+    reason: "stable count " + state.stableCount + "/" + config.stableThreshold,
+    metadata: { stableCount: state.stableCount },
   };
 }
 
 export async function waitForStableText(
   getText: () => Promise<string>,
+  prompt: string = "",
   config: StreamingConfig = DEFAULT_STREAMING_CONFIG,
   onProgress?: (state: ExtractionState) => void
-): Promise<string> {
-  const state = createExtractionState();
+): Promise<{ text: string; status: string; metadata?: Record<string, any> }> {
+  const state = createExtractionState(prompt);
 
   while (true) {
     const currentText = await getText();
@@ -132,14 +216,21 @@ export async function waitForStableText(
 
     const result = checkStreamingComplete(state, currentText, config);
 
+    await logExtractionEvent("extraction_check", {
+      status: result.status,
+      text_length: currentText.length,
+      reason: result.reason,
+    });
+
     if (result.complete) {
       await logExtractionEvent("extraction_completed", {
         status: result.status,
         text_length: result.text.length,
         attempts: state.attempts,
         reason: result.reason,
+        ...(result.metadata || {}),
       });
-      return result.text;
+      return { text: result.text, status: result.status, metadata: result.metadata };
     }
 
     await new Promise((r) => setTimeout(r, config.stableCheckIntervalMs));
