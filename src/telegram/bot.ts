@@ -25,6 +25,7 @@ import {
 import { retryBuildTask } from "../intel/retryBuildTask.js";
 import { MSG } from "#i18n/messages";
 import type { SessionProviderId } from "../providers/creator/session/adapters.js";
+import { deliverFullOutput } from "../providers/creator/output-delivery.js";
 
 function getTelegaRoot(): string {
   const root = (process.env.TELEGA_ROOT || "").trim();
@@ -432,7 +433,11 @@ export async function startPantheonTelegramBot() {
       const { strategy, evidence, usedFallback } = await buildStrategyWithGuardrails(message, `tg-${Date.now()}`);
       const summary = formatStrategySummary(strategy);
       const verbose = `${summary}\n\n📋 Evidence:\n${JSON.stringify(evidence, null, 2)}`;
-      await ctx.reply(usedFallback ? `⚠️ Fallback used\n\n${verbose}` : summary);
+      await deliverFullOutput(ctx, usedFallback ? `⚠️ Fallback used
+${verbose}` : verbose, {
+        title: "🧠 Strategy Analysis",
+        reply_to_message_id: ctx.message?.message_id,
+      });
     } catch (e: any) {
       console.error("[creator-control] /bridge_strategy failed", e?.message || e);
     }
