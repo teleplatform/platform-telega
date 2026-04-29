@@ -111,6 +111,16 @@ import {
   formatQueue,
   linkToParent,
 } from "./forge-graph.js";
+import {
+  saveCheckpoint,
+  getLatestCheckpoint,
+  getWorkflowCheckpoints,
+  pauseWorkflow,
+  resumeWorkflow,
+  recoverWorkflow,
+  formatCheckpointList,
+  formatRecoveryReport,
+} from "./forge-checkpoints.js";
 
 function getTelegaRoot(): string {
   const root = (process.env.TELEGA_ROOT || "").trim();
@@ -5007,6 +5017,131 @@ bot.command("set_currency", async (ctx) => {
       await ctx.reply(queue);
     } catch (e: any) {
       console.error("[telegram] /forge_queue failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_pause", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const workflowId = args.join(" ").trim();
+
+      if (!workflowId) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_pause <workflow_id>"
+          : "Usage: /forge_pause <workflow_id>");
+        return;
+      }
+
+      console.log("[telegram] /forge_pause", { user_id: uid, workflow_id: workflowId });
+
+      const result = await pauseWorkflow(workflowId);
+
+      if (!result.ok) {
+        await ctx.reply(`❌ ${result.error}`);
+        return;
+      }
+
+      await ctx.reply(lang === "ru" ? "⏸ Workflow приостановлен" : "⏸ Workflow paused");
+    } catch (e: any) {
+      console.error("[telegram] /forge_pause failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_resume", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const workflowId = args.join(" ").trim();
+
+      if (!workflowId) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_resume <workflow_id>"
+          : "Usage: /forge_resume <workflow_id>");
+        return;
+      }
+
+      console.log("[telegram] /forge_resume", { user_id: uid, workflow_id: workflowId });
+
+      const result = await resumeWorkflow(workflowId);
+
+      if (!result.ok) {
+        await ctx.reply(`❌ ${result.error}`);
+        return;
+      }
+
+      await ctx.reply(lang === "ru" ? "▶️ Workflow возобновлён" : "▶️ Workflow resumed");
+    } catch (e: any) {
+      console.error("[telegram] /forge_resume failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_checkpoint", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const workflowId = args.join(" ").trim();
+
+      if (!workflowId) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_checkpoint <workflow_id>"
+          : "Usage: /forge_checkpoint <workflow_id>");
+        return;
+      }
+
+      const checkpoints = await getWorkflowCheckpoints(workflowId);
+      const formatted = formatCheckpointList(checkpoints, lang);
+      await ctx.reply(formatted);
+    } catch (e: any) {
+      console.error("[telegram] /forge_checkpoint failed", e?.message || e);
+    }
+  });
+
+  bot.command("forge_recover", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      const label = getAccountLabel(uid);
+      const username = String((ctx as any)?.from?.username || "");
+      const lang = detectLanguage(username);
+
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const workflowId = args.join(" ").trim();
+
+      if (!workflowId) {
+        await ctx.reply(lang === "ru"
+          ? "Использование: /forge_recover <workflow_id>"
+          : "Usage: /forge_recover <workflow_id>");
+        return;
+      }
+
+      console.log("[telegram] /forge_recover", { user_id: uid, workflow_id: workflowId });
+
+      const result = await recoverWorkflow(workflowId);
+
+      if (!result.ok) {
+        await ctx.reply(`❌ ${result.error}`);
+        return;
+      }
+
+      await ctx.reply(lang === "ru" ? "🔄 Workflow восстановлен" : "🔄 Workflow recovered");
+
+      if (result.checkpoint) {
+        const report = formatRecoveryReport(result.checkpoint, lang);
+        await ctx.reply(report);
+      }
+    } catch (e: any) {
+      console.error("[telegram] /forge_recover failed", e?.message || e);
     }
   });
 
