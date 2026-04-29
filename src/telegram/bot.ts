@@ -6254,6 +6254,45 @@ await ctx.reply("❌ Voice processing failed");
     }
   });
 
+  bot.command("recovery_status", async (ctx) => {
+    const uid = String((ctx as any)?.from?.id || "");
+    if (getAccountLabel(uid) !== "★") return;
+    try {
+      const { getRecoveryState, isRecoveryEnabled } = await import("./recovery.js");
+      const s = getRecoveryState();
+      const lines = [
+        `🔧 RECOVERY`,
+        `Enabled: ${isRecoveryEnabled() ? "YES" : "NO"}`,
+        `Total Attempts: ${s.attempts}`,
+        `Success: ${s.successCount}`,
+        `Fail: ${s.failCount}`,
+        `Last: ${s.lastAttempt ? new Date(s.lastAttempt).toLocaleTimeString() : "never"}`,
+      ];
+      await ctx.reply(lines.join("\n"));
+    } catch (e: any) {
+      console.error("[recovery_status] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("recovery_logs", async (ctx) => {
+    const uid = String((ctx as any)?.from?.id || "");
+    if (getAccountLabel(uid) !== "★") return;
+    try {
+      const { getRecoveryLogs } = await import("./recovery.js");
+      const logs = await getRecoveryLogs();
+      const lines = logs.map((l: any) => `${l.success ? "✅" : "❌"} ${l.action}: ${l.issue}`);
+      if (lines.length === 0) {
+        await ctx.reply("No recovery logs yet");
+      } else {
+        await ctx.reply("🔧 RECOVERY LOGS\n\n" + lines.join("\n"));
+      }
+    } catch (e: any) {
+      console.error("[recovery_logs] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
