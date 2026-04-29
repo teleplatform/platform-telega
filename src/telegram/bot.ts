@@ -6658,6 +6658,112 @@ Revenue: ${dash.revenue}₽`
     }
   });
 
+  bot.command("memory_save", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const text = args.join(" ");
+      if (!text) {
+        await ctx.reply("Usage: /memory_save <text>");
+        return;
+      }
+      const { memorySave } = await import("./memory-stack.js");
+      const result = await memorySave(text, "tektite");
+      await ctx.reply(`💾 Saved: ${result.id}`);
+    } catch (e: any) {
+      console.error("[memory_save] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("memory_find", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const query = args.join(" ");
+      if (!query) {
+        await ctx.reply("Usage: /memory_find <query>");
+        return;
+      }
+      const { memoryFind } = await import("./memory-stack.js");
+      const results = await memoryFind(query);
+      const lines = [
+        `🔍 MEMORY FIND: "${query}"`,
+        `Tektite: ${results.tektite.length}`,
+        `Oblivion: ${results.oblivion.length}`,
+        "",
+      ];
+      for (const t of results.tektite.slice(0, 3)) {
+        lines.push(`📚 ${t.title}`);
+      }
+      for (const o of results.oblivion.slice(0, 3)) {
+        lines.push(`💭 ${o.event}`);
+      }
+      await ctx.reply(lines.join("\n"));
+    } catch (e: any) {
+      console.error("[memory_find] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("tektite_save", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const text = args.join(" ");
+      if (!text) {
+        await ctx.reply("Usage: /tektite_save <knowledge>");
+        return;
+      }
+      const { tektiteSave } = await import("./memory-stack.js");
+      const entry = await tektiteSave(text.substring(0, 50), text, "knowledge");
+      await ctx.reply(`📚 Tektite: ${entry.id}`);
+    } catch (e: any) {
+      console.error("[tektite_save] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("oblivion_remember", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      const text = args.join(" ");
+      if (!text) {
+        await ctx.reply("Usage: /oblivion_remember <experience>");
+        return;
+      }
+      const { oblivionRemember } = await import("./memory-stack.js");
+      const entry = await oblivionRemember(text, text, "workflow");
+      await ctx.reply(`💭 Oblivion: ${entry.id}`);
+    } catch (e: any) {
+      console.error("[oblivion_remember] fail", e?.message);
+      await ctx.reply("�� " + e?.message);
+    }
+  });
+
+  bot.command("memory_status", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      const { getMemoryStatus } = await import("./memory-stack.js");
+      const status = await getMemoryStatus();
+      await ctx.reply(
+        `💾 MEMORY STATUS
+        
+Tektite: ${status.tektite_count} entries
+Oblivion: ${status.oblivion_count} entries`
+      );
+    } catch (e: any) {
+      console.error("[memory_status] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
