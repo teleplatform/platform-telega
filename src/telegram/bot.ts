@@ -5987,11 +5987,12 @@ await ctx.reply("❌ Voice processing failed");
 
   bot.command("help", async (ctx) => {
     try {
+      const uid = String((ctx as any)?.from?.id || "");
       const username = String((ctx as any)?.from?.username || "");
+      const label = getAccountLabel(uid);
       const lang = detectLanguage(username);
-      const { renderTeleGPTCommands, renderForgeCommands } = await import("../lib/commands.js");
-      const output = renderTeleGPTCommands(lang) + "\n\n" + renderForgeCommands(lang);
-      await ctx.reply(output);
+      const { renderAllCommands } = await import("../lib/commands.js");
+      await ctx.reply(renderAllCommands(lang, label));
     } catch (e: any) {
       console.error("[telegram] /help failed", e?.message || e);
     }
@@ -5999,10 +6000,13 @@ await ctx.reply("❌ Voice processing failed");
 
   bot.command("commands", async (ctx) => {
     try {
+      const uid = String((ctx as any)?.from?.id || "");
       const username = String((ctx as any)?.from?.username || "");
+      const label = getAccountLabel(uid);
       const lang = detectLanguage(username);
-      const { renderForgeCommands } = await import("../lib/commands.js");
-      await ctx.reply(renderForgeCommands(lang));
+      const { renderForgeCommands, renderAllCommands } = await import("../lib/commands.js");
+      const output = "⚡ FORGE COMMANDS\n\n" + renderForgeCommands(lang, label) + "\n\n📱 ALL COMMANDS\n\n" + renderAllCommands(lang, label);
+      await ctx.reply(output);
     } catch (e: any) {
       console.error("[telegram] /commands failed", e?.message || e);
     }
