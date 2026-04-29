@@ -6794,6 +6794,71 @@ ${enhancedPrompt.substring(0, 200)}...`
     }
   });
 
+  bot.command("optimize_pricing", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      const args = ctx.message?.text?.split(" ").slice(1) || [];
+      if (args.length < 2) {
+        await ctx.reply("Usage: /optimize_pricing <price> <category>");
+        return;
+      }
+      const price = parseInt(args[0], 10);
+      const category = args.slice(1).join(" ");
+      const { optimizePricing } = await import("./optimization-engine.js");
+      const result = await optimizePricing(price, category);
+      await ctx.reply(
+        `💰 PRICING OPTIMIZATION
+        
+Current: ${price}₽
+Suggested: ${result.suggested_price}₽
+Confidence: ${(result.confidence * 100).toFixed(0)}%
+Reason: ${result.reason}`
+      );
+    } catch (e: any) {
+      console.error("[optimize_pricing] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("optimize_ads", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      const { optimizeAds } = await import("./optimization-engine.js");
+      const result = await optimizeAds();
+      const lines = [
+        "📈 AD OPTIMIZATION",
+        `Boost: ${result.boost.join(", ") || "none"}`,
+        `Pause: ${result.pause.join(", ") || "none"}`,
+        `Reason: ${result.reason}`,
+      ];
+      await ctx.reply(lines.join("\n"));
+    } catch (e: any) {
+      console.error("[optimize_ads] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
+  bot.command("insights", async (ctx) => {
+    try {
+      const uid = String((ctx as any)?.from?.id || "");
+      if (getAccountLabel(uid) !== "★") return;
+      const { getGrowthInsights } = await import("./optimization-engine.js");
+      const result = await getGrowthInsights();
+      const lines = [
+        "💡 GROWTH INSIGHTS",
+        `(Based on: ${result.based_on})`,
+        "",
+        ...result.insights,
+      ];
+      await ctx.reply(lines.join("\n"));
+    } catch (e: any) {
+      console.error("[insights] fail", e?.message);
+      await ctx.reply("❌ " + e?.message);
+    }
+  });
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
