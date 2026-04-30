@@ -27,7 +27,7 @@ interface OllamaChatReq {
   };
 }
 
-// v3.2 fast local profile + chunked generation
+// v3.3 fast local profile + chunked generation + anti-hallucination
 const DEFAULT_MODEL = process.env.LONGFORM_MODEL ?? "qwen2.5:3b-instruct";
 const DEFAULT_TIMEOUT_MS = Number(process.env.LONGFORM_TIMEOUT_MS ?? "120000");
 const DEFAULT_NUM_PREDICT = Number(process.env.LONGFORM_NUM_PREDICT ?? "3500");
@@ -40,6 +40,77 @@ const CHUNK_WORDS = Number(process.env.LONGFORM_CHUNK_WORDS ?? "350");
 const CHUNK_TIMEOUT_MS = Number(process.env.LONGFORM_CHUNK_TIMEOUT_MS ?? "90000");
 const CHUNK_NUM_PREDICT = 1200;
 const CHUNKED_THRESHOLD = 500; // above this, use chunked mode
+
+// v3.3 anti-hallucination
+const FORBIDDEN_PATTERNS = [
+  "плазменные пушки",
+  "биозиготы",
+  "ультразвуковой прицел",
+  "хригит",
+  "sent-lorenz",
+  "norwegian style",
+  "норвежский стиль",
+  "сан-лоренц",
+  "хригитская",
+  "плазменн",
+  "биоимплант",
+  "нейро-чернила",
+  "квантов",
+];
+
+const ALLOWED_TATTOO_STYLES = [
+  "fine line",
+  "blackwork",
+  "realism",
+  "реализм",
+  "micro tattoo",
+  "lettering",
+  "минимализм",
+  "minimalism",
+  "traditional",
+  "neo-traditional",
+  "нео-традишнл",
+  "графика",
+  "dotwork",
+  "дотворк",
+  "акварель",
+  "watercolor",
+  "геометрия",
+  "ornamental",
+  "орнаментал",
+  "якудза",
+  "irezumi",
+  "blackwork",
+  "блэкворк",
+  "графика",
+  "портрет",
+  "портретная работа",
+];
+
+function checkForbiddenWords(text: string): string | null {
+  const lower = text.toLowerCase();
+  for (const pattern of FORBIDDEN_PATTERNS) {
+    if (lower.includes(pattern.toLowerCase())) {
+      return pattern;
+    }
+  }
+  return null;
+}
+
+function countSections(text: string): number {
+  const matches = text.match(/^#{1,3}\s/gm);
+  return matches ? matches.length : 0;
+}
+
+function buildTitle(message: string): string {
+  return message
+    .replace(/^напиши статью на \d+ слов про /i, "")
+    .replace(/^напиши статью про /i, "")
+    .replace(/^write an article about /i, "")
+    .replace(/^статья на тему /i, "")
+    .trim()
+    .replace(/^./, (c) => c.toUpperCase());
+}
 
 function postJson(
   urlString: string,
@@ -143,6 +214,8 @@ async function withRetry<T>(
 
       if ((err as Error)?.message === "LONGFORM_TOO_SHORT") {
         console.log("[longform] retry_due_to_short_output", { attempt });
+      } else if ((err as Error)?.message === "LONGFORM_HALLUCINATION_DETECTED") {
+        console.log("[longform] retry_due_to_hallucination", { attempt });
       } else {
         console.log("[longform] generation_retry", {
           attempt,
@@ -195,6 +268,33 @@ function detectRegion(message: string): string {
   return "";
 }
 
+const ANTI_HALLUCINATION_SYSTEM_PROMPT = [
+  "Ты профессиональный автор и эксперт по тату-культуре.",
+  "Пиши ТОЛЬКО реальные факты и реальные стили татуировок.",
+  "",
+  "Разрешённые реальные стили:",
+  "- fine line",
+  "- blackwork",
+  "- realism (реализм)",
+  "- micro tattoo",
+  "- lettering",
+  "- minimalism (минимализм)",
+  "- traditional / neo-traditional",
+  "- dotwork (дотворк)",
+  "- акварель (watercolor)",
+  "- графика / геометрия",
+  "- ornamental (орнаментал)",
+  "- портретные работы",
+  "",
+  "Запрещено:",
+  "- выдуманные стили",
+  "- несуществующее оборудование",
+  "- фантастические технологии",
+  "- вымышленные названия школ или направлений",
+  "",
+  "Пиши живо, как эксперт, а не как учебник.",
+].join("\n");
+
 function buildTattooTrendSections(message: string, region: string, chunkCount: number): ArticleSection[] {
   const regionHint = region ? ` (контекст: ${region})` : "";
 
@@ -205,15 +305,15 @@ function buildTattooTrendSections(message: string, region: string, chunkCount: n
     },
     {
       heading: "Fine line и micro tattoo",
-      prompt: `Опиши тренд fine line и micro tattoo в тату${regionHint}. Что это, почему популярен, как проявляется. ~${CHUNK_WORDS} слов.`,
+      prompt: `Опиши тренд fine line и micro tattoo в тату${regionHint}. Что это, почему популярен, как проявляется. ~${CHUNK_WORDS} слов. Пиши ТОЛЬКО реальные факты.`,
     },
     {
       heading: "Blackwork и графика",
-      prompt: `Опиши тренд blackwork и геометрической графики в тату${regionHint}. ~${CHUNK_WORDS} слов.`,
+      prompt: `Опиши тренд blackwork и геометрической графики в тату${regionHint}. ~${CHUNK_WORDS} слов. Пиши ТОЛЬКО реальные факты.`,
     },
     {
       heading: "Реализм и портретные работы",
-      prompt: `Опиши тренд реализма и портретных татуировок${regionHint}. ~${CHUNK_WORDS} слов.`,
+      prompt: `Опиши тренд реализма и портретных татуировок${regionHint}. ~${CHUNK_WORDS} слов. Пиши ТОЛЬКО реальные факты.`,
     },
     {
       heading: "Этнические мотивы и локальная символика",
@@ -221,7 +321,7 @@ function buildTattooTrendSections(message: string, region: string, chunkCount: n
     },
     {
       heading: "Минимализм и lettering",
-      prompt: `Опиши тренд минимализма и lettering в тату${regionHint}. ~${CHUNK_WORDS} слов.`,
+      prompt: `Опиши тренд минимализма и lettering в тату${regionHint}. ~${CHUNK_WORDS} слов. Пиши ТОЛЬКО реальные факты.`,
     },
     {
       heading: "Что выбирают клиенты",
@@ -238,19 +338,17 @@ function buildTattooTrendSections(message: string, region: string, chunkCount: n
     },
   ];
 
-  // Select sections to match chunkCount: intro + N trends + clients + industry + conclusion
-  // Minimum: intro + 3 trends + conclusion = 5 chunks
   const minChunks = 5;
   const maxTrendSections = Math.max(1, chunkCount - minChunks);
 
-  const trendSections = allSections.slice(1, 7); // 6 trend sections
+  const trendSections = allSections.slice(1, 7);
   const selectedTrends = trendSections.slice(0, maxTrendSections);
 
   return [
-    allSections[0], // intro
+    allSections[0],
     ...selectedTrends,
-    allSections[7], // clients
-    allSections[8], // conclusion
+    allSections[7],
+    allSections[8],
   ].slice(0, chunkCount);
 }
 
@@ -258,7 +356,7 @@ function buildGenericSections(message: string, chunkCount: number): ArticleSecti
   const sections: ArticleSection[] = [
     {
       heading: "Введение",
-      prompt: `Напиши введение для статьи. Тема: ${message}. Объём ~${CHUNK_WORDS} слов. ~${CHUNK_WORDS} слов.`,
+      prompt: `Напиши введение для статьи. Тема: ${message}. Объём ~${CHUNK_WORDS} слов.`,
     },
   ];
 
@@ -291,22 +389,13 @@ function buildSections(message: string, chunkCount: number): ArticleSection[] {
 
 function buildLongformSystemPrompt(message: string, targetWords: number): string {
   return [
-    "Ты профессиональный автор и эксперт по тату-культуре.",
+    ANTI_HALLUCINATION_SYSTEM_PROMPT,
     "",
     `Задача:\n${message}`,
     "",
-    "Требования:",
-    "- Пиши ТОЛЬКО реальные тренды, без выдуманных стилей",
-    "- Не придумывай названия школ или направлений",
-    "- Используй современные реальные направления:",
-    "  (fine line, blackwork, realism, micro tattoo, lettering, ethnic, minimalism и т.д.)",
-    "- Учитывай регион (Грузия, Тбилиси, локальные студии, культура)",
-    "- Пиши живо, как эксперт, а не как учебник",
-    "- Избегай воды и повторов",
-    "",
     "Структура ОБЯЗАТЕЛЬНА:",
     "",
-    "# Заголовок",
+    `# ${buildTitle(message)}`,
     "",
     "## Введение (почему тема актуальна)",
     "",
@@ -314,13 +403,11 @@ function buildLongformSystemPrompt(message: string, targetWords: number): string
     "Каждый тренд:",
     "- что это",
     "- почему популярен",
-    "- как проявляется в Грузии",
+    "- как проявляется",
     "",
     "## Что выбирают клиенты",
-    "(реальные запросы, поведение)",
     "",
     "## Работа мастеров",
-    "(техника, оборудование, стиль работы)",
     "",
     "## Будущее индустрии",
     "",
@@ -339,10 +426,14 @@ function buildFallbackMarkdown(
   profile: { model: string; timeoutMs: number; numPredict: number; targetWords: number },
 ): string {
   const isTimeout = reason.includes("LONGFORM_TIMEOUT") || reason.includes("timed out");
+  const isHallucination = reason.includes("LONGFORM_HALLUCINATION");
 
-  const reasonText = isTimeout
-    ? "Локальная модель не успела сгенерировать материал в заданный лимит."
-    : reason;
+  let reasonText = reason;
+  if (isTimeout) {
+    reasonText = "Локальная модель не успела сгенерировать материал в заданный лимит.";
+  } else if (isHallucination) {
+    reasonText = "Генерация остановлена: обнаружены выдуманные факты или несуществующие стили.";
+  }
 
   return [
     "# Long Form Engine: генерация временно недоступна",
@@ -418,9 +509,11 @@ function createSuccessFile(text: string, topic: string, model: string, stats: { 
   const fileName = `longform_${Date.now()}_${randomUUID().slice(0, 8)}.md`;
   const filePath = path.join(outputDir, fileName);
 
+  const title = buildTitle(topic);
+
   const frontmatter = [
     "---",
-    `title: "${topic.replace(/"/g, '\\"')}"`,
+    `title: "${title.replace(/"/g, '\\"')}"`,
     `generated: ${new Date().toISOString()}`,
     `model: ${model}`,
     `word_count: ${stats.words}`,
@@ -435,7 +528,7 @@ function createSuccessFile(text: string, topic: string, model: string, stats: { 
   return filePath;
 }
 
-// v3.2 chunked generation
+// v3.2 chunked generation with v3.3 anti-hallucination
 async function generateChunkedLongformText(
   message: string,
   targetWords: number,
@@ -448,47 +541,70 @@ async function generateChunkedLongformText(
 
   console.log("[longform] chunked_generation_started", { targetWords, chunkCount, sections: sections.length });
 
-  let finalText = `# ${message}\n\n`;
+  const title = buildTitle(message);
+  let finalText = `# ${title}\n\n`;
 
   for (let i = 0; i < sections.length; i++) {
     const section = sections[i];
     console.log("[longform] chunk_started", { index: i + 1, total: sections.length, title: section.heading });
 
-    // Progress: first, middle, last
     if (i === 0 || i === Math.floor(sections.length / 2) || i === sections.length - 1) {
       if (onProgress) {
         await onProgress(`✍️ Пишу часть ${i + 1}/${sections.length}: ${section.heading}`).catch(() => {});
       }
     }
 
-    const sectionText = await callOllama(
-      baseUrl,
-      model,
-      `Ты профессиональный автор. Пиши ТОЛЬКО реальные факты, без выдуманных названий. Пиши живо, как эксперт.`,
-      section.prompt,
-      CHUNK_TIMEOUT_MS,
-      CHUNK_NUM_PREDICT,
-      DEFAULT_TEMPERATURE,
-    );
+    const sectionText = await withRetry(
+      async (attemptNum) => {
+        const temp = attemptNum === 1 ? DEFAULT_TEMPERATURE : DEFAULT_RETRY_TEMPERATURE;
 
-    const sectionStats = getTextStats(sectionText);
-    if (sectionStats.words < 120) {
-      console.log("[longform] chunk_too_short", { index: i + 1, words: sectionStats.words });
-    }
+        const text = await callOllama(
+          baseUrl,
+          model,
+          ANTI_HALLUCINATION_SYSTEM_PROMPT,
+          section.prompt,
+          CHUNK_TIMEOUT_MS,
+          CHUNK_NUM_PREDICT,
+          temp,
+        );
+
+        const forbidden = checkForbiddenWords(text);
+        if (forbidden) {
+          console.log("[longform] forbidden_detected", { pattern: forbidden, chunk: i + 1 });
+          throw new Error("LONGFORM_HALLUCINATION_DETECTED");
+        }
+
+        const stats = getTextStats(text);
+        if (stats.words < 120) {
+          console.log("[longform] chunk_too_short", { index: i + 1, words: stats.words });
+        }
+
+        return text;
+      },
+      1,
+      1500,
+    );
 
     finalText += `## ${section.heading}\n\n${sectionText.trim()}\n\n`;
 
     console.log("[longform] chunk_completed", {
       index: i + 1,
       total: sections.length,
-      words: sectionStats.words,
+      words: getTextStats(sectionText).words,
     });
+  }
+
+  const sectionCount = countSections(finalText);
+  if (sectionCount < 4) {
+    console.log("[longform] structure_invalid", { sectionCount, required: 4 });
+    throw new Error("LONGFORM_TOO_FEW_SECTIONS");
   }
 
   const finalStats = getTextStats(finalText);
   console.log("[longform] chunked_generation_completed", {
     totalWords: finalStats.words,
     chunks: sections.length,
+    sections: sectionCount,
   });
 
   return finalText;
@@ -528,10 +644,8 @@ export async function generateLongformFile(params: {
     let text: string;
 
     if (targetWords > CHUNKED_THRESHOLD) {
-      // v3.2 chunked mode
       text = await generateChunkedLongformText(message, targetWords, baseUrl, model, onProgress);
     } else {
-      // Single-shot mode for short articles
       text = await withRetry(
         async (attemptNum = 1) => {
           const temperature = attemptNum === 1 ? DEFAULT_TEMPERATURE : DEFAULT_RETRY_TEMPERATURE;
@@ -539,12 +653,18 @@ export async function generateLongformFile(params: {
           const extracted = await callOllama(
             baseUrl,
             model,
+            ANTI_HALLUCINATION_SYSTEM_PROMPT,
             buildLongformSystemPrompt(message, targetWords),
-            `Write a comprehensive article about: ${message}`,
             timeoutMs,
             numPredict,
             temperature,
           );
+
+          const forbidden = checkForbiddenWords(extracted);
+          if (forbidden) {
+            console.log("[longform] forbidden_detected", { pattern: forbidden });
+            throw new Error("LONGFORM_HALLUCINATION_DETECTED");
+          }
 
           const stats = getTextStats(extracted);
           const threshold = getWordThreshold(targetWords);
@@ -559,24 +679,33 @@ export async function generateLongformFile(params: {
             throw new Error("LONGFORM_TOO_SHORT");
           }
 
+          const sectionCount = countSections(extracted);
+          if (sectionCount < 4) {
+            console.log("[longform] structure_invalid", { sectionCount, required: 4 });
+            throw new Error("LONGFORM_TOO_FEW_SECTIONS");
+          }
+
           return extracted;
         },
         MAX_RETRIES,
         1500,
       );
+
+      const title = buildTitle(message);
+      if (!text.startsWith("# ")) {
+        text = `# ${title}\n\n${text}`;
+      }
     }
 
     const stats = getTextStats(text);
     const threshold = getWordThreshold(targetWords);
 
-    // For chunked mode, accept if >= threshold
     if (stats.words < targetWords * threshold) {
       console.log("[longform] quality_check_below_threshold", {
         words: stats.words,
         required: Math.floor(targetWords * threshold),
         accepting: targetWords > CHUNKED_THRESHOLD,
       });
-      // Accept anyway for chunked mode — it's better than nothing
       if (targetWords <= CHUNKED_THRESHOLD) {
         throw new Error("LONGFORM_TOO_SHORT");
       }
