@@ -1,0 +1,16 @@
+{
+  "allowRecoveryAttempt": true,
+  "allowHold": true,
+  "allowDegrade": true,
+  "allowDisable": true,
+  "allowRestoreLive": true,
+  "severityThresholds": {
+    "highSeverityAutoDegrade": true,
+    "criticalSeverityAutoDisable": true
+  },
+  "restorationRequirements": {
+    "requiresCleanIncidentState": true,
+    "requiresSuccessfulRecovery": true,
+    "requiresOperatorApproval": true
+  }
+}

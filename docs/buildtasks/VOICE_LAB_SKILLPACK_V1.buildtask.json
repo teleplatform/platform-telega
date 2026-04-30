@@ -1,0 +1,116 @@
+{
+  "kind": "BuildTask",
+  "version": "TELECORE_BUILD_CONTRACT_V1",
+  "id": "voice_lab_skillpack_v1",
+  "title": "Voice Lab SkillPack v1 (register/speak/convert/dialogue + audit/rate + UI)",
+  "owner": "nikita",
+  "mode": "maker",
+  "policy": {
+    "write_scope": "worktree",
+    "network": "deny",
+    "secrets": ["SUPABASE_SERVICE_ROLE_KEY"],
+    "safety": {
+      "maker_required_for": [
+        "voice.register",
+        "voice.convert",
+        "voice.dialogue",
+        "voice.rename",
+        "voice.delete"
+      ],
+      "public_allowed_for": ["voice.speak"]
+    }
+  },
+  "inputs": {
+    "repo_root": ".",
+    "paths_expected": [
+      "src/app/voice/page.tsx",
+      "src/app/api/voice/register/route.ts",
+      "src/app/api/voice/speak/route.ts",
+      "src/app/api/voice/convert/route.ts",
+      "src/app/api/voice/dialogue/route.ts",
+      "src/app/api/voice/me/route.ts",
+      "src/app/api/voice/rename/route.ts",
+      "src/app/api/voice/delete/route.ts",
+      "src/server/supabase/service.ts",
+      "src/server/voice/audit.ts",
+      "src/server/voice/rateLimit.ts",
+      "src/server/crypto/sha256.ts",
+      "src/components/voice/VoiceDialoguePanel.tsx",
+      "src/components/voice/VoiceConvertPanel.tsx",
+      "src/components/voice/VoiceRenameInline.tsx"
+    ],
+    "sql_migration_source": "docs/sql/VOICE_CORE_V1.sql"
+  },
+  "steps": [
+    {
+      "id": "collect",
+      "tool": "fs.read",
+      "args": {
+        "paths": [
+          "docs/sql/VOICE_CORE_V1.sql",
+          "src/app/api/voice/**/route.ts",
+          "src/app/voice/page.tsx",
+          "src/components/voice/**.tsx",
+          "src/server/voice/**.ts",
+          "src/server/supabase/service.ts",
+          "src/server/crypto/sha256.ts"
+        ]
+      }
+    },
+    {
+      "id": "package",
+      "tool": "fs.write",
+      "args": {
+        "base_dir": "packs/voice_lab_skillpack_v1",
+        "files": [
+          { "from": "docs/sql/VOICE_CORE_V1.sql", "to": "sql/VOICE_CORE_V1.sql" },
+          { "from": "src/app/api/voice/register/route.ts", "to": "telegpt/api/voice/register.route.ts" },
+          { "from": "src/app/api/voice/speak/route.ts", "to": "telegpt/api/voice/speak.route.ts" },
+          { "from": "src/app/api/voice/convert/route.ts", "to": "telegpt/api/voice/convert.route.ts" },
+          { "from": "src/app/api/voice/dialogue/route.ts", "to": "telegpt/api/voice/dialogue.route.ts" },
+          { "from": "src/app/api/voice/me/route.ts", "to": "telegpt/api/voice/me.route.ts" },
+          { "from": "src/app/api/voice/rename/route.ts", "to": "telegpt/api/voice/rename.route.ts" },
+          { "from": "src/app/api/voice/delete/route.ts", "to": "telegpt/api/voice/delete.route.ts" },
+          { "from": "src/app/voice/page.tsx", "to": "telegpt/ui/voice.page.tsx" },
+          { "from": "src/components/voice/VoiceDialoguePanel.tsx", "to": "telegpt/ui/components/VoiceDialoguePanel.tsx" },
+          { "from": "src/components/voice/VoiceConvertPanel.tsx", "to": "telegpt/ui/components/VoiceConvertPanel.tsx" },
+          { "from": "src/components/voice/VoiceRenameInline.tsx", "to": "telegpt/ui/components/VoiceRenameInline.tsx" },
+          { "from": "src/server/voice/audit.ts", "to": "telegpt/server/audit.ts" },
+          { "from": "src/server/voice/rateLimit.ts", "to": "telegpt/server/rateLimit.ts" },
+          { "from": "src/server/crypto/sha256.ts", "to": "telegpt/server/sha256.ts" },
+          { "from": "src/server/supabase/service.ts", "to": "telegpt/server/supabase.service.ts" }
+        ]
+      }
+    },
+    {
+      "id": "validators",
+      "tool": "fs.write",
+      "args": {
+        "base_dir": "packs/voice_lab_skillpack_v1",
+        "files": [
+          {
+            "to": "validators/validate_pack.ts",
+            "content": "/* Validator: Voice Lab SkillPack v1 */\nimport fs from 'fs';\nimport path from 'path';\n\nconst root = process.argv[2] || 'packs/voice_lab_skillpack_v1';\nconst must = [\n  'sql/VOICE_CORE_V1.sql',\n  'telegpt/api/voice/register.route.ts',\n  'telegpt/api/voice/speak.route.ts',\n  'telegpt/api/voice/convert.route.ts',\n  'telegpt/api/voice/dialogue.route.ts',\n  'telegpt/api/voice/me.route.ts',\n  'telegpt/api/voice/rename.route.ts',\n  'telegpt/api/voice/delete.route.ts',\n  'telegpt/ui/voice.page.tsx',\n  'telegpt/ui/components/VoiceDialoguePanel.tsx',\n  'telegpt/ui/components/VoiceConvertPanel.tsx',\n  'telegpt/ui/components/VoiceRenameInline.tsx'\n];\n\nlet ok = true;\nfor (const f of must) {\n  const p = path.join(root, f);\n  if (!fs.existsSync(p)) {\n    console.error('MISSING', f);\n    ok = false;\n  }\n}\n\nif (!ok) process.exit(1);\nconsole.log('OK: Voice Lab SkillPack v1');\n"
+          }
+        ]
+      }
+    },
+    {
+      "id": "readme",
+      "tool": "fs.write",
+      "args": {
+        "base_dir": "packs/voice_lab_skillpack_v1",
+        "files": [
+          {
+            "to": "README.md",
+            "content": "# Voice Lab SkillPack v1\n\nThis pack contains:\n- Supabase schema: sql/VOICE_CORE_V1.sql\n- Tele•GPT API routes (Maker gating + audit + rate): telegpt/api/voice/*.route.ts\n- UI page + components: telegpt/ui/*\n- Validators: validators/validate_pack.ts\n\n## Install\n1) Apply SQL to Supabase\n2) Copy API routes into your Next.js app routes\n3) Copy UI page and components\n4) Ensure env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, TELEGPT_COSYVOICE_BASE_URL\n\n## Security\n- register/convert/dialogue/rename/delete: Maker-only\n- speak: allowed for Public\n\n## Validate\nnode validators/validate_pack.ts packs/voice_lab_skillpack_v1\n"
+          }
+        ]
+      }
+    }
+  ],
+  "outputs": {
+    "artifacts": ["packs/voice_lab_skillpack_v1/**"],
+    "status": "done"
+  }
+}

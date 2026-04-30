@@ -1,0 +1,36 @@
+{
+  "providers": [
+    {
+      "id": "chatgpt_web",
+      "kind": "creator-web-automation",
+      "display_name": "ChatGPT Web (Owner)",
+      "source_url": "https://chatgpt.com/",
+      "maker_only": true,
+      "enabled": true,
+      "policy_id": "human_interaction_policy_v1"
+    },
+    {
+      "id": "qwen_web",
+      "kind": "creator-web-automation",
+      "display_name": "Qwen Web (Owner)",
+      "source_url": "https://chat.qwen.ai/",
+      "maker_only": true,
+      "enabled": true,
+      "policy_id": "human_interaction_policy_v1"
+    },
+    {
+      "id": "deepseek_web",
+      "kind": "creator-web-automation",
+      "display_name": "DeepSeek Web (Owner)",
+      "source_url": "https://chat.deepseek.com/",
+      "maker_only": true,
+      "enabled": true,
+      "policy_id": "human_interaction_policy_v1"
+    }
+  ],
+  "rules": {
+    "never_auto_select": true,
+    "require_explicit_select": true,
+    "no_parallel": true
+  }
+}

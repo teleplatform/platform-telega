@@ -1,0 +1,17 @@
+{
+  "run_id": "example-run",
+  "mode": "Public",
+  "inputs": {
+    "prompt": "A clean tech product teaser in neon blue."
+  },
+  "outputs": [
+    { "name": "cover.jpg", "path": "./artifacts/example-run/mediafactory/cover.jpg", "bytes": 1234 }
+  ],
+  "validators": {
+    "mp4_exists": false,
+    "duration_ok": false,
+    "aspect_9x16": false,
+    "audio_present": false
+  },
+  "created_at": "2025-01-01T00:00:00.000Z"
+}

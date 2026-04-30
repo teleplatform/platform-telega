@@ -1,0 +1,26 @@
+{
+  "kind": "TeleGaKeyring",
+  "version": "1.1.0",
+  "keys": [
+    {
+      "key_id": "nikita-owner-2026-01",
+      "algo": "ed25519",
+      "role": "owner",
+      "status": "active",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nREPLACE_WITH_OWNER_PUBKEY_PEM\n-----END PUBLIC KEY-----\n",
+      "created_at": "2026-01-29T00:00:00Z",
+      "not_before": "2026-01-01T00:00:00Z",
+      "not_after": null
+    },
+    {
+      "key_id": "telega-releasebot-2026-01",
+      "algo": "ed25519",
+      "role": "release",
+      "status": "active",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nREPLACE_WITH_RELEASE_PUBKEY_PEM\n-----END PUBLIC KEY-----\n",
+      "created_at": "2026-01-29T00:00:00Z",
+      "not_before": "2026-01-01T00:00:00Z",
+      "not_after": null
+    }
+  ]
+}

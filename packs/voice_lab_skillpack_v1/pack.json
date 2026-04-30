@@ -1,0 +1,67 @@
+{
+  "kind": "TeleGaSkillPack",
+  "pack_id": "voice_lab_skillpack_v1",
+  "version": "1.0.0",
+  "created_at": "AUTO",
+  "owner": "nikita",
+  "modes": {
+    "public": ["voice.speak"],
+    "maker": [
+      "voice.register",
+      "voice.convert",
+      "voice.dialogue",
+      "voice.rename",
+      "voice.delete",
+      "voice.me"
+    ]
+  },
+  "endpoints": [
+    "POST /api/voice/register",
+    "POST /api/voice/speak",
+    "POST /api/voice/convert",
+    "POST /api/voice/dialogue",
+    "GET /api/voice/me",
+    "POST /api/voice/rename",
+    "POST /api/voice/delete"
+  ],
+  "fileset": {
+    "hash_algo": "sha256",
+    "hash_file": "hashes.sha256",
+    "include_globs": [
+      "sql/**",
+      "telegpt/**",
+      "validators/**",
+      "README.md",
+      "pack.json",
+      "hashes.sha256",
+      "pack.sigs.json"
+    ],
+    "exclude_globs": [
+      "**/.DS_Store",
+      "**/*.map",
+      "**/node_modules/**"
+    ]
+  },
+  "integrity": {
+    "sealed": true,
+    "root_hash": "AUTO"
+  },
+  "signing_policies": {
+    "dev": {
+      "algo": "ed25519",
+      "message_v": "v2",
+      "sig_file": "pack.sigs.json",
+      "threshold": 1,
+      "required_roles": ["owner"],
+      "require_distinct_keys": true
+    },
+    "prod": {
+      "algo": "ed25519",
+      "message_v": "v2",
+      "sig_file": "pack.sigs.json",
+      "threshold": 2,
+      "required_roles": ["owner", "release"],
+      "require_distinct_keys": true
+    }
+  }
+}

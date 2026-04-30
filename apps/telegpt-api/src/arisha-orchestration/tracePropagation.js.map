@@ -1,0 +1,1 @@
+{"version":3,"file":"tracePropagation.js","sourceRoot":"","sources":["tracePropagation.ts"],"names":[],"mappings":"AAEA,MAAM,UAAU,UAAU,CAAC,KAA+B;IACxD,OAAO,KAAK,CAAC,QAAQ,CAAC;AACxB,CAAC;AAED,MAAM,UAAU,YAAY,CAAC,KAAa,EAAE,OAAe,EAAE,OAAe;IAC1E,OAAO,CAAC,GAAG,CAAC,IAAI,OAAO,KAAK,KAAK,KAAK,OAAO,EAAE,CAAC,CAAC;AACnD,CAAC"}

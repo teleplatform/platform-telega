@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RunLedger",
+  "type": "object",
+  "required": ["run_id", "task_id", "actor_id", "actor_mode", "status", "graph_id", "plan_mode", "selected_skill_ids", "current_node_ids", "completed_node_ids", "failed_node_ids", "artifact_ids", "created_at", "updated_at"],
+  "properties": {
+    "run_id": { "type": "string" },
+    "task_id": { "type": "string" },
+    "actor_id": { "type": "string" },
+    "actor_mode": { "type": "string" },
+    "status": { "type": "string", "enum": ["created", "planned", "running", "paused", "failed", "completed", "degraded"] },
+    "graph_id": { "type": "string" },
+    "plan_mode": { "type": "string", "enum": ["fast", "safe", "quality", "creator"] },
+    "selected_skill_ids": { "type": "array", "items": { "type": "string" } },
+    "current_node_ids": { "type": "array", "items": { "type": "string" } },
+    "completed_node_ids": { "type": "array", "items": { "type": "string" } },
+    "failed_node_ids": { "type": "array", "items": { "type": "string" } },
+    "artifact_ids": { "type": "array", "items": { "type": "string" } },
+    "last_error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "node_id": { "type": "string" }
+      }
+    },
+    "trace_id": { "type": "string" },
+    "resume_token": { "type": "string" },
+    "created_at": { "type": "string" },
+    "updated_at": { "type": "string" }
+  }
+}

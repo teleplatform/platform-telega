@@ -116,7 +116,7 @@ export async function registerPatchRoute(server: any) {
     };
   });
 
-  server.get("/forge/dashboard", async (_req: any, _reply: any) => {
+  server.get("/forge/patch-dashboard", async (_req: any, _reply: any) => {
     const patches = await readJsonl<KiloPatchPlan>(PATCH_INDEX);
 
     const pending = patches.filter((p) => p.status === "pending");

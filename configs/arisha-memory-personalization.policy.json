@@ -1,0 +1,17 @@
+{
+  "boundaryModes": ["none", "minimal", "contextual", "continuity_only"],
+  "usageTypes": ["none", "preference", "tone", "continuity", "context_hint"],
+  "toneAdaptationModes": ["none", "soften", "tighten", "simplify", "warm_up", "stay_consistent"],
+  "continuityModes": ["none", "topic_continuity", "workflow_continuity", "preference_continuity", "style_continuity"],
+  "dormantRules": {
+    "maxDormantTurns": 20,
+    "recallOnlyWhenUseful": true,
+    "neverSurfaceDormantExplicitly": true
+  },
+  "trustConstraints": {
+    "neverOverPersonalize": true,
+    "respectSafetyOverPersonalization": true,
+    "avoidCreepyMemorySurfacing": true,
+    "maintainOnePersonaConsistency": true
+  }
+}

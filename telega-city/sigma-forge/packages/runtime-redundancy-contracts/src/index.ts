@@ -1,0 +1,16 @@
+export {
+  type TransportType,
+  type ChannelStatus,
+  type FailoverStatus,
+  type RecoveryStatus,
+  type RecoveryMethod,
+  type TransportLossEventSeverity,
+  type TransportChannel,
+  type IdentityContinuityRecord,
+  type FailoverEvent,
+  type RecoveryRecord,
+  type DeliveryEnvelope,
+  type TransportLossEvent,
+  type OperationalDegradationState,
+  type RedundancyAuditEvent,
+} from "./redundancy.js";

@@ -1,0 +1,21 @@
+import type { AttentionPlan, PresencePlan, RelationshipPlan } from "../arisha-orchestration/types.js";
+
+export function buildPresencePlan(input: {
+  attention_plan: AttentionPlan;
+  relationship_plan: RelationshipPlan;
+  raw_text: string;
+}): PresencePlan {
+  const isSupport = input.relationship_plan.relationship_state === "sensitive_support_mode";
+
+  if (isSupport) {
+    return {
+      micro_ack: "Понял.",
+      chunks: [{ text: "Я рядом. Можно спокойно пойти шаг за шагом." }],
+    };
+  }
+
+  return {
+    micro_ack: "Принял.",
+    chunks: [{ text: `Фокус: ${input.attention_plan.primary_focus}.` }],
+  };
+}

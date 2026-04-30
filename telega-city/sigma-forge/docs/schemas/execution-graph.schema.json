@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExecutionGraph",
+  "type": "object",
+  "required": ["graph_id", "run_id", "version", "plan_mode", "nodes", "edges", "entry_nodes", "terminal_nodes"],
+  "properties": {
+    "graph_id": { "type": "string" },
+    "run_id": { "type": "string" },
+    "version": { "type": "integer", "minimum": 1 },
+    "plan_mode": { "type": "string", "enum": ["fast", "safe", "quality", "creator"] },
+    "nodes": { "type": "array", "items": { "$ref": "#/definitions/ExecutionNode" } },
+    "edges": { "type": "array", "items": { "$ref": "#/definitions/ExecutionEdge" } },
+    "entry_nodes": { "type": "array", "items": { "type": "string" } },
+    "terminal_nodes": { "type": "array", "items": { "type": "string" } }
+  },
+  "definitions": {
+    "ExecutionNode": {
+      "type": "object",
+      "required": ["node_id", "skill_id", "title", "status", "input_refs", "output_refs", "dependency_ids", "validator_hooks", "retry_count", "max_retries", "risk_class"],
+      "properties": {
+        "node_id": { "type": "string" },
+        "skill_id": { "type": "string" },
+        "title": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "ready", "running", "blocked", "waiting_dependency", "needs_review", "failed", "completed", "rolled_back"] },
+        "input_refs": { "type": "array", "items": { "type": "string" } },
+        "output_refs": { "type": "array", "items": { "type": "string" } },
+        "dependency_ids": { "type": "array", "items": { "type": "string" } },
+        "validator_hooks": { "type": "array", "items": { "type": "string" } },
+        "retry_count": { "type": "integer", "minimum": 0 },
+        "max_retries": { "type": "integer", "minimum": 0 },
+        "fallback_skill_id": { "type": "string" },
+        "risk_class": { "type": "string", "enum": ["low", "medium", "high"] }
+      }
+    },
+    "ExecutionEdge": {
+      "type": "object",
+      "required": ["from_node_id", "to_node_id", "kind"],
+      "properties": {
+        "from_node_id": { "type": "string" },
+        "to_node_id": { "type": "string" },
+        "kind": { "type": "string", "enum": ["dependency", "artifact_flow", "control_flow"] }
+      }
+    }
+  }
+}

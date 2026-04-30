@@ -269,6 +269,61 @@ export const messages: Record<string, MessageDict> = {
     en: "Language not supported: {lang}",
     ru: "Язык не поддерживается: {lang}",
   },
+
+
+  // Action Buttons
+  action_repeat: {
+    en: "Repeat",
+    ru: "Повторить",
+  },
+  action_clarify: {
+    en: "Clarify",
+    ru: "Уточнить",
+  },
+  action_file: {
+    en: "Send as file",
+    ru: "В файл",
+  },
+  action_read_aloud: {
+    en: "Read aloud",
+    ru: "Озвучить",
+  },
+  action_image: {
+    en: "Generate image",
+    ru: "Картинка",
+  },
+  action_provider: {
+    en: "Switch provider",
+    ru: "Провайдер",
+  },
+  action_save: {
+    en: "Save",
+    ru: "Сохранить",
+  },
+  action_no_response: {
+    en: "No previous response to act on",
+    ru: "Нет предыдущего ответа",
+  },
+  action_saved: {
+    en: "Response saved!",
+    ru: "Ответ сохранён!",
+  },
+  action_repeating: {
+    en: "Repeating your last request...",
+    ru: "Повторяю ваш последний запрос...",
+  },
+  action_clarifying: {
+    en: "Making answer clearer...",
+    ru: "Делаю ответ понятнее...",
+  },
+  action_sent_file: {
+    en: "Sent as file!",
+    ru: "Отправлено файлом!",
+  },
+  action_saved_responses: {
+    en: "Saved responses:",
+    ru: "Сохранённые ответы:",
+  },
 };
 
 export function t(key: string, lang: Language, vars?: Record<string, any>): string {

@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ContextCapsule",
+  "type": "object",
+  "required": ["capsule_id", "run_id", "goal", "active_plan_mode", "current_focus", "completed_milestones", "open_risks", "last_decisions", "evidence_summary", "next_actions", "updated_at"],
+  "properties": {
+    "capsule_id": { "type": "string" },
+    "run_id": { "type": "string" },
+    "goal": { "type": "string" },
+    "active_plan_mode": { "type": "string" },
+    "current_focus": { "type": "array", "items": { "type": "string" } },
+    "completed_milestones": { "type": "array", "items": { "type": "string" } },
+    "open_risks": { "type": "array", "items": { "type": "string" } },
+    "last_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "summary", "at"],
+        "properties": {
+          "kind": { "type": "string" },
+          "summary": { "type": "string" },
+          "at": { "type": "string" }
+        }
+      }
+    },
+    "evidence_summary": { "type": "array", "items": { "type": "string" } },
+    "next_actions": { "type": "array", "items": { "type": "string" } },
+    "updated_at": { "type": "string" }
+  }
+}

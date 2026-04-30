@@ -1,0 +1,7 @@
+{
+  "kind": "telecore_signature_policy",
+  "version": "v1",
+  "updated_at": "2026-02-27T00:00:00.000Z",
+  "required_message_v": "v3",
+  "allow_legacy_verify": false
+}

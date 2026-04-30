@@ -1,15 +1,35 @@
 {
   "compilerOptions": {
+    "jsx": "react-jsx",
     "target": "ES2022",
-    "module": "ES2022",
-    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "#i18n/messages": ["src/i18n/messages.ts"],
+      "#i18n/keypath-runtime": ["src/i18n/messages.keypath.runtime.ts"]
+    },
     "outDir": "dist",
-    "rootDir": "src",
-    "strict": true,
+    "strict": false,
     "skipLibCheck": true,
+    "noImplicitAny": false,
     "esModuleInterop": true,
+    "downlevelIteration": true,
     "resolveJsonModule": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "typeRoots": ["./node_modules/@types"]
   },
-  "include": ["src"]
+  "include": [
+    "src/telegram/**/*",
+    "src/core/**/*",
+    "src/providers/**/*",
+    "src/i18n/**/*",
+    "src/server/**/*",
+    "src/intel/**/*"
+  ],
+  "exclude": ["**/*.test.ts", "apps/**/*", "telega-city/**/*", "scripts/**/*", "examples/**/*", "packs/**/*", "tests/**/*"]
 }

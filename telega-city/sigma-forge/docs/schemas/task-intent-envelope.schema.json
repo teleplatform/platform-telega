@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TaskIntentEnvelope",
+  "type": "object",
+  "required": ["task_id", "actor_id", "actor_mode", "intent_key", "task_kind", "goal", "constraints", "execution_mode"],
+  "properties": {
+    "task_id": { "type": "string" },
+    "session_id": { "type": "string" },
+    "actor_id": { "type": "string" },
+    "actor_mode": { "type": "string", "enum": ["public", "creator", "internal", "system"] },
+    "intent_key": { "type": "string" },
+    "task_kind": { "type": "string" },
+    "goal": { "type": "string" },
+    "constraints": { "type": "array", "items": { "type": "string" } },
+    "requested_artifact": { "type": "string" },
+    "execution_mode": { "type": "string", "enum": ["fast", "safe", "quality", "creator"] },
+    "budget_class": { "type": "string", "enum": ["low", "medium", "high"] },
+    "privacy_preference": { "type": "string", "enum": ["prefer_local", "allow_remote", "require_local"] },
+    "trace_id": { "type": "string" },
+    "metadata": { "type": "object" }
+  }
+}

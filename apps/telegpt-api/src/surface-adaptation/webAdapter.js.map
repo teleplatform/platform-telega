@@ -1,0 +1,1 @@
+{"version":3,"file":"webAdapter.js","sourceRoot":"","sources":["webAdapter.ts"],"names":[],"mappings":"AAAA,SAAS,mBAAmB,CAAC,IAAY;IACvC,OAAO,IAAI,CAAC,OAAO,CAAC,MAAM,EAAE,GAAG,CAAC,CAAC,IAAI,EAAE,CAAC;AAC1C,CAAC;AAED,MAAM,UAAU,WAAW,CAAC,IAAY;IACtC,OAAO,mBAAmB,CAAC,IAAI,CAAC,CAAC;AACnC,CAAC"}

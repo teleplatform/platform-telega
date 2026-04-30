@@ -1,0 +1,9 @@
+{
+  "id": "react-best-practices",
+  "version": "1.0.0",
+  "title": "React Best Practices — Lint Brain",
+  "stages": ["AutoReview", "FixPlan", "Patch"],
+  "maker_only_stages": ["Patch"],
+  "inputs": ["file_path", "code", "context"],
+  "outputs": ["issues", "fix_plan", "patch_diff"]
+}

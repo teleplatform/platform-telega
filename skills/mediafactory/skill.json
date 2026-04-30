@@ -1,0 +1,8 @@
+{
+  "id": "mediafactory",
+  "version": "1.0.0",
+  "title": "MediaFactory v1 — Image→Video→Audio→Mux→Export",
+  "stages": ["Image", "Video", "Audio", "Mux", "Export"],
+  "maker_only_stages": ["Video", "Audio", "Mux", "Export"],
+  "outputs": ["reel.mp4", "cover.jpg", "captions.srt", "pack.json"]
+}

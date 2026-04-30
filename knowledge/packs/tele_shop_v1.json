@@ -1,0 +1,24 @@
+{
+  "id": "tele_shop_v1",
+  "version": "1.0.0",
+  "brand_terms": ["Tele•Ga", "Teleton", "MarketBase", "Tele•GPT"],
+  "currency": "UZS",
+  "price_list": [
+    { "sku": "tattoo_small", "name": "Тату маленькая", "price": 300000, "unit": "шт" }
+  ],
+  "faq": [
+    { "q": "Сколько длится сеанс?", "a": "Обычно 1–3 часа, зависит от размера." }
+  ],
+  "delivery": {
+    "type": "service_or_goods",
+    "service_area": "Ташкент",
+    "time_windows": ["10:00-18:00"]
+  },
+  "warranty": {
+    "returns": "По услугам — бесплатная коррекция в течение 7 дней при соблюдении рекомендаций.",
+    "conditions": ["Следовать уходу", "Не посещать сауну 7 дней"]
+  },
+  "policies": {
+    "handover_to_human": ["legal", "refund_conflict", "angry_user"]
+  }
+}

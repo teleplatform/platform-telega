@@ -1,0 +1,11 @@
+{
+  "allowHold": true,
+  "allowDegrade": true,
+  "allowDisable": true,
+  "allowResume": true,
+  "anomalyThresholds": {
+    "highSeverityTriggersDegrade": true,
+    "mediumSeverityTriggersWarning": true,
+    "repeatedLowSeverityCount": 5
+  }
+}

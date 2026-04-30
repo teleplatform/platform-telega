@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ArtifactEnvelope",
+  "type": "object",
+  "required": ["artifact_id", "run_id", "artifact_kind", "title", "storage_ref", "validator_results", "created_at"],
+  "properties": {
+    "artifact_id": { "type": "string" },
+    "run_id": { "type": "string" },
+    "node_id": { "type": "string" },
+    "artifact_kind": { "type": "string", "enum": ["code", "doc", "json", "asset", "report", "patch", "bundle"] },
+    "title": { "type": "string" },
+    "storage_ref": { "type": "string" },
+    "checksum": { "type": "string" },
+    "validator_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["validator", "status", "summary"],
+        "properties": {
+          "validator": { "type": "string" },
+          "status": { "type": "string", "enum": ["passed", "failed", "warning"] },
+          "summary": { "type": "string" }
+        }
+      }
+    },
+    "created_at": { "type": "string" }
+  }
+}

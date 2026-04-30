@@ -1,0 +1,15 @@
+export {
+  type ProposalType,
+  type TargetType,
+  type ProposalRiskClass,
+  type ProposalStatus,
+  type PolicyOutcome,
+  type ReviewAction,
+  type AdaptationProposal,
+  type ProposalEvidenceRef,
+  type PolicyDecision,
+  type ReviewDecision,
+  type AppliedChangeRecord,
+  type RollbackRecord,
+  type ProposalAuditTrail,
+} from "./adaptation.js";

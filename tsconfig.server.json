@@ -1,17 +1,26 @@
 {
-  "extends": "./tsconfig.json",
   "compilerOptions": {
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "noEmit": false
+    "noEmit": false,
+    "target": "ES2022",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "outDir": "./dist",
+    "baseUrl": ".",
+    "paths": {
+      "#i18n/messages": ["src/i18n/messages.ts"],
+      "#i18n/keypath-runtime": ["src/i18n/messages.keypath.runtime.ts"]
+    }
   },
   "include": [
-    "src/server/**/*.ts",
-    "src/core/**/*.ts",
-    "src/providers/**/*.ts",
-    "src/types/**/*.ts"
+    "src/server/index.ts",
+    "src/channels/**/*.ts"
   ],
   "exclude": [
-    "src/server/translate/translator.ts"
+    "src/server/routes/*.ts",
+    "src/telegram/**/*.ts"
   ]
 }

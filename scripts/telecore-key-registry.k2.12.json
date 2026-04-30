@@ -1,0 +1,28 @@
+{
+  "registry_version": "v1",
+  "updated_at": "2026-02-27T00:00:00.000Z",
+  "keys": [
+    {
+      "key_id": "telecore_dev_2026q1",
+      "alg": "ed25519",
+      "public_key_spki_b64": "MCowBQYDK2VwAyEAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+      "status": "active",
+      "created_at": "2026-02-27T00:00:00.000Z",
+      "note": "Dev default key for K2.11/K2.12 offline verification"
+    },
+    {
+      "key_id": "telecore_dev_2026q2",
+      "alg": "ed25519",
+      "public_key_spki_b64": "MCowBQYDK2VwAyEAebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=",
+      "status": "active",
+      "created_at": "2026-03-31T00:00:00.000Z",
+      "note": "Dev rotation key for K2.13 overlap window"
+    }
+  ],
+  "policy": {
+    "allow_embedded_pubkey_fallback": false,
+    "accept_if_key_status": ["active", "retired"],
+    "allow_signatures_before_revoke_at": true,
+    "require_key_id_match": true
+  }
+}

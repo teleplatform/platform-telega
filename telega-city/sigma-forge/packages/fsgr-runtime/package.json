@@ -1,0 +1,11 @@
+{
+  "name": "@telega/fsgr-runtime",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@telega/fsgr-contracts": "file:../fsgr-contracts"
+  },
+  "devDependencies": {}
+}

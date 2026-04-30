@@ -1,0 +1,34 @@
+{
+  "manifestVersion": "1.0",
+  "identity": {
+    "skillId": "arisha_alice_skill_v1",
+    "displayName": "Ариша",
+    "personaId": "arisha",
+    "surface": "alice",
+    "primaryLanguage": "ru",
+    "supportedLanguages": ["ru", "en", "uz"],
+    "shortDescription": "Голосовой ассистент Ариша — живой, спокойный, надёжный.",
+    "longDescription": "Ариша — голосовой AI-ассистент, встроенный в платформу Tele•GPT. Поддерживает русский, английский и узбекский языки. Управляется через Alice voice surface с production-grade ingress protection."
+  },
+  "invocation": {
+    "entryPhrases": [
+      "Алиса, позови Аришу",
+      "Алиса, включи Аришу",
+      "Алиса, переключи на Аришу"
+    ],
+    "invocationMode": "voice_entry",
+    "requiresExplicitInvocation": true,
+    "defaultEntryIntent": "arisha_entry",
+    "supportsFollowupTurns": true,
+    "supportsSessionContinuation": true
+  },
+  "webhookPath": "/api/v1/alice/webhook",
+  "httpMethod": "POST",
+  "contentType": "application/json",
+  "readiness": {
+    "ingressReady": true,
+    "protocolReady": true,
+    "bridgeReady": true,
+    "hardeningReady": true
+  }
+}

@@ -1,20 +1,33 @@
-# Canon Today
+# CANON_TODAY — 2026-01-27
+Статус: CANONICAL  
+Owner: Никита  
+Scope: Tele•GPT Core + Sigma Forge Integration Surface
 
-## TeleCore Task System (canon)
-- BuildTask/BuildResult stored as JSON by task_id
-- Heartbeat drives running status; terminal statuses are final
-- Summary counts + polling hints for UI dashboards
-- Creator-only guard for custom provider base URLs
+---
 
-## Tele•GPT Product Canon
-- Sales/Support Agent template
-- Business Knowledge Pack
-- Intent routing
-- Generate-to-Forge
-- Policy/limits/fallback
+## Что стало каноном сегодня
+- Локальный провайдер (OpenAI-compatible) с доказуемыми traces
+- Самовосстанавливающиеся задачи (heartbeat/sweep/409 terminal hardening)
+- Агентный слой с полной наблюдаемостью (lane/intent/fallback/limits)
+- G2F: actionability gate → BuildTask → artifacts → trace linkage
+- KB-2: CAS/etag + DB-first overrides
+- INTENT-2: hybrid (keyword-first → LLM json contract)
+- SkillPack react-best-practices: AutoReview → FixPlan → Patch (maker-only)
+- MediaFactory v1: ffmpeg pipeline + валидаторы + Public/Maker
+- LRL v1: Wallet + ledger + rules/events + review gate + antifraud + action maps
 
-## LRL (Loyalty & Retention Layer)
-Retention = (Activation × Value) / (Friction + Drift)
+---
 
-## Canonical Agent Standard
-docs/TELEGA_AGENT_PATTERNS_v1.md — Canonical Agent Standard
+## Proof checklist (должно быть зелёным)
+- smoke_agent_observability.sh
+- smoke_g2f_fullcycle.sh (или эквивалент)
+- smoke_kb2_intent2.sh
+- smoke_skill_react_best_practices.sh
+- smoke_mediafactory_v1.sh
+- smoke_lrl_v1.sh
+
+---
+
+## Релиз
+Тег релиза: **CANON-2026-01-27**  
+Changelog: docs/CHANGELOG_SESSION.md

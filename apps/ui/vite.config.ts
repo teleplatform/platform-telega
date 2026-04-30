@@ -12,8 +12,14 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
         ws: true,
+        rewrite: (path) => path.replace(/^\/v1/, ""),
       },
       "/health": {
+        target,
+        changeOrigin: true,
+        secure: false,
+      },
+      "/forge": {
         target,
         changeOrigin: true,
         secure: false,
@@ -21,4 +27,3 @@ export default defineConfig({
     },
   },
 });
-

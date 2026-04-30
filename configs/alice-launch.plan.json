@@ -1,0 +1,14 @@
+{
+  "launchId": "alice-launch-001",
+  "skillId": "arisha_alice_skill_v1",
+  "mode": "dry_run",
+  "targetSurface": "alice",
+  "requiresReadinessPass": true,
+  "requiresSmokePass": true,
+  "allowsRollback": true,
+  "notes": [
+    "Initial launch plan — dry run mode",
+    "Upgrade to controlled_live after gates + smoke pass",
+    "Rollback path confirmed"
+  ]
+}

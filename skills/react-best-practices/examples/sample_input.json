@@ -1,0 +1,5 @@
+{
+  "stage": "AutoReview",
+  "file_path": "src/components/Foo.tsx",
+  "code": "export function Foo(){return <div>Hello</div>}"
+}

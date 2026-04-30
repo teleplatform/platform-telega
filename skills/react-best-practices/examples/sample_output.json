@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "skill_id": "react-best-practices",
+  "version": "1.0.0",
+  "stage": "AutoReview",
+  "issues": [
+    {
+      "id": "react/hooks-deps",
+      "severity": "med",
+      "title": "Missing deps in useEffect",
+      "evidence": "useEffect(() => { ... }, [])",
+      "suggestion": "Include referenced values in deps."
+    }
+  ],
+  "meta": {
+    "issues_count": 1,
+    "patch_bytes": 0,
+    "maker_mode": false,
+    "provider": "local"
+  }
+}

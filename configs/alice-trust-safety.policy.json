@@ -1,0 +1,12 @@
+{
+  "enabledRiskClasses": ["safe", "sensitive", "unsafe", "high_risk", "unknown"],
+  "refusalTypes": ["none", "soft_refusal", "firm_refusal", "redirect", "safety_block"],
+  "safeModes": ["none", "bounded_answer", "clarify_only", "refuse_only", "handoff_safe"],
+  "sensitiveCategories": ["self_harm", "violence", "illegal", "privacy", "medical", "sexual", "manipulation", "unknown", "none"],
+  "shapingConstraints": {
+    "maxWords": 15,
+    "avoidThreateningTone": true,
+    "avoidSystemBotTone": true,
+    "requireBrevity": true
+  }
+}

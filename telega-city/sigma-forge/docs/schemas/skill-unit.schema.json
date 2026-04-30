@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SkillUnit",
+  "type": "object",
+  "required": ["skill_id", "family", "name", "description", "version", "capability_tags", "input_schema_ref", "output_schema_ref", "mode_support", "risk_class", "policy_scope", "retry_policy", "validator_hooks", "timeout_ms"],
+  "properties": {
+    "skill_id": { "type": "string" },
+    "family": { "type": "string", "enum": ["frontend", "backend", "content", "research", "ops"] },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "version": { "type": "string" },
+    "capability_tags": { "type": "array", "items": { "type": "string" } },
+    "input_schema_ref": { "type": "string" },
+    "output_schema_ref": { "type": "string" },
+    "mode_support": { "type": "array", "items": { "type": "string", "enum": ["public", "creator", "internal", "system"] } },
+    "risk_class": { "type": "string", "enum": ["low", "medium", "high"] },
+    "policy_scope": { "type": "array", "items": { "type": "string" } },
+    "runtime_requirements": {
+      "type": "object",
+      "properties": {
+        "tools": { "type": "array", "items": { "type": "string" } },
+        "providers": { "type": "array", "items": { "type": "string" } },
+        "local_only": { "type": "boolean" }
+      }
+    },
+    "retry_policy": {
+      "type": "object",
+      "required": ["max_attempts", "backoff_ms", "retryable_errors"],
+      "properties": {
+        "max_attempts": { "type": "integer", "minimum": 0 },
+        "backoff_ms": { "type": "integer", "minimum": 0 },
+        "retryable_errors": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "validator_hooks": { "type": "array", "items": { "type": "string" } },
+    "fallback_skills": { "type": "array", "items": { "type": "string" } },
+    "timeout_ms": { "type": "integer", "minimum": 0 },
+    "deprecated": { "type": "boolean" }
+  }
+}

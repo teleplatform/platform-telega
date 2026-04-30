@@ -1,24 +1,45 @@
-# Pack Index
+# PACK_INDEX — Tele•GPT Canon Packs
+Статус: CANONICAL  
+Owner: Никита  
+Updated: 2026-01-27
 
-## P6 — Task Log (TeleCore BuildTask/BuildResult)
-- Stores BuildTask/BuildResult JSON by task_id
-- Endpoints for create/result/list/get
+---
 
-## P7 — Heartbeat + Running
-- Runner heartbeat endpoint
-- Status moves to running (no terminal regression)
+## Packs
 
-## P10 — Summary Counts + Poll Hints
-- Counts by status
-- Polling hints without extra list calls
+### Pack B — Local Provider (OpenAI-compatible) + Proof
+Цель: “железный” локальный провайдер и доказуемость в traces.  
+Ключевые proof: provider=local, /v1/models, usage tokens.
 
-## P12 — Local OpenAI-Compatible Provider
-- LOCAL_OPENAI_BASE_URL support (vLLM/Ollama/llama.cpp server)
-- Creator-only guard for base_url
+### Pack C — Task System Self-Heal
+Цель: задачи “как у взрослых”: heartbeat, stale sweep, терминальные статусы, 409.  
+Ключевые proof: STALE_HEARTBEAT, conflict=409, smoke suite.
 
-## CP1 — Creator Provider Guard
-- Blocks custom base URLs outside creator mode
-- Allows only localhost/127.0.0.1/host.docker.internal
+### Pack D — Agent Modules + Full Observability
+Цель: агентные модули + наблюдаемость (lane/intent/fallback/limits).  
+Ключевые proof: intent/lane/fallback_used/failures/timeouts/max_tokens + traces.
 
-## AP1 — Tele•Ga Agent Patterns v1.0
-- Canonical agent law (actions, validation, trace, fallback)
+### Pack E — Generate-to-Forge (G2F) Full Cycle
+Цель: actionability gate → BuildTask → artifacts → trace linkage.  
+Ключевые proof: generated_task_id, actionability_score, artifacts_count.
+
+### Pack F — KB-2 + INTENT-2
+Цель: knowledge overrides с CAS/etag + hybrid intent классификация.  
+Ключевые proof: knowledge_etag, intent_confidence, source/version, 409 conflict.
+
+### Pack G — Skill Packs: react-best-practices “lint мозга”
+Цель: AutoReview → FixPlan → Patch (maker-only patch) + traces proof.  
+Ключевые proof: skill_id/stage/issues_count/patch_bytes/maker_mode.
+
+### Pack H — MediaFactory v1
+Цель: Image→Video→Audio→Mux→Export + валидаторы + Public/Maker.  
+Ключевые proof: validator flags, duration_sec, artifacts manifest.
+
+### Pack I — LRL (Loyalty & Retention Layer) v1
+Цель: Wallet + Rules + Events/Triggers + Review Gate + Anti-fraud + Action Maps.  
+Ключевые proof: ledger idempotency, awards/caps, review gate routing, traces.
+
+---
+
+## Canon Release
+Текущий каноничный релиз: **CANON-2026-01-27**

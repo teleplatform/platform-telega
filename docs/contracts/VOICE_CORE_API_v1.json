@@ -1,0 +1,125 @@
+{
+  "version": "1.0.0",
+  "service": "telegpt-voice-core",
+  "notes": "API contracts for Voice-Core v1. Engine provider: local.cosyvoice.v3",
+  "endpoints": {
+    "POST /voice/clone": {
+      "auth": { "mode": "maker_required" },
+      "request": {
+        "job_id": "string (uuid)",
+        "provider": "string = local.cosyvoice.v3",
+        "audio": {
+          "content_base64": "string",
+          "mime": "audio/wav|audio/flac|audio/mpeg",
+          "filename": "string",
+          "trim_to_seconds": "number (default 30)"
+        },
+        "consent": {
+          "declared_owner_or_permission": "boolean (must be true)"
+        },
+        "meta": {
+          "voice_label": "string (optional)",
+          "lang_hint": "ru|uz|en|auto"
+        }
+      },
+      "response": {
+        "status": "done|partial|blocked",
+        "voice_id": "string (stable id)",
+        "embedding_ref": "string (internal ref/path)",
+        "warnings": ["string"],
+        "trace": {
+          "lane": "voice.local.cosyvoice.v3",
+          "duration_ms": "number",
+          "input_audio_sha256": "string"
+        }
+      }
+    },
+
+    "POST /voice/speak": {
+      "auth": { "mode": "public_or_maker" },
+      "request": {
+        "job_id": "string (uuid)",
+        "provider": "string (default router)",
+        "text": "string",
+        "voice": {
+          "type": "base|cloned",
+          "base_voice": "string (if type=base)",
+          "voice_id": "string (if type=cloned)"
+        },
+        "lang": "ru|uz|en|auto",
+        "seed": "number (optional, for determinism)",
+        "format": {
+          "container": "wav",
+          "sample_rate": "16000|22050|44100 (default 44100)"
+        }
+      },
+      "response": {
+        "status": "done|partial|blocked",
+        "audio_base64": "string",
+        "mime": "audio/wav",
+        "warnings": ["string"],
+        "trace": {
+          "lane": "voice.router",
+          "provider_used": "string",
+          "duration_ms": "number"
+        }
+      }
+    },
+
+    "POST /voice/convert": {
+      "auth": { "mode": "maker_required" },
+      "request": {
+        "job_id": "string (uuid)",
+        "provider": "string = local.cosyvoice.v3",
+        "source_audio": {
+          "content_base64": "string",
+          "mime": "audio/wav|audio/flac|audio/mpeg",
+          "filename": "string",
+          "trim_to_seconds": "number (default 30)"
+        },
+        "target": { "voice_id": "string" },
+        "lang": "ru|uz|en|auto"
+      },
+      "response": {
+        "status": "done|partial|blocked",
+        "audio_base64": "string",
+        "mime": "audio/wav",
+        "warnings": ["string"],
+        "trace": {
+          "lane": "voice.local.cosyvoice.v3",
+          "duration_ms": "number"
+        }
+      }
+    },
+
+    "POST /voice/dialogue": {
+      "auth": { "mode": "maker_required" },
+      "request": {
+        "job_id": "string (uuid)",
+        "provider": "string = local.cosyvoice.v3",
+        "script": [
+          {
+            "speaker": "A|B",
+            "text": "string"
+          }
+        ],
+        "voices": {
+          "A": { "voice_id": "string" },
+          "B": { "voice_id": "string" }
+        },
+        "lang": "ru|uz|en|auto",
+        "format": { "container": "wav", "sample_rate": "44100" }
+      },
+      "response": {
+        "status": "done|partial|blocked",
+        "audio_base64": "string",
+        "mime": "audio/wav",
+        "warnings": ["string"],
+        "trace": {
+          "lane": "voice.local.cosyvoice.v3",
+          "duration_ms": "number"
+        }
+      }
+    }
+  }
+}
