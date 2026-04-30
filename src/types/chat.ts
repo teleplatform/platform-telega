@@ -18,7 +18,7 @@ export type ChatUsage = {
 };
 
 export type ChatMeta = {
-  provider?: "local" | "openai" | "persona" | "deepseek" | "qwen" | "creator" | "openai_web" | "qwen_web" | "deepseek_web" | "grok_web" | "kimi_web" | "chatgpt_web" | "perplexity_web" | "claude_web" | "gemini_web" | "poe_web" | "openai_api" | "qwen_api" | "deepseek_api" | "openrouter_kimi" | "multi_agent" | "strategy";
+  provider?: "local" | "openai" | "persona" | "deepseek" | "qwen" | "creator" | "openai_web" | "qwen_web" | "deepseek_web" | "grok_web" | "kimi_web" | "chatgpt_web" | "perplexity_web" | "claude_web" | "gemini_web" | "poe_web" | "openai_api" | "qwen_api" | "deepseek_api" | "openrouter_kimi" | "multi_agent" | "strategy" | "longform";
   model?: string;
   usage?: ChatUsage;
   fallback_used?: boolean;
@@ -33,6 +33,11 @@ export type ChatMeta = {
   strategy_reasoning?: string;
   plan?: string;
   error?: string;
+  task_intent?: string;
+  longform_file_path?: string;
+  longform_word_count?: number;
+  longform_char_count?: number;
+  intent?: string;
 };
 
 export type ChatResponse = {

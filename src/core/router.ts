@@ -171,11 +171,55 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
     }
   }
   
+  // 2. Intent detection (code vs longform vs chat)
+  const { detectTaskIntent, shouldRouteToLongform, shouldRouteToOpenAIWeb } = await import("./router/intent-router.js");
+  const taskIntent = detectTaskIntent(req.message, { role: req.meta?.role, meta: req.meta });
+  console.log(`[router] intent detected: ${taskIntent.intent} confidence=${taskIntent.confidence} reason=${taskIntent.reason}`);
+
+  // Force code tasks to openai_web Creator Bridge
+  if (shouldRouteToOpenAIWeb(taskIntent) && (!requestedProvider || requestedProvider === "auto")) {
+    console.log("[router] overriding provider to openai_web for code task");
+    (req as any).meta = { ...(req.meta || {}), selected_provider: "openai_web" };
+  }
+
+  // Route longform tasks to local engine with file delivery
+  if (shouldRouteToLongform(taskIntent) && (!requestedProvider || requestedProvider === "auto")) {
+    console.log(`[router] routing to longform engine: ${taskIntent.estimatedLength || "unknown"} chars estimated`);
+    try {
+      const { generateLongform } = await import("./longform/longform-engine.js");
+      const longformResult = await generateLongform(req.message, {
+        maxTokens: 16384,
+      });
+
+      if (longformResult.success) {
+        return {
+          id: request_id,
+          model: `local:${longformResult.model}`,
+          output: `Article generated (${longformResult.wordCount} words). File: ${longformResult.filePath}`,
+          meta: {
+            provider: "longform" as any,
+            model: longformResult.model,
+            longform_file_path: longformResult.filePath,
+            longform_word_count: longformResult.wordCount,
+            longform_char_count: longformResult.charCount,
+            intent: "longform",
+          },
+          request_id,
+          latency_ms: Date.now() - t0,
+        };
+      } else {
+        console.error("[router] longform engine failed:", longformResult.error);
+      }
+    } catch (e) {
+      console.error("[router] longform routing failed", e);
+    }
+  }
+  
   let provider: "local" | "openai" | "deepseek_api" | "qwen_api" | "openrouter_kimi";
   let resolved_model: string;
   let base: ChatResponse;
 
-  // 1. Trivial prompt bypass first (only for web providers when explicitly set)
+  // 3. Trivial prompt bypass first (only for web providers when explicitly set)
   const isPlainPrompt = /^(hi|hello|hey|say hi|hi there|hello there|2\+2\??|4\*5|what is 2\+2|qwen_web_ok|bridge_openai_ok|deepseek_web_ok|grok_web_ok)$/i
     .test(req.message.trim());
   
@@ -218,7 +262,7 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
     return base;
   }
   
-  // 2. Explicit execution modes BEFORE single provider routing
+  // 4. Explicit execution modes BEFORE single provider routing
   const explicitMultiAgent = (req as any).multi_agent_mode === true || req.meta?.multi_agent_mode === true;
   const explicitDebate = (req as any).debate_mode === true || req.meta?.debate_mode === true;
   
@@ -251,7 +295,7 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
     }
   }
   
-  // 3. Single provider routing
+  // 5. Single provider routing
   if (isCreatorBridgeProvider(requestedProvider)) {
     if (requestedProvider === "kimi_web") {
       providerUnavailable(
@@ -611,6 +655,7 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       provider,
       model: resolved_model,
       usage,
+      task_intent: taskIntent.intent,
     },
   };
 }
