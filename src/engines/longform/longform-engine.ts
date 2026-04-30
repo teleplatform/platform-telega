@@ -29,6 +29,7 @@ interface OllamaChatReq {
 
 const LONGFORM_TIMEOUT_MS = 8 * 60 * 1000;
 const MIN_REASONABLE_WORDS = 50;
+const WORD_COUNT_THRESHOLD = 0.8;
 
 function postJson(
   urlString: string,
@@ -74,7 +75,7 @@ function postJson(
 }
 
 async function withRetry<T>(
-  fn: () => Promise<T>,
+  fn: (attempt: number) => Promise<T>,
   retries = 2,
   delayMs = 1500,
 ): Promise<T> {
@@ -82,14 +83,18 @@ async function withRetry<T>(
 
   for (let attempt = 1; attempt <= retries + 1; attempt++) {
     try {
-      return await fn();
+      return await fn(attempt);
     } catch (err) {
       lastError = err;
 
-      console.log("[longform] generation_retry", {
-        attempt,
-        error: String((err as Error)?.message || err),
-      });
+      if ((err as Error)?.message === "LONGFORM_TOO_SHORT") {
+        console.log("[longform] retry_due_to_short_output", { attempt });
+      } else {
+        console.log("[longform] generation_retry", {
+          attempt,
+          error: String((err as Error)?.message || err),
+        });
+      }
 
       if (attempt <= retries) {
         await new Promise((r) => setTimeout(r, delayMs * attempt));
@@ -108,17 +113,56 @@ function getTextStats(text: string) {
   };
 }
 
-function buildLongformSystemPrompt(topic: string): string {
+function extractTargetWords(message: string): number | null {
+  const match = message.match(/(\d{3,5})\s*(?:слов|слова|word)/i);
+  if (match) {
+    return parseInt(match[1], 10);
+  }
+  return null;
+}
+
+function buildLongformSystemPrompt(message: string, targetWords: number): string {
   return [
-    "You are an expert long-form content writer.",
-    "Write a comprehensive, detailed, well-structured article on the given topic.",
-    "Use markdown formatting with headings, subheadings, lists, and paragraphs.",
-    "Include an introduction, multiple body sections, and a conclusion.",
-    "Write at least 2000 words. Be thorough and informative.",
-    "Do not include any preamble about what you will write - start the article directly.",
-    "Do not mention AI or language models.",
-    `Topic: ${topic}`,
-  ].join("\n\n");
+    "Ты профессиональный автор и эксперт по тату-культуре.",
+    "",
+    `Задача:\n${message}`,
+    "",
+    "Требования:",
+    "- Пиши ТОЛЬКО реальные тренды, без выдуманных стилей",
+    "- Не придумывай названия школ или направлений",
+    "- Используй современные реальные направления:",
+    "  (fine line, blackwork, realism, micro tattoo, lettering, ethnic, minimalism и т.д.)",
+    "- Учитывай регион (Грузия, Тбилиси, локальные студии, культура)",
+    "- Пиши живо, как эксперт, а не как учебник",
+    "- Избегай воды и повторов",
+    "",
+    "Структура ОБЯЗАТЕЛЬНА:",
+    "",
+    "# Заголовок",
+    "",
+    "## Введение (почему тема актуальна)",
+    "",
+    "## Основные тренды (минимум 5-7 пунктов)",
+    "Каждый тренд:",
+    "- что это",
+    "- почему популярен",
+    "- как проявляется в Грузии",
+    "",
+    "## Что выбирают клиенты",
+    "(реальные запросы, поведение)",
+    "",
+    "## Работа мастеров",
+    "(техника, оборудование, стиль работы)",
+    "",
+    "## Будущее индустрии",
+    "",
+    "## Вывод",
+    "",
+    "Ограничения:",
+    `- минимум ${targetWords} слов`,
+    `- не меньше 80% от заданного объёма`,
+    "- цельный текст без обрывов",
+  ].join("\n");
 }
 
 function buildFallbackMarkdown(message: string, reason: string): string {
@@ -215,19 +259,23 @@ export async function generateLongformFile(params: {
   }
 
   try {
+    const targetWords = extractTargetWords(message) || 800;
+
     const text = await withRetry(
-      async () => {
+      async (attemptNum = 1) => {
         const url = `${baseUrl}/api/chat`;
+        const temperature = attemptNum === 1 ? 0.7 : 0.9;
+
         const body: OllamaChatReq = {
           model,
           messages: [
-            { role: "system", content: buildLongformSystemPrompt(message) },
+            { role: "system", content: buildLongformSystemPrompt(message, targetWords) },
             { role: "user", content: `Write a comprehensive article about: ${message}` },
           ],
           stream: false,
           options: {
-            temperature: 0.7,
-            num_predict: 16384,
+            temperature,
+            num_predict: 8000,
             top_p: 0.9,
           },
         };
@@ -236,7 +284,7 @@ export async function generateLongformFile(params: {
           "content-type": "application/json",
         };
 
-        console.log("[longform] generation_started", { model, url });
+        console.log("[longform] generation_started", { model, url, attempt: attemptNum, temperature });
 
         const response = await postJson(url, headers, JSON.stringify(body), LONGFORM_TIMEOUT_MS);
 
@@ -253,8 +301,13 @@ export async function generateLongformFile(params: {
 
         const stats = getTextStats(extracted);
 
-        if (stats.words < MIN_REASONABLE_WORDS) {
-          throw new Error(`Response too short: ${stats.words} words (minimum ${MIN_REASONABLE_WORDS})`);
+        if (stats.words < targetWords * WORD_COUNT_THRESHOLD) {
+          console.log("[longform] quality_check_failed", {
+            words: stats.words,
+            required: Math.floor(targetWords * WORD_COUNT_THRESHOLD),
+            attempt: attemptNum,
+          });
+          throw new Error("LONGFORM_TOO_SHORT");
         }
 
         console.log("[longform] generation_completed", { words: stats.words, chars: stats.chars });
