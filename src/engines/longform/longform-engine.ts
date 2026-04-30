@@ -259,6 +259,143 @@ interface ArticleSection {
   isConclusion?: boolean;
 }
 
+// v3.4 outline-first generation
+async function generateOutline(
+  baseUrl: string,
+  model: string,
+  message: string,
+  targetWords: number,
+): Promise<string[]> {
+  const outlinePrompt = [
+    `Составь план статьи (ТОЛЬКО список разделов, без текста):`,
+    "",
+    `Тема: ${message}`,
+    `Целевой объём: ${targetWords} слов`,
+    "",
+    "Требования:",
+    "- 6–9 разделов",
+    "- реальные темы тату-индустрии",
+    "- без выдумок",
+    "- короткие названия",
+    "",
+    "Формат:",
+    "1. Введение",
+    "2. ...",
+    "3. ...",
+  ].join("\n");
+
+  const outlineText = await callOllama(
+    baseUrl,
+    model,
+    "Ты профессиональный редактор. Составляй чёткие планы статей.",
+    outlinePrompt,
+    30000,
+    400,
+    0.5,
+  );
+
+  const sections = outlineText
+    .split("\n")
+    .map((line) => line.replace(/^\d+\.\s*/, "").trim())
+    .filter((line) => line.length > 0 && !line.toLowerCase().includes("план") && !line.toLowerCase().startsWith("#"))
+    .slice(0, 9);
+
+  if (sections.length < 4) {
+    throw new Error("Outline too short: " + sections.length);
+  }
+
+  console.log("[longform] outline_generated", { sections: sections.length, items: sections });
+
+  return sections;
+}
+
+function buildSectionPromptFromOutline(
+  message: string,
+  sectionTitle: string,
+  sectionIndex: number,
+  totalSections: number,
+  regionHint: string,
+): string {
+  const isTrendSection = /тренд|направлен|стиль|популярн/i.test(sectionTitle);
+  const isFirst = sectionIndex === 0;
+  const isLast = sectionIndex === totalSections - 1;
+
+  let extraInstructions = "";
+
+  if (isTrendSection) {
+    extraInstructions = `\nОпиши минимум 5 реальных направлений: fine line, blackwork, realism, minimalism, lettering, dotwork, traditional.`;
+  }
+
+  if (isFirst) {
+    return [
+      `Напиши введение для статьи. Тема: ${message}${regionHint}.`,
+      `Объём ~${CHUNK_WORDS} слов. Объясни, почему тема актуальна сейчас. Пиши как эксперт.`,
+      extraInstructions,
+    ].filter(Boolean).join("\n");
+  }
+
+  if (isLast) {
+    return [
+      `Напиши заключение-вывод для раздела "${sectionTitle}". Тема: ${message}.`,
+      `Объём ~${CHUNK_WORDS} слов. Подведи итоги статьи.`,
+    ].join("\n");
+  }
+
+  return [
+    `Напиши ТОЛЬКО раздел "${sectionTitle}" статьи на тему: ${message}${regionHint}.`,
+    "Не пиши всю статью.",
+    "Не делай вывод, если это не последний раздел.",
+    `Объём ~${CHUNK_WORDS} слов. Пиши подробно, без воды.`,
+    extraInstructions,
+  ].filter(Boolean).join("\n");
+}
+
+function buildSectionsFromOutline(
+  outline: string[],
+  message: string,
+  region: string,
+): ArticleSection[] {
+  const regionHint = region ? ` (контекст: ${region})` : "";
+  const total = outline.length;
+
+  return outline.map((title, i) => ({
+    heading: title,
+    prompt: buildSectionPromptFromOutline(message, title, i, total, regionHint),
+    isConclusion: i === total - 1,
+  }));
+}
+
+function mergeAndCleanArticle(title: string, chunks: Array<{ heading: string; text: string }>): string {
+  let result = `# ${title}\n\n`;
+
+  let hasIntro = false;
+
+  for (const chunk of chunks) {
+    let text = chunk.text.trim();
+
+    // Remove repeated H1 from chunks
+    text = text.replace(/^#\s+.+$/m, "").trim();
+
+    // Remove duplicate intro if already written
+    if (hasIntro && /введение|introduction/i.test(chunk.heading)) {
+      continue;
+    }
+    if (/введение/i.test(chunk.heading)) {
+      hasIntro = true;
+    }
+
+    // Ensure no double ##
+    text = text.replace(/^##\s+/m, "");
+
+    result += `## ${chunk.heading}\n\n${text}\n\n`;
+  }
+
+  // Fix excessive newlines
+  result = result.replace(/\n{3,}/g, "\n\n");
+
+  return result.trim() + "\n";
+}
+
 function detectRegion(message: string): string {
   const lower = message.toLowerCase();
   if (lower.includes("грузи") || lower.includes("тбилис")) return "Грузия, Тбилиси";
@@ -528,7 +665,7 @@ function createSuccessFile(text: string, topic: string, model: string, stats: { 
   return filePath;
 }
 
-// v3.2 chunked generation with v3.3 anti-hallucination
+// v3.4 chunked generation with outline-first + anti-hallucination
 async function generateChunkedLongformText(
   message: string,
   targetWords: number,
@@ -536,17 +673,23 @@ async function generateChunkedLongformText(
   model: string,
   onProgress?: (text: string) => Promise<void>,
 ): Promise<string> {
-  const chunkCount = Math.ceil(targetWords / CHUNK_WORDS);
-  const sections = buildSections(message, chunkCount);
-
-  console.log("[longform] chunked_generation_started", { targetWords, chunkCount, sections: sections.length });
-
   const title = buildTitle(message);
-  let finalText = `# ${title}\n\n`;
+  const region = detectRegion(message);
+
+  // Step 1: generate outline
+  const outline = await generateOutline(baseUrl, model, message, targetWords);
+
+  // Step 2: build sections from outline
+  const sections = buildSectionsFromOutline(outline, message, region);
+
+  console.log("[longform] outline_used", { sections: sections.length, outline });
+
+  // Step 3: generate each section
+  const chunks: Array<{ heading: string; text: string }> = [];
 
   for (let i = 0; i < sections.length; i++) {
     const section = sections[i];
-    console.log("[longform] chunk_started", { index: i + 1, total: sections.length, title: section.heading });
+    console.log("[longform] section_generated", { index: i + 1, total: sections.length, title: section.heading });
 
     if (i === 0 || i === Math.floor(sections.length / 2) || i === sections.length - 1) {
       if (onProgress) {
@@ -585,7 +728,7 @@ async function generateChunkedLongformText(
       1500,
     );
 
-    finalText += `## ${section.heading}\n\n${sectionText.trim()}\n\n`;
+    chunks.push({ heading: section.heading, text: sectionText.trim() });
 
     console.log("[longform] chunk_completed", {
       index: i + 1,
@@ -593,6 +736,9 @@ async function generateChunkedLongformText(
       words: getTextStats(sectionText).words,
     });
   }
+
+  // Step 4: merge and clean
+  const finalText = mergeAndCleanArticle(title, chunks);
 
   const sectionCount = countSections(finalText);
   if (sectionCount < 4) {
