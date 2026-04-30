@@ -172,9 +172,117 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
   }
   
   // 2. Intent detection (code vs longform vs chat)
-  const { detectTaskIntent, shouldRouteToLongform, shouldRouteToOpenAIWeb } = await import("./router/intent-router.js");
+  const { detectTaskIntent, shouldRouteToLongform, shouldRouteToOpenAIWeb, detectProductMode } = await import("./router/intent-router.js");
+
+  // Product/Service/Ad mode — FORCE LONGFORM BEFORE ANYTHING ELSE
+  const productMode = detectProductMode(req.message);
+  if (productMode) {
+    console.log("[router] forced_longform_product_mode", { productMode });
+
+    const chatId = req.meta?.chat_id;
+    const message = req.message;
+
+    try {
+      void (async () => {
+        try {
+          console.log("[longform] background_job_started", { productMode });
+
+          const { sendTelegramMessage, sendDocument, buildLongformCaption } = await import("./telegram/send-document.js");
+          const { generateLongformFile, generateLongformFallbackFile } = await import("../engines/longform/longform-engine.js");
+
+          await sendTelegramMessage({
+            chatId,
+            text: "⏳ Генерирую материал...",
+          }).catch(() => {});
+
+          const result = await generateLongformFile({
+            message,
+            chatId,
+            onProgress: async (text) => {
+              await sendTelegramMessage({ chatId, text }).catch(() => {});
+            },
+          });
+
+          await sendTelegramMessage({
+            chatId,
+            text: `📄 Готово.\n\n📊 ${result.words} слов / ${result.chars} символов`,
+          }).catch(() => {});
+
+          await sendDocument({
+            chatId,
+            filePath: result.filePath,
+            caption: buildLongformCaption(result.words, result.chars),
+          });
+
+          console.log("[longform] background_delivery_completed");
+        } catch (err) {
+          console.log("[longform] background_job_failed", {
+            error: String((err as Error)?.message || err),
+          });
+
+          try {
+            const { sendTelegramMessage, sendDocument } = await import("./telegram/send-document.js");
+            const { generateLongformFallbackFile } = await import("../engines/longform/longform-engine.js");
+
+            const fallback = await generateLongformFallbackFile({
+              message,
+              error: String((err as Error)?.message || err),
+            });
+
+            await sendDocument({
+              chatId,
+              filePath: fallback.filePath,
+              caption: "⚠️ Long Form Engine fallback file",
+            });
+
+            console.log("[longform] background_fallback_delivery_completed");
+          } catch (fallbackErr) {
+            console.log("[longform] background_fallback_failed", {
+              error: String((fallbackErr as Error)?.message || fallbackErr),
+            });
+
+            try {
+              const { sendTelegramMessage } = await import("./telegram/send-document.js");
+              await sendTelegramMessage({
+                chatId,
+                text: "⚠️ Long Form Engine не смог отправить файл. Проверь Ollama и логи.",
+              }).catch(() => {});
+            } catch {}
+          }
+        }
+      })();
+    } catch (err) {
+      console.error("[router] longform_background_start_failed", { error: String((err as Error)?.message || err) });
+    }
+
+    console.log("[router] longform_ack_sent", { productMode });
+
+    return {
+      id: request_id,
+      model: "local:longform-async",
+      output: `⏳ Принял задачу (${productMode}). Генерирую материал и отправлю файлом.`,
+      meta: {
+        provider: "longform" as any,
+        model: "longform-async",
+        task_intent: "longform",
+        intent: "longform",
+        async: true,
+        productMode,
+      } as any,
+      request_id,
+      latency_ms: Date.now() - t0,
+    };
+  }
+
   const taskIntent = detectTaskIntent(req.message, { role: req.meta?.role, meta: req.meta });
   console.log(`[router] intent detected: ${taskIntent.intent} confidence=${taskIntent.confidence} reason=${taskIntent.reason}`);
+
+  // Safety log
+  console.log("[router] routing_decision", {
+    intent: taskIntent.intent,
+    productMode: null,
+    usedProvider: requestedProvider || "auto",
+  });
 
   // Force code tasks to openai_web Creator Bridge
   if (shouldRouteToOpenAIWeb(taskIntent) && (!requestedProvider || requestedProvider === "auto")) {
@@ -283,6 +391,22 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
     };
   }
   
+  // Provider guard — no provider configured for non-longform requests
+  if (!hasOpenAI() && !hasLocal()) {
+    console.log("[router] no_provider_configured", { intent: taskIntent.intent });
+    return {
+      id: request_id,
+      model: "none",
+      output: "⚠️ LLM провайдер не настроен. Установи OPENAI_API_KEY или подключи локальную модель.",
+      meta: {
+        provider: "none" as any,
+        error: "no_provider",
+      } as any,
+      request_id,
+      latency_ms: Date.now() - t0,
+    };
+  }
+
   let provider: "local" | "openai" | "deepseek_api" | "qwen_api" | "openrouter_kimi";
   let resolved_model: string;
   let base: ChatResponse;

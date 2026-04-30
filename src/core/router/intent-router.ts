@@ -1,10 +1,27 @@
 export type TaskIntent = "code" | "longform" | "chat";
 
+export type ProductMode = "product" | "service" | "ad" | null;
+
 export interface IntentResult {
   intent: TaskIntent;
   confidence: number;
   reason: string;
   estimatedLength?: number;
+  productMode?: ProductMode;
+}
+
+const PRODUCT_SIGNALS = {
+  product: ["карточка товара", "карточку товара", "описание товара", "product card", "product description"],
+  service: ["карточка услуги", "описание услуги", "карточку услуги", "service card", "service description", "услуга", "услуги"],
+  ad: ["реклама", "рекламный текст", "ad text", "ad copy", "рекламный пост"],
+};
+
+export function detectProductMode(message: string): ProductMode {
+  const text = message.toLowerCase();
+  if (PRODUCT_SIGNALS.product.some((s) => text.includes(s))) return "product";
+  if (PRODUCT_SIGNALS.service.some((s) => text.includes(s))) return "service";
+  if (PRODUCT_SIGNALS.ad.some((s) => text.includes(s))) return "ad";
+  return null;
 }
 
 const CODE_SIGNALS = [
@@ -113,6 +130,18 @@ export function detectTaskIntent(message: string, options?: { role?: string; met
   if (options?.meta?.force_intent) {
     const forced = options.meta.force_intent as TaskIntent;
     return { intent: forced, confidence: 1.0, reason: `forced_${forced}` };
+  }
+
+  // 1. Product/Service/Ad mode — HIGHEST PRIORITY
+  const productMode = detectProductMode(message);
+  if (productMode) {
+    return {
+      intent: "longform",
+      confidence: 0.95,
+      reason: `product_mode_force: ${productMode}`,
+      estimatedLength: 5000,
+      productMode,
+    };
   }
 
   const codeScore = countSignals(message, CODE_SIGNALS) + (hasCodeBlock(message) ? 2 : 0) + (hasCodeStructure(message) ? 3 : 0) + (FILE_EXT_PATTERN.test(message) ? 1 : 0);
