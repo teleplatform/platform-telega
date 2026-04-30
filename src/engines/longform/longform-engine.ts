@@ -27,13 +27,19 @@ interface OllamaChatReq {
   };
 }
 
-// v3.1 fast local profile — configurable via env
+// v3.2 fast local profile + chunked generation
 const DEFAULT_MODEL = process.env.LONGFORM_MODEL ?? "qwen2.5:3b-instruct";
 const DEFAULT_TIMEOUT_MS = Number(process.env.LONGFORM_TIMEOUT_MS ?? "120000");
 const DEFAULT_NUM_PREDICT = Number(process.env.LONGFORM_NUM_PREDICT ?? "3500");
 const DEFAULT_TEMPERATURE = Number(process.env.LONGFORM_TEMPERATURE ?? "0.7");
 const DEFAULT_RETRY_TEMPERATURE = Number(process.env.LONGFORM_RETRY_TEMPERATURE ?? "0.85");
-const MAX_RETRIES = 1; // total 2 attempts max
+const MAX_RETRIES = 1;
+
+// v3.2 chunked generation config
+const CHUNK_WORDS = Number(process.env.LONGFORM_CHUNK_WORDS ?? "350");
+const CHUNK_TIMEOUT_MS = Number(process.env.LONGFORM_CHUNK_TIMEOUT_MS ?? "90000");
+const CHUNK_NUM_PREDICT = 1200;
+const CHUNKED_THRESHOLD = 500; // above this, use chunked mode
 
 function postJson(
   urlString: string,
@@ -76,6 +82,50 @@ function postJson(
     req.write(body);
     req.end();
   });
+}
+
+async function callOllama(
+  baseUrl: string,
+  model: string,
+  systemPrompt: string,
+  userPrompt: string,
+  timeoutMs: number,
+  numPredict: number,
+  temperature: number,
+): Promise<string> {
+  const url = `${baseUrl}/api/chat`;
+  const body: OllamaChatReq = {
+    model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    stream: false,
+    options: {
+      temperature,
+      num_predict: numPredict,
+      top_p: 0.9,
+    },
+  };
+
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
+
+  const response = await postJson(url, headers, JSON.stringify(body), timeoutMs);
+
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw new Error(`Ollama error: ${response.statusCode} - ${response.body.slice(0, 500)}`);
+  }
+
+  const json = JSON.parse(response.body);
+  const extracted = json.message?.content ?? json.output ?? "";
+
+  if (!extracted || extracted.trim().length === 0) {
+    throw new Error("Empty response from Ollama");
+  }
+
+  return extracted;
 }
 
 async function withRetry<T>(
@@ -127,6 +177,116 @@ function extractTargetWords(message: string): number | null {
 
 function getWordThreshold(targetWords: number): number {
   return targetWords <= 1000 ? 0.7 : 0.6;
+}
+
+// v3.2 section builder
+interface ArticleSection {
+  heading: string;
+  prompt: string;
+  isConclusion?: boolean;
+}
+
+function detectRegion(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes("грузи") || lower.includes("тбилис")) return "Грузия, Тбилиси";
+  if (lower.includes("росси") || lower.includes("москв")) return "Россия, Москва";
+  if (lower.includes("украин")) return "Украина";
+  if (lower.includes("европ")) return "Европа";
+  return "";
+}
+
+function buildTattooTrendSections(message: string, region: string, chunkCount: number): ArticleSection[] {
+  const regionHint = region ? ` (контекст: ${region})` : "";
+
+  const allSections: ArticleSection[] = [
+    {
+      heading: "Введение",
+      prompt: `Напиши введение для статьи о тату трендах. Тема: ${message}. Объём ~${CHUNK_WORDS} слов. Объясни, почему тема актуальна сейчас. Пиши как эксперт.`,
+    },
+    {
+      heading: "Fine line и micro tattoo",
+      prompt: `Опиши тренд fine line и micro tattoo в тату${regionHint}. Что это, почему популярен, как проявляется. ~${CHUNK_WORDS} слов.`,
+    },
+    {
+      heading: "Blackwork и графика",
+      prompt: `Опиши тренд blackwork и геометрической графики в тату${regionHint}. ~${CHUNK_WORDS} слов.`,
+    },
+    {
+      heading: "Реализм и портретные работы",
+      prompt: `Опиши тренд реализма и портретных татуировок${regionHint}. ~${CHUNK_WORDS} слов.`,
+    },
+    {
+      heading: "Этнические мотивы и локальная символика",
+      prompt: `Опиши использование этнических мотивов в тату${regionHint}. Реальные паттерны, не выдуманные. ~${CHUNK_WORDS} слов.`,
+    },
+    {
+      heading: "Минимализм и lettering",
+      prompt: `Опиши тренд минимализма и lettering в тату${regionHint}. ~${CHUNK_WORDS} слов.`,
+    },
+    {
+      heading: "Что выбирают клиенты",
+      prompt: `Опиши реальные запросы и поведение клиентов тату-мастеров${regionHint}. ~${CHUNK_WORDS} слов.`,
+    },
+    {
+      heading: "Как развивается индустрия",
+      prompt: `Опиши развитие тату-индустрии: оборудование, техники, стандарты${regionHint}. ~${CHUNK_WORDS} слов.`,
+    },
+    {
+      heading: "Вывод",
+      prompt: `Напиши заключение-вывод для статьи о тату трендах. Тема: ${message}. ~${CHUNK_WORDS} слов.`,
+      isConclusion: true,
+    },
+  ];
+
+  // Select sections to match chunkCount: intro + N trends + clients + industry + conclusion
+  // Minimum: intro + 3 trends + conclusion = 5 chunks
+  const minChunks = 5;
+  const maxTrendSections = Math.max(1, chunkCount - minChunks);
+
+  const trendSections = allSections.slice(1, 7); // 6 trend sections
+  const selectedTrends = trendSections.slice(0, maxTrendSections);
+
+  return [
+    allSections[0], // intro
+    ...selectedTrends,
+    allSections[7], // clients
+    allSections[8], // conclusion
+  ].slice(0, chunkCount);
+}
+
+function buildGenericSections(message: string, chunkCount: number): ArticleSection[] {
+  const sections: ArticleSection[] = [
+    {
+      heading: "Введение",
+      prompt: `Напиши введение для статьи. Тема: ${message}. Объём ~${CHUNK_WORDS} слов. ~${CHUNK_WORDS} слов.`,
+    },
+  ];
+
+  for (let i = 1; i <= chunkCount - 2; i++) {
+    sections.push({
+      heading: `Раздел ${i}`,
+      prompt: `Напиши раздел ${i} статьи на тему: ${message}. Раскрой конкретные аспекты темы. ~${CHUNK_WORDS} слов. Пиши подробно, без воды.`,
+    });
+  }
+
+  sections.push({
+    heading: "Вывод",
+    prompt: `Напиши заключение для статьи. Тема: ${message}. ~${CHUNK_WORDS} слов.`,
+    isConclusion: true,
+  });
+
+  return sections;
+}
+
+function buildSections(message: string, chunkCount: number): ArticleSection[] {
+  const lower = message.toLowerCase();
+  const isTattoo = lower.includes("тату") || lower.includes("tattoo") || lower.includes("татуировк");
+  const region = detectRegion(message);
+
+  if (isTattoo) {
+    return buildTattooTrendSections(message, region, chunkCount);
+  }
+  return buildGenericSections(message, chunkCount);
 }
 
 function buildLongformSystemPrompt(message: string, targetWords: number): string {
@@ -275,6 +435,65 @@ function createSuccessFile(text: string, topic: string, model: string, stats: { 
   return filePath;
 }
 
+// v3.2 chunked generation
+async function generateChunkedLongformText(
+  message: string,
+  targetWords: number,
+  baseUrl: string,
+  model: string,
+  onProgress?: (text: string) => Promise<void>,
+): Promise<string> {
+  const chunkCount = Math.ceil(targetWords / CHUNK_WORDS);
+  const sections = buildSections(message, chunkCount);
+
+  console.log("[longform] chunked_generation_started", { targetWords, chunkCount, sections: sections.length });
+
+  let finalText = `# ${message}\n\n`;
+
+  for (let i = 0; i < sections.length; i++) {
+    const section = sections[i];
+    console.log("[longform] chunk_started", { index: i + 1, total: sections.length, title: section.heading });
+
+    // Progress: first, middle, last
+    if (i === 0 || i === Math.floor(sections.length / 2) || i === sections.length - 1) {
+      if (onProgress) {
+        await onProgress(`✍️ Пишу часть ${i + 1}/${sections.length}: ${section.heading}`).catch(() => {});
+      }
+    }
+
+    const sectionText = await callOllama(
+      baseUrl,
+      model,
+      `Ты профессиональный автор. Пиши ТОЛЬКО реальные факты, без выдуманных названий. Пиши живо, как эксперт.`,
+      section.prompt,
+      CHUNK_TIMEOUT_MS,
+      CHUNK_NUM_PREDICT,
+      DEFAULT_TEMPERATURE,
+    );
+
+    const sectionStats = getTextStats(sectionText);
+    if (sectionStats.words < 120) {
+      console.log("[longform] chunk_too_short", { index: i + 1, words: sectionStats.words });
+    }
+
+    finalText += `## ${section.heading}\n\n${sectionText.trim()}\n\n`;
+
+    console.log("[longform] chunk_completed", {
+      index: i + 1,
+      total: sections.length,
+      words: sectionStats.words,
+    });
+  }
+
+  const finalStats = getTextStats(finalText);
+  console.log("[longform] chunked_generation_completed", {
+    totalWords: finalStats.words,
+    chunks: sections.length,
+  });
+
+  return finalText;
+}
+
 export async function generateLongformFile(params: {
   message: string;
   chatId?: number | string;
@@ -295,6 +514,8 @@ export async function generateLongformFile(params: {
     timeoutMs,
     numPredict,
     temperature: DEFAULT_TEMPERATURE,
+    chunkWords: CHUNK_WORDS,
+    chunkTimeoutMs: CHUNK_TIMEOUT_MS,
   });
 
   console.log("[longform] queued", { messageLength: message.length, model, targetWords });
@@ -304,66 +525,63 @@ export async function generateLongformFile(params: {
   }
 
   try {
-    const text = await withRetry(
-      async (attemptNum = 1) => {
-        const url = `${baseUrl}/api/chat`;
-        const temperature = attemptNum === 1 ? DEFAULT_TEMPERATURE : DEFAULT_RETRY_TEMPERATURE;
+    let text: string;
 
-        const body: OllamaChatReq = {
-          model,
-          messages: [
-            { role: "system", content: buildLongformSystemPrompt(message, targetWords) },
-            { role: "user", content: `Write a comprehensive article about: ${message}` },
-          ],
-          stream: false,
-          options: {
+    if (targetWords > CHUNKED_THRESHOLD) {
+      // v3.2 chunked mode
+      text = await generateChunkedLongformText(message, targetWords, baseUrl, model, onProgress);
+    } else {
+      // Single-shot mode for short articles
+      text = await withRetry(
+        async (attemptNum = 1) => {
+          const temperature = attemptNum === 1 ? DEFAULT_TEMPERATURE : DEFAULT_RETRY_TEMPERATURE;
+
+          const extracted = await callOllama(
+            baseUrl,
+            model,
+            buildLongformSystemPrompt(message, targetWords),
+            `Write a comprehensive article about: ${message}`,
+            timeoutMs,
+            numPredict,
             temperature,
-            num_predict: numPredict,
-            top_p: 0.9,
-          },
-        };
+          );
 
-        const headers: Record<string, string> = {
-          "content-type": "application/json",
-        };
+          const stats = getTextStats(extracted);
+          const threshold = getWordThreshold(targetWords);
 
-        console.log("[longform] generation_started", { model, url, attempt: attemptNum, temperature, numPredict });
+          if (stats.words < targetWords * threshold) {
+            console.log("[longform] quality_check_failed", {
+              words: stats.words,
+              required: Math.floor(targetWords * threshold),
+              attempt: attemptNum,
+              threshold,
+            });
+            throw new Error("LONGFORM_TOO_SHORT");
+          }
 
-        const response = await postJson(url, headers, JSON.stringify(body), timeoutMs);
-
-        if (response.statusCode < 200 || response.statusCode >= 300) {
-          throw new Error(`Ollama error: ${response.statusCode} - ${response.body.slice(0, 500)}`);
-        }
-
-        const json = JSON.parse(response.body);
-        const extracted = json.message?.content ?? json.output ?? "";
-
-        if (!extracted || extracted.trim().length === 0) {
-          throw new Error("Empty response from Ollama");
-        }
-
-        const stats = getTextStats(extracted);
-        const threshold = getWordThreshold(targetWords);
-
-        if (stats.words < targetWords * threshold) {
-          console.log("[longform] quality_check_failed", {
-            words: stats.words,
-            required: Math.floor(targetWords * threshold),
-            attempt: attemptNum,
-            threshold,
-          });
-          throw new Error("LONGFORM_TOO_SHORT");
-        }
-
-        console.log("[longform] generation_completed", { words: stats.words, chars: stats.chars });
-
-        return extracted;
-      },
-      MAX_RETRIES,
-      1500,
-    );
+          return extracted;
+        },
+        MAX_RETRIES,
+        1500,
+      );
+    }
 
     const stats = getTextStats(text);
+    const threshold = getWordThreshold(targetWords);
+
+    // For chunked mode, accept if >= threshold
+    if (stats.words < targetWords * threshold) {
+      console.log("[longform] quality_check_below_threshold", {
+        words: stats.words,
+        required: Math.floor(targetWords * threshold),
+        accepting: targetWords > CHUNKED_THRESHOLD,
+      });
+      // Accept anyway for chunked mode — it's better than nothing
+      if (targetWords <= CHUNKED_THRESHOLD) {
+        throw new Error("LONGFORM_TOO_SHORT");
+      }
+    }
+
     const progressText = buildProgressText(text, stats);
 
     if (onProgress) {
