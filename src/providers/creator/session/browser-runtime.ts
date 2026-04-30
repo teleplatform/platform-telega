@@ -15,6 +15,10 @@ async function safeEvaluateWithRetry<TResult>(
       await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
       await page.waitForTimeout(1500);
 
+      await page.evaluate(`
+        globalThis.__name = globalThis.__name || ((fn, _name) => fn);
+      `).catch(() => {});
+
       const result = (await page.evaluate(pageFunction, arg)) as TResult;
 
       return { result, success: true, attempts: attempt };
