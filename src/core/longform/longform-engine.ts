@@ -5,13 +5,14 @@ import http from "node:http";
 import https from "node:https";
 
 export interface LongformResult {
-  success: boolean;
-  text: string;
+  status: "done" | "fallback";
   filePath: string;
+  text: string;
+  chars: number;
+  words: number;
+  fallback: boolean;
   model: string;
   latencyMs: number;
-  wordCount: number;
-  charCount: number;
   error?: string;
 }
 
@@ -27,6 +28,7 @@ interface OllamaChatReq {
 }
 
 const LONGFORM_TIMEOUT_MS = 8 * 60 * 1000;
+const MIN_REASONABLE_WORDS = 50;
 
 function postJson(
   urlString: string,
@@ -71,6 +73,41 @@ function postJson(
   });
 }
 
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  retries = 2,
+  delayMs = 1500,
+): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= retries + 1; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+
+      console.log("[longform] generation_retry", {
+        attempt,
+        error: String((err as Error)?.message || err),
+      });
+
+      if (attempt <= retries) {
+        await new Promise((r) => setTimeout(r, delayMs * attempt));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+function getTextStats(text: string) {
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  return {
+    chars: text.length,
+    words,
+  };
+}
+
 function buildLongformSystemPrompt(topic: string): string {
   return [
     "You are an expert long-form content writer.",
@@ -84,6 +121,27 @@ function buildLongformSystemPrompt(topic: string): string {
   ].join("\n\n");
 }
 
+function buildFallbackMarkdown(message: string, reason: string): string {
+  return [
+    "# Long Form Engine: генерация временно недоступна",
+    "",
+    "Запрос пользователя:",
+    "",
+    `> ${message}`,
+    "",
+    "Причина:",
+    `${reason}`,
+    "",
+    "Проверь команды:",
+    "",
+    "```bash",
+    "ollama list",
+    "ollama pull qwen2.5:7b-instruct",
+    "ollama serve",
+    "```",
+  ].join("\n");
+}
+
 function ensureOutputDir(): string {
   const dir = path.join(process.cwd(), "storage", "longform");
   if (!fs.existsSync(dir)) {
@@ -92,117 +150,165 @@ function ensureOutputDir(): string {
   return dir;
 }
 
-function countWords(text: string): number {
-  const trimmed = text.trim();
-  if (!trimmed) return 0;
-  return trimmed.split(/\s+/).length;
+function buildProgressText(text: string, stats: { words: number; chars: number }) {
+  const preview = text.slice(0, 300);
+  return [
+    "📄 Материал готов. Формирую файл...",
+    "",
+    `📊 ${stats.words} слов / ${stats.chars} символов`,
+    "Маршрут: Long Form Engine",
+    "",
+    "Первые строки:",
+    preview,
+  ].join("\n");
 }
 
-export async function generateLongform(
-  topic: string,
-  options?: {
-    model?: string;
-    ollamaUrl?: string;
-    maxTokens?: number;
-  },
-): Promise<LongformResult> {
+function createFallbackFile(message: string, reason: string): { filePath: string; text: string } {
+  const outputDir = ensureOutputDir();
+  const fileName = `longform_fallback_${Date.now()}_${randomUUID().slice(0, 8)}.md`;
+  const filePath = path.join(outputDir, fileName);
+  const text = buildFallbackMarkdown(message, reason);
+
+  fs.writeFileSync(filePath, text, "utf-8");
+  console.log("[longform] fallback_file_created", { filePath });
+
+  return { filePath, text };
+}
+
+function createSuccessFile(text: string, topic: string, model: string, stats: { words: number; chars: number }): string {
+  const outputDir = ensureOutputDir();
+  const fileName = `longform_${Date.now()}_${randomUUID().slice(0, 8)}.md`;
+  const filePath = path.join(outputDir, fileName);
+
+  const frontmatter = [
+    "---",
+    `title: "${topic.replace(/"/g, '\\"')}"`,
+    `generated: ${new Date().toISOString()}`,
+    `model: ${model}`,
+    `word_count: ${stats.words}`,
+    `char_count: ${stats.chars}`,
+    "---",
+    "",
+  ].join("\n");
+
+  fs.writeFileSync(filePath, frontmatter + text, "utf-8");
+  console.log("[longform] file_created", { filePath, words: stats.words, chars: stats.chars });
+
+  return filePath;
+}
+
+export async function generateLongformFile(params: {
+  message: string;
+  chatId?: number | string;
+  onProgress?: (text: string) => Promise<void>;
+}): Promise<LongformResult> {
   const t0 = Date.now();
-  const model = options?.model || process.env.LONGFORM_MODEL || "qwen2.5:7b-instruct";
-  const baseUrl = (options?.ollamaUrl || process.env.OLLAMA_URL || "http://127.0.0.1:11434").replace(/\/+$/, "");
-  const maxTokens = options?.maxTokens || 16384;
+  const { message, onProgress } = params;
 
-  const url = `${baseUrl}/api/chat`;
-  const body: OllamaChatReq = {
-    model,
-    messages: [
-      { role: "system", content: buildLongformSystemPrompt(topic) },
-      { role: "user", content: `Write a comprehensive article about: ${topic}` },
-    ],
-    stream: false,
-    options: {
-      temperature: 0.7,
-      num_predict: maxTokens,
-      top_p: 0.9,
-    },
-  };
+  const model = process.env.LONGFORM_MODEL || "qwen2.5:7b-instruct";
+  const baseUrl = (process.env.OLLAMA_URL || "http://127.0.0.1:11434").replace(/\/+$/, "");
 
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-  };
+  console.log("[longform] queued", { messageLength: message.length, model });
+
+  if (onProgress) {
+    await onProgress("⏳ Генерирую большой материал...");
+  }
 
   try {
-    const response = await postJson(url, headers, JSON.stringify(body), LONGFORM_TIMEOUT_MS);
+    const text = await withRetry(
+      async () => {
+        const url = `${baseUrl}/api/chat`;
+        const body: OllamaChatReq = {
+          model,
+          messages: [
+            { role: "system", content: buildLongformSystemPrompt(message) },
+            { role: "user", content: `Write a comprehensive article about: ${message}` },
+          ],
+          stream: false,
+          options: {
+            temperature: 0.7,
+            num_predict: 16384,
+            top_p: 0.9,
+          },
+        };
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      return {
-        success: false,
-        text: "",
-        filePath: "",
-        model,
-        latencyMs: Date.now() - t0,
-        wordCount: 0,
-        charCount: 0,
-        error: `Ollama error: ${response.statusCode} - ${response.body.slice(0, 500)}`,
-      };
+        const headers: Record<string, string> = {
+          "content-type": "application/json",
+        };
+
+        console.log("[longform] generation_started", { model, url });
+
+        const response = await postJson(url, headers, JSON.stringify(body), LONGFORM_TIMEOUT_MS);
+
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          throw new Error(`Ollama error: ${response.statusCode} - ${response.body.slice(0, 500)}`);
+        }
+
+        const json = JSON.parse(response.body);
+        const extracted = json.message?.content ?? json.output ?? "";
+
+        if (!extracted || extracted.trim().length === 0) {
+          throw new Error("Empty response from Ollama");
+        }
+
+        const stats = getTextStats(extracted);
+
+        if (stats.words < MIN_REASONABLE_WORDS) {
+          throw new Error(`Response too short: ${stats.words} words (minimum ${MIN_REASONABLE_WORDS})`);
+        }
+
+        console.log("[longform] generation_completed", { words: stats.words, chars: stats.chars });
+
+        return extracted;
+      },
+      2,
+      1500,
+    );
+
+    const stats = getTextStats(text);
+    const progressText = buildProgressText(text, stats);
+
+    if (onProgress) {
+      await onProgress(progressText);
+      await onProgress("📤 Отправляю файл...");
     }
 
-    const json = JSON.parse(response.body);
-    let text = json.message?.content ?? json.output ?? "";
+    const filePath = createSuccessFile(text, message, model, stats);
 
-    if (!text) {
-      return {
-        success: false,
-        text: "",
-        filePath: "",
-        model,
-        latencyMs: Date.now() - t0,
-        wordCount: 0,
-        charCount: 0,
-        error: "Empty response from Ollama",
-      };
-    }
-
-    const wordCount = countWords(text);
-    const charCount = text.length;
-
-    const outputDir = ensureOutputDir();
-    const fileName = `longform_${Date.now()}_${randomUUID().slice(0, 8)}.md`;
-    const filePath = path.join(outputDir, fileName);
-
-    const frontmatter = [
-      "---",
-      `title: "${topic.replace(/"/g, '\\"')}"`,
-      `generated: ${new Date().toISOString()}`,
-      `model: ${model}`,
-      `word_count: ${wordCount}`,
-      `char_count: ${charCount}`,
-      "---",
-      "",
-    ].join("\n");
-
-    fs.writeFileSync(filePath, frontmatter + text, "utf-8");
-
-    console.log(`[longform] Generated: ${filePath} (${wordCount} words, ${charCount} chars, ${Date.now() - t0}ms)`);
+    console.log("[longform] completed", { filePath, words: stats.words, chars: stats.chars, latencyMs: Date.now() - t0 });
 
     return {
-      success: true,
-      text,
+      status: "done",
       filePath,
+      text,
+      chars: stats.chars,
+      words: stats.words,
+      fallback: false,
       model,
       latencyMs: Date.now() - t0,
-      wordCount,
-      charCount,
     };
   } catch (e: any) {
+    const errorMessage = e?.message || "Unknown error";
+
+    console.log("[longform] generation_failed", { error: errorMessage, latencyMs: Date.now() - t0 });
+
+    const fallback = createFallbackFile(message, errorMessage);
+    const stats = getTextStats(fallback.text);
+
+    if (onProgress) {
+      await onProgress(`⚠️ Генерация не удалась: ${errorMessage}\n📄 Создан fallback файл.`);
+    }
+
     return {
-      success: false,
-      text: "",
-      filePath: "",
+      status: "fallback",
+      filePath: fallback.filePath,
+      text: fallback.text,
+      chars: stats.chars,
+      words: stats.words,
+      fallback: true,
       model,
       latencyMs: Date.now() - t0,
-      wordCount: 0,
-      charCount: 0,
-      error: e?.message || "Unknown error",
+      error: errorMessage,
     };
   }
 }

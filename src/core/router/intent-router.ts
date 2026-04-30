@@ -15,13 +15,14 @@ const CODE_SIGNALS = [
   "package.json", "node_modules", "webpack", "vite", "esbuild",
   "syntax error", "type error", "runtime error", "stack trace",
   "console.log", "console.error", "throw new", "try {", "catch (",
-  ".ts", ".js", ".tsx", ".jsx", ".py", ".rs", ".go", ".java",
   "pull request", "git commit", "git push", "merge conflict",
   "sigma forge", "forge", "sigma_forge",
   "write a function", "write code", "refactor", "implement",
   "api endpoint", "rest api", "graphql", "database query",
   "sql ", "mongodb", "postgres", "redis",
 ];
+
+const FILE_EXT_PATTERN = /(?:^|\s|[/\\])(?:index\.)?(?:ts|tsx|js|jsx|py|rs|go|java)(?:\s|$|[;,)])/;
 
 const LONGFORM_SIGNALS = [
   "write an article", "write a blog", "write a post", "write an essay",
@@ -35,6 +36,11 @@ const LONGFORM_SIGNALS = [
   "markdown file", "save as", "export as", "document",
   "chapter ", "section ", "introduction", "conclusion",
   "table of contents", "executive summary",
+  "напиши статью", "напиши пост", "напиши блог", "напиши обзор",
+  "напиши гайд", "напиши туториал", "напиши документацию",
+  "напиши отчет", "напиши эссе", "длинная статья", "длинный гайд",
+  "подробная статья", "подробный гайд", "5000 слов", "3000 слов",
+  "статью на", "гайд по", "обзор по",
 ];
 
 function countSignals(message: string, signals: string[]): number {
@@ -107,7 +113,7 @@ export function detectTaskIntent(message: string, options?: { role?: string; met
     return { intent: forced, confidence: 1.0, reason: `forced_${forced}` };
   }
 
-  const codeScore = countSignals(message, CODE_SIGNALS) + (hasCodeBlock(message) ? 2 : 0) + (hasCodeStructure(message) ? 3 : 0);
+  const codeScore = countSignals(message, CODE_SIGNALS) + (hasCodeBlock(message) ? 2 : 0) + (hasCodeStructure(message) ? 3 : 0) + (FILE_EXT_PATTERN.test(message) ? 1 : 0);
   const longformScore = countSignals(message, LONGFORM_SIGNALS);
 
   const estimatedLength = estimateOutputLength(message);

@@ -37,7 +37,9 @@ export type ChatMeta = {
   longform_file_path?: string;
   longform_word_count?: number;
   longform_char_count?: number;
+  longform_fallback?: boolean;
   intent?: string;
+  fallback?: boolean;
 };
 
 export type ChatResponse = {

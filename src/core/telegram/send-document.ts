@@ -147,6 +147,14 @@ export async function sendDocument(options: SendDocumentOptions): Promise<Telegr
   }
 }
 
+export async function sendTelegramMessage(params: {
+  chatId: number | string;
+  text: string;
+  botToken?: string;
+}): Promise<TelegramApiResponse> {
+  return sendMessage(params.chatId, params.text, params.botToken);
+}
+
 export async function sendMessage(chatId: string | number, text: string, botToken?: string): Promise<TelegramApiResponse> {
   const token = botToken || process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
@@ -198,4 +206,13 @@ export async function sendMessage(chatId: string | number, text: string, botToke
     req.write(body);
     req.end();
   });
+}
+
+export function buildLongformCaption(words: number, chars: number): string {
+  return [
+    "📄 Готовый материал",
+    "",
+    `📊 ${words} слов / ${chars} символов`,
+    "Маршрут: Long Form Engine",
+  ].join("\n");
 }

@@ -183,35 +183,87 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
   }
 
   // Route longform tasks to local engine with file delivery
+  // IMPORTANT: Never route longform to openai_web
   if (shouldRouteToLongform(taskIntent) && (!requestedProvider || requestedProvider === "auto")) {
-    console.log(`[router] routing to longform engine: ${taskIntent.estimatedLength || "unknown"} chars estimated`);
+    console.log(`[router] routing to Long Form Engine: ${taskIntent.estimatedLength || "unknown"} chars estimated`);
+
+    const chatId = req.meta?.chat_id;
+    const { generateLongformFile } = await import("./longform/longform-engine.js");
+    const { sendTelegramMessage, sendDocument, buildLongformCaption } = await import("./telegram/send-document.js");
+
+    const progressMessages: string[] = [];
+    const onProgress = async (text: string) => {
+      progressMessages.push(text);
+      console.log(`[router] longform progress: ${text.slice(0, 100)}`);
+      if (chatId) {
+        try {
+          await sendTelegramMessage({ chatId, text });
+        } catch (e) {
+          console.error("[router] longform progress message failed", e);
+        }
+      }
+    };
+
     try {
-      const { generateLongform } = await import("./longform/longform-engine.js");
-      const longformResult = await generateLongform(req.message, {
-        maxTokens: 16384,
+      const longformResult = await generateLongformFile({
+        message: req.message,
+        chatId,
+        onProgress,
       });
 
-      if (longformResult.success) {
+      if (longformResult.status === "done" || longformResult.status === "fallback") {
+        if (chatId && longformResult.filePath) {
+          try {
+            const caption = buildLongformCaption(longformResult.words, longformResult.chars);
+            const docResult = await sendDocument({
+              chatId,
+              filePath: longformResult.filePath,
+              caption,
+            });
+
+            console.log("[router] longform document delivery", {
+              ok: docResult.ok,
+            longform_fallback: longformResult.fallback,
+              messageId: docResult.result?.message_id,
+            });
+          } catch (e) {
+            console.error("[router] longform document delivery failed", e);
+            if (chatId) {
+              await sendTelegramMessage({
+                chatId,
+                text: `⚠️ Файл не удалось отправить: ${longformResult.filePath}`,
+              });
+            }
+          }
+        }
+
         return {
           id: request_id,
           model: `local:${longformResult.model}`,
-          output: `Article generated (${longformResult.wordCount} words). File: ${longformResult.filePath}`,
+          output: longformResult.fallback
+            ? `⚠️ Fallback файл создан: ${longformResult.filePath} (${longformResult.words} слов)`
+            : `📄 Материал готов: ${longformResult.filePath} (${longformResult.words} слов / ${longformResult.chars} символов)`,
           meta: {
             provider: "longform" as any,
             model: longformResult.model,
             longform_file_path: longformResult.filePath,
-            longform_word_count: longformResult.wordCount,
-            longform_char_count: longformResult.charCount,
+            longform_word_count: longformResult.words,
+            longform_char_count: longformResult.chars,
             intent: "longform",
+            fallback: longformResult.fallback,
           },
           request_id,
           latency_ms: Date.now() - t0,
         };
-      } else {
-        console.error("[router] longform engine failed:", longformResult.error);
       }
-    } catch (e) {
-      console.error("[router] longform routing failed", e);
+    } catch (e: any) {
+      console.error("[router] longform engine failed", e?.message || e);
+      if (chatId) {
+        try {
+          const { sendTelegramMessage: notify } = await import("./telegram/send-document.js");
+          await notify({ chatId, text: `⚠️ Long Form Engine ошибка: ${e?.message || "unknown"}` });
+        } catch {}
+      }
     }
   }
   
