@@ -192,77 +192,85 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
     const chatId = req.meta?.chat_id;
     const message = req.message;
 
-    void (async () => {
-      try {
-        console.log("[longform] background_job_started");
-
-        const { sendTelegramMessage, sendDocument, buildLongformCaption } = await import("./telegram/send-document.js");
-        const { generateLongformFile, generateLongformFallbackFile } = await import("../engines/longform/longform-engine.js");
-
-        await sendTelegramMessage({
-          chatId,
-          text: "⏳ Генерирую большой материал...",
-        }).catch(() => {});
-
-        const result = await generateLongformFile({
-          message,
-          chatId,
-          onProgress: async (text) => {
-            await sendTelegramMessage({ chatId, text }).catch(() => {});
-          },
-        });
-
-        await sendTelegramMessage({
-          chatId,
-          text: `📄 Материал готов.\n\n📊 ${result.words} слов / ${result.chars} символов`,
-        }).catch(() => {});
-
-        await sendDocument({
-          chatId,
-          filePath: result.filePath,
-          caption: buildLongformCaption(result.words, result.chars),
-        });
-
-        console.log("[longform] background_delivery_completed");
-      } catch (err) {
-        console.log("[longform] background_job_failed", {
-          error: String((err as Error)?.message || err),
-        });
-
+    try {
+      void (async () => {
         try {
-          const { sendTelegramMessage, sendDocument } = await import("./telegram/send-document.js");
-          const { generateLongformFallbackFile } = await import("../engines/longform/longform-engine.js");
+          console.log("[longform] background_job_started");
 
-          const fallback = await generateLongformFallbackFile({
+          const { sendTelegramMessage, sendDocument, buildLongformCaption } = await import("./telegram/send-document.js");
+          const { generateLongformFile, generateLongformFallbackFile } = await import("../engines/longform/longform-engine.js");
+
+          await sendTelegramMessage({
+            chatId,
+            text: "⏳ Генерирую большой материал...",
+          }).catch(() => {});
+
+          const result = await generateLongformFile({
             message,
-            error: String((err as Error)?.message || err),
+            chatId,
+            onProgress: async (text) => {
+              await sendTelegramMessage({ chatId, text }).catch(() => {});
+            },
           });
+
+          await sendTelegramMessage({
+            chatId,
+            text: `📄 Материал готов.\n\n📊 ${result.words} слов / ${result.chars} символов`,
+          }).catch(() => {});
 
           await sendDocument({
             chatId,
-            filePath: fallback.filePath,
-            caption: "⚠️ Long Form Engine fallback file",
+            filePath: result.filePath,
+            caption: buildLongformCaption(result.words, result.chars),
           });
 
-          console.log("[longform] background_fallback_delivery_completed");
-        } catch (fallbackErr) {
-          console.log("[longform] background_fallback_failed", {
-            error: String((fallbackErr as Error)?.message || fallbackErr),
+          console.log("[longform] background_delivery_completed");
+        } catch (err) {
+          console.log("[longform] background_job_failed", {
+            error: String((err as Error)?.message || err),
           });
 
-          const { sendTelegramMessage } = await import("./telegram/send-document.js");
-          await sendTelegramMessage({
-            chatId,
-            text: "⚠️ Long Form Engine не смог отправить файл. Проверь Ollama и логи.",
-          }).catch(() => {});
+          try {
+            const { sendTelegramMessage, sendDocument } = await import("./telegram/send-document.js");
+            const { generateLongformFallbackFile } = await import("../engines/longform/longform-engine.js");
+
+            const fallback = await generateLongformFallbackFile({
+              message,
+              error: String((err as Error)?.message || err),
+            });
+
+            await sendDocument({
+              chatId,
+              filePath: fallback.filePath,
+              caption: "⚠️ Long Form Engine fallback file",
+            });
+
+            console.log("[longform] background_fallback_delivery_completed");
+          } catch (fallbackErr) {
+            console.log("[longform] background_fallback_failed", {
+              error: String((fallbackErr as Error)?.message || fallbackErr),
+            });
+
+            try {
+              const { sendTelegramMessage } = await import("./telegram/send-document.js");
+              await sendTelegramMessage({
+                chatId,
+                text: "⚠️ Long Form Engine не смог отправить файл. Проверь Ollama и логи.",
+              }).catch(() => {});
+            } catch {}
+          }
         }
-      }
-    })();
+      })();
+    } catch (err) {
+      console.error("[router] longform_background_start_failed", { error: String((err as Error)?.message || err) });
+    }
+
+    console.log("[router] longform_ack_sent");
 
     return {
       id: request_id,
       model: "local:longform-async",
-      output: "⏳ Принял задачу. Генерирую большой материал и отправлю файлом.",
+      output: "⏳ Принял задачу. Генерирую материал и отправлю файлом.",
       meta: {
         provider: "longform" as any,
         model: "longform-async",

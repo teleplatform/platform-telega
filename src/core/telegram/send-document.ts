@@ -94,41 +94,45 @@ function postMultipart(
 }
 
 export async function sendDocument(options: SendDocumentOptions): Promise<TelegramApiResponse> {
-  const botToken = options.botToken || process.env.TELEGRAM_BOT_TOKEN;
-  if (!botToken) {
-    throw new Error("TELEGRAM_BOT_TOKEN is not set");
-  }
-
-  if (!fs.existsSync(options.filePath)) {
-    throw new Error(`File not found: ${options.filePath}`);
-  }
-
-  const fileName = options.filename || path.basename(options.filePath);
-  const fileContent = fs.readFileSync(options.filePath);
-  const fileSize = fileContent.length;
-
-  if (fileSize > 50 * 1024 * 1024) {
-    throw new Error(`File too large: ${fileSize} bytes (max 50MB)`);
-  }
-
-  const fields: Record<string, string> = {
-    chat_id: String(options.chatId),
-  };
-
-  if (options.caption) {
-    fields.caption = options.caption.length > 1024 ? options.caption.slice(0, 1021) + "..." : options.caption;
-    fields.parse_mode = "Markdown";
-  }
-
-  const boundary = buildFormBoundary();
-  const body = buildMultipartBody(boundary, fields, "document", fileName, fileContent);
-
-  const apiUrl = `https://api.telegram.org/bot${botToken}/sendDocument`;
-
   try {
+    const botToken = options.botToken || process.env.TELEGRAM_BOT_TOKEN;
+    if (!botToken) {
+      throw new Error("TELEGRAM_BOT_TOKEN is not set");
+    }
+
+    if (!fs.existsSync(options.filePath)) {
+      throw new Error(`File not found: ${options.filePath}`);
+    }
+
+    const fileName = options.filename || path.basename(options.filePath);
+    const fileContent = fs.readFileSync(options.filePath);
+    const fileSize = fileContent.length;
+
+    if (fileSize > 50 * 1024 * 1024) {
+      throw new Error(`File too large: ${fileSize} bytes (max 50MB)`);
+    }
+
+    const fields: Record<string, string> = {
+      chat_id: String(options.chatId),
+    };
+
+    if (options.caption) {
+      fields.caption = options.caption.length > 1024 ? options.caption.slice(0, 1021) + "..." : options.caption;
+      fields.parse_mode = "Markdown";
+    }
+
+    const boundary = buildFormBoundary();
+    const body = buildMultipartBody(boundary, fields, "document", fileName, fileContent);
+
+    const apiUrl = `https://api.telegram.org/bot${botToken}/sendDocument`;
+
     const response = await postMultipart(apiUrl, body, `multipart/form-data; boundary=${boundary}`);
 
     if (response.statusCode !== 200) {
+      console.error("[telegram] send_document_failed", {
+        statusCode: response.statusCode,
+        body: response.body.slice(0, 500),
+      });
       return {
         ok: false,
         error_code: response.statusCode,
@@ -139,6 +143,7 @@ export async function sendDocument(options: SendDocumentOptions): Promise<Telegr
     const result = JSON.parse(response.body) as TelegramApiResponse;
     return result;
   } catch (e: any) {
+    console.error("[telegram] send_document_exception", { error: e?.message || String(e) });
     return {
       ok: false,
       error_code: 0,
@@ -156,56 +161,64 @@ export async function sendTelegramMessage(params: {
 }
 
 export async function sendMessage(chatId: string | number, text: string, botToken?: string): Promise<TelegramApiResponse> {
-  const token = botToken || process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) {
-    throw new Error("TELEGRAM_BOT_TOKEN is not set");
-  }
+  try {
+    const token = botToken || process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) {
+      throw new Error("TELEGRAM_BOT_TOKEN is not set");
+    }
 
-  const url = `https://api.telegram.org/bot${token}/sendMessage`;
-  const body = JSON.stringify({
-    chat_id: String(chatId),
-    text: text.length > 4096 ? text.slice(0, 4093) + "..." : text,
-    parse_mode: "Markdown",
-  });
-
-  return new Promise((resolve, reject) => {
-    const parsedUrl = new URL(url);
-    const client = parsedUrl.protocol === "https:" ? https : http;
-
-    const req = client.request(
-      {
-        protocol: parsedUrl.protocol,
-        hostname: parsedUrl.hostname,
-        port: parsedUrl.port,
-        path: `${parsedUrl.pathname}${parsedUrl.search}`,
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(body).toString(),
-        },
-      },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-        res.on("end", () => {
-          const responseBody = Buffer.concat(chunks).toString("utf8");
-          try {
-            resolve(JSON.parse(responseBody) as TelegramApiResponse);
-          } catch {
-            resolve({ ok: false, description: responseBody.slice(0, 500) });
-          }
-        });
-      },
-    );
-
-    req.setTimeout(30000, () => {
-      req.destroy(new Error("Telegram sendMessage timeout"));
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    const body = JSON.stringify({
+      chat_id: String(chatId),
+      text: text.length > 4096 ? text.slice(0, 4093) + "..." : text,
+      parse_mode: "Markdown",
     });
 
-    req.on("error", reject);
-    req.write(body);
-    req.end();
-  });
+    return new Promise((resolve, reject) => {
+      const parsedUrl = new URL(url);
+      const client = parsedUrl.protocol === "https:" ? https : http;
+
+      const req = client.request(
+        {
+          protocol: parsedUrl.protocol,
+          hostname: parsedUrl.hostname,
+          port: parsedUrl.port,
+          path: `${parsedUrl.pathname}${parsedUrl.search}`,
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(body).toString(),
+          },
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+          res.on("end", () => {
+            const responseBody = Buffer.concat(chunks).toString("utf8");
+            try {
+              resolve(JSON.parse(responseBody) as TelegramApiResponse);
+            } catch {
+              resolve({ ok: false, error_code: res.statusCode ?? 0, description: responseBody.slice(0, 500) });
+            }
+          });
+        },
+      );
+
+      req.setTimeout(30000, () => {
+        req.destroy(new Error("Telegram sendMessage timeout"));
+      });
+
+      req.on("error", (err) => {
+        console.error("[telegram] send_message_network_error", { error: err.message });
+        resolve({ ok: false, error_code: 0, description: err.message });
+      });
+      req.write(body);
+      req.end();
+    });
+  } catch (e: any) {
+    console.error("[telegram] send_message_exception", { error: e?.message || String(e) });
+    return { ok: false, error_code: 0, description: e?.message || "Unknown error sending message" };
+  }
 }
 
 export function buildLongformCaption(words: number, chars: number): string {

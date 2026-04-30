@@ -5703,6 +5703,14 @@ await ctx.reply("❌ Voice processing failed");
         } else {
           replyMsg = "Chat timed out. Please try again.";
         }
+      } else if (errMsg.includes("Empty /v1/chat response")) {
+        replyMsg = "⚠️ Пустой ответ от сервера. Попробуй ещё раз.";
+      } else if (errMsg.includes("NO_PROVIDER_CONFIGURED") || errMsg.includes("No LLM provider")) {
+        replyMsg = "⚠️ LLM провайдер не настроен. Проверь конфигурацию.";
+      } else if (errMsg.includes("fetch") || errMsg.includes("ECONNREFUSED") || errMsg.includes("ENOTFOUND")) {
+        replyMsg = "⚠️ Не удалось подключиться к серверу. Попробуй позже.";
+      } else if (errMsg && errMsg !== "Empty /v1/chat response") {
+        replyMsg = `⚠️ Ошибка: ${errMsg.slice(0, 100)}`;
       }
       
       console.error("[pantheon-tg] /v1/chat text handler failed", errMsg);
