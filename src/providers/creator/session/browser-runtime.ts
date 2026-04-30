@@ -2,6 +2,58 @@ import { chromium, Browser, Page, BrowserContext } from "playwright";
 import path from "node:path";
 import type { SessionProviderId, SessionState } from "./session-registry.js";
 
+async function safeEvaluateWithRetry<TResult>(
+  page: Page,
+  pageFunction: any,
+  arg?: any,
+  retries = 3
+): Promise<{ result: TResult; success: boolean; attempts: number }> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(1500);
+
+      const result = (await page.evaluate(pageFunction, arg)) as TResult;
+
+      return { result, success: true, attempts: attempt };
+    } catch (err) {
+      lastError = err;
+      const msg = String((err as Error)?.message || err);
+
+      const recoverable =
+        msg.includes("Execution context was destroyed") ||
+        msg.includes("Cannot find context") ||
+        msg.includes("Target closed") ||
+        msg.includes("Frame was detached");
+
+      if (!recoverable) {
+        throw err;
+      }
+
+      console.log("[creator-bridge] extraction_context_destroyed", {
+        attempt,
+        message: msg,
+      });
+
+      if (attempt < retries) {
+        console.log("[creator-bridge] extraction_retry_started", {
+          nextAttempt: attempt + 1,
+        });
+        await page.waitForTimeout(2000);
+      }
+    }
+  }
+
+  console.log("[creator-bridge] extraction_retry_failed", {
+    error: String((lastError as Error)?.message || lastError),
+  });
+
+  throw new Error("EXTRACTION_CONTEXT_DESTROYED_AFTER_RETRIES");
+}
+
+
 export interface SessionBridgeResult {
   success: boolean;
   provider: SessionProviderId;
@@ -322,187 +374,197 @@ async function executeWithCDP(prompt: string, traceId: string): Promise<SessionB
     while ((Date.now() - responseWaitStart) < DEFAULT_RESPONSE_TIMEOUT_MS) {
       await page.waitForTimeout(3000);
       
-      const messages = await page.evaluate(() => {
-        function getVisibleText(el: Element): string {
-          if (!el) return "";
-          try {
-            const range = document.createRange();
-            range.selectNodeContents(el);
-            const sel = window.getSelection();
-            if (sel) {
-              sel.removeAllRanges();
-              sel.addRange(range);
-              const text = sel.toString();
-              sel.removeAllRanges();
-              return text.trim();
-            }
-          } catch {}
-          return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
-        }
-        
-        function getConversationTurns(): Element[] {
-          const selectors = [
-            'article[data-testid*="conversation-turn"]',
-            'article[data-testid*="conversation"]',
-            "[data-testid=conversation-turn]",
-          ];
-          const turns: Element[] = [];
-          for (const sel of selectors) {
+      const messagesEval = await safeEvaluateWithRetry<string>(
+        page,
+        () => {
+          function getVisibleText(el: Element): string {
+            if (!el) return "";
             try {
-              const els = document.querySelectorAll(sel);
-              for (const el of els) {
-                if (!turns.includes(el as Element)) turns.push(el as Element);
+              const range = document.createRange();
+              range.selectNodeContents(el);
+              const sel = window.getSelection();
+              if (sel) {
+                sel.removeAllRanges();
+                sel.addRange(range);
+                const text = sel.toString();
+                sel.removeAllRanges();
+                return text.trim();
               }
             } catch {}
+            return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
           }
-          return turns;
-        }
-        
-        function extractAllTextNodes(root: Element): string[] {
-          const texts: string[] = [];
-          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-          let node: Node | null;
-          while ((node = walker.nextNode())) {
-            const value = node.textContent?.trim() || "";
-            if (value.length > 5 && !value.match(/^(Copy|Edit|Regenerate|Stop)$/)) {
-              texts.push(value);
+          
+          function getConversationTurns(): Element[] {
+            const selectors = [
+              'article[data-testid*="conversation-turn"]',
+              'article[data-testid*="conversation"]',
+              "[data-testid=conversation-turn]",
+            ];
+            const turns: Element[] = [];
+            for (const sel of selectors) {
+              try {
+                const els = document.querySelectorAll(sel);
+                for (const el of els) {
+                  if (!turns.includes(el as Element)) turns.push(el as Element);
+                }
+              } catch {}
             }
+            return turns;
           }
-          return texts;
-        }
-        
-        function deduplicateTexts(texts: string[]): string[] {
-          const seen = new Set<string>();
-          const unique: string[] = [];
-          for (const t of texts) {
-            if (!seen.has(t)) {
-              seen.add(t);
-              unique.push(t);
-            }
-          }
-          return unique;
-        }
-        
-        function getTurnMetrics(turn: Element): { length: number; nodes: number } {
-          const texts = extractAllTextNodes(turn);
-          const unique = deduplicateTexts(texts);
-          const full = unique.join("\n\n");
-          return { length: full.length, nodes: unique.length };
-        }
-        
-        const turns = getConversationTurns();
-        
-        if (turns.length === 0) {
-          const selectors = [
-            '[data-message-author-role="assistant"]',
-            '[class*="message-assistant"]',
-            '[data-testid*="message"]',
-          ];
-          const candidates: { selector: string; text: string }[] = [];
-          for (const sel of selectors) {
-            try {
-              const els = Array.from(document.querySelectorAll(sel));
-              for (const el of els) {
-                const text = getVisibleText(el as HTMLElement);
-                if (text.length > 10) candidates.push({ selector: sel, text });
+          
+          function extractAllTextNodes(root: Element): string[] {
+            const texts: string[] = [];
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            let node: Node | null;
+            while ((node = walker.nextNode())) {
+              const value = node.textContent?.trim() || "";
+              if (value.length > 5 && !value.match(/^(Copy|Edit|Regenerate|Stop)$/)) {
+                texts.push(value);
               }
-            } catch {}
+            }
+            return texts;
           }
-          if (candidates.length === 0) return "";
-          const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
-          console.log(`[creator-bridge] extraction_v10: fallback candidates=${candidates.length} best=${best.text.length}`);
-          return best.text;
-        }
-        
-        const turnMetrics = turns.map((t, i) => ({
-          index: i,
-          ...getTurnMetrics(t),
-        }));
-        
-        const bestTurnData = turnMetrics.sort((a, b) => b.length - a.length)[0];
-        const bestTurn = turns[bestTurnData.index];
-        
-        console.log(`[creator-bridge] extraction_v10: turns=${turns.length} best_index=${bestTurnData.index} best_length=${bestTurnData.length} best_nodes=${bestTurnData.nodes}`);
-        
-const allTexts = extractAllTextNodes(bestTurn);
-        const uniqueTexts = deduplicateTexts(allTexts);
-        
-        return uniqueTexts.join("\n\n");
-      });
+          
+          function deduplicateTexts(texts: string[]): string[] {
+            const seen = new Set<string>();
+            const unique: string[] = [];
+            for (const t of texts) {
+              if (!seen.has(t)) {
+                seen.add(t);
+                unique.push(t);
+              }
+            }
+            return unique;
+          }
+          
+          function getTurnMetrics(turn: Element): { length: number; nodes: number } {
+            const texts = extractAllTextNodes(turn);
+            const unique = deduplicateTexts(texts);
+            const full = unique.join("\n\n");
+            return { length: full.length, nodes: unique.length };
+          }
+          
+          const turns = getConversationTurns();
+          
+          if (turns.length === 0) {
+            const selectors = [
+              '[data-message-author-role="assistant"]',
+              '[class*="message-assistant"]',
+              '[data-testid*="message"]',
+            ];
+            const candidates: { selector: string; text: string }[] = [];
+            for (const sel of selectors) {
+              try {
+                const els = Array.from(document.querySelectorAll(sel));
+                for (const el of els) {
+                  const text = getVisibleText(el as HTMLElement);
+                  if (text.length > 10) candidates.push({ selector: sel, text });
+                }
+              } catch {}
+            }
+            if (candidates.length === 0) return "";
+            const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
+            console.log(`[creator-bridge] extraction_v10: fallback candidates=${candidates.length} best=${best.text.length}`);
+            return best.text;
+          }
+          
+          const turnMetrics = turns.map((t, i) => ({
+            index: i,
+            ...getTurnMetrics(t),
+          }));
+          
+          const bestTurnData = turnMetrics.sort((a, b) => b.length - a.length)[0];
+          const bestTurn = turns[bestTurnData.index];
+          
+          console.log(`[creator-bridge] extraction_v10: turns=${turns.length} best_index=${bestTurnData.index} best_length=${bestTurnData.length} best_nodes=${bestTurnData.nodes}`);
+          
+          const allTexts = extractAllTextNodes(bestTurn);
+          const uniqueTexts = deduplicateTexts(allTexts);
+          
+          return uniqueTexts.join("\n\n");
+        },
+        undefined
+      );
+      const messages = messagesEval.result;
        
        if (messages.length > 0) {
          outputText = messages;
          console.log(`[creator-bridge] response_wait: got ${messages.length} chars, waiting 3s post-stabilization...`);
          await page.waitForTimeout(3000);
          
-         const stabilized = await page.evaluate(() => {
-           function getConversationTurns(): Element[] {
-             const selectors = [
-               'article[data-testid*="conversation-turn"]',
-               'article[data-testid*="conversation"]',
-               "[data-testid=conversation-turn]",
-             ];
-             const turns: Element[] = [];
-             for (const sel of selectors) {
-               try {
-               const els = document.querySelectorAll(sel);
-               for (const el of els) {
-                 if (!turns.includes(el as Element)) turns.push(el as Element);
-               }
-               } catch {}
-             }
-             return turns;
-           }
-           
-           function extractAllTextNodes(root: Element): string[] {
-             const texts: string[] = [];
-             const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-             let node: Node | null;
-             while ((node = walker.nextNode())) {
-               const value = node.textContent?.trim() || "";
-               if (value.length > 5 && !value.match(/^(Copy|Edit|Regenerate|Stop)$/)) {
-                 texts.push(value);
-               }
-             }
-             return texts;
-           }
-           
-           function deduplicateTexts(texts: string[]): string[] {
-             const seen = new Set<string>();
-             const unique: string[] = [];
-             for (const t of texts) {
-               if (!seen.has(t)) {
-                 seen.add(t);
-                 unique.push(t);
-               }
-             }
-             return unique;
-           }
-           
-           function getTurnMetrics(turn: Element): { length: number; nodes: number } {
-             const texts = extractAllTextNodes(turn);
-             const unique = deduplicateTexts(texts);
-             const full = unique.join("\n\n");
-             return { length: full.length, nodes: unique.length };
-           }
-           
-           const turns = getConversationTurns();
-           if (turns.length === 0) return { length: 0, nodes: 0, text: "" };
-           
-           const turnMetrics = turns.map((t, i) => ({
-             index: i,
-             ...getTurnMetrics(t),
-           }));
-           
-           const best = turnMetrics.sort((a, b) => b.length - a.length)[0];
-           const bestTurn = turns[best.index];
-           
-           return {
-             length: best.length,
-             nodes: best.nodes,
-             text: deduplicateTexts(extractAllTextNodes(bestTurn)).join("\n\n"),
-           };
-         });
+          const stabilizedEval = await safeEvaluateWithRetry<{ length: number; nodes: number; text: string }>(
+            page,
+            () => {
+              function getConversationTurns(): Element[] {
+                const selectors = [
+                  'article[data-testid*="conversation-turn"]',
+                  'article[data-testid*="conversation"]',
+                  "[data-testid=conversation-turn]",
+                ];
+                const turns: Element[] = [];
+                for (const sel of selectors) {
+                  try {
+                    const els = document.querySelectorAll(sel);
+                    for (const el of els) {
+                      if (!turns.includes(el as Element)) turns.push(el as Element);
+                    }
+                  } catch {}
+                }
+                return turns;
+              }
+              
+              function extractAllTextNodes(root: Element): string[] {
+                const texts: string[] = [];
+                const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+                let node: Node | null;
+                while ((node = walker.nextNode())) {
+                  const value = node.textContent?.trim() || "";
+                  if (value.length > 5 && !value.match(/^(Copy|Edit|Regenerate|Stop)$/)) {
+                    texts.push(value);
+                  }
+                }
+                return texts;
+              }
+              
+              function deduplicateTexts(texts: string[]): string[] {
+                const seen = new Set<string>();
+                const unique: string[] = [];
+                for (const t of texts) {
+                  if (!seen.has(t)) {
+                    seen.add(t);
+                    unique.push(t);
+                  }
+                }
+                return unique;
+              }
+              
+              function getTurnMetrics(turn: Element): { length: number; nodes: number } {
+                const texts = extractAllTextNodes(turn);
+                const unique = deduplicateTexts(texts);
+                const full = unique.join("\n\n");
+                return { length: full.length, nodes: unique.length };
+              }
+              
+              const turns = getConversationTurns();
+              if (turns.length === 0) return { length: 0, nodes: 0, text: "" };
+              
+              const turnMetrics = turns.map((t, i) => ({
+                index: i,
+                ...getTurnMetrics(t),
+              }));
+              
+              const best = turnMetrics.sort((a, b) => b.length - a.length)[0];
+              const bestTurn = turns[best.index];
+              
+              return {
+                length: best.length,
+                nodes: best.nodes,
+                text: deduplicateTexts(extractAllTextNodes(bestTurn)).join("\n\n"),
+              };
+            },
+            undefined
+          );
+          const stabilized = stabilizedEval.result;
          
          console.log(`[creator-bridge] post_stabilization: final ${stabilized.length} chars, ${stabilized.nodes} nodes`);
          
@@ -693,96 +755,101 @@ async function executeQwenWithCDP(prompt: string, traceId: string): Promise<Sess
     while ((Date.now() - responseWaitStart) < DEFAULT_RESPONSE_TIMEOUT_MS) {
       await page.waitForTimeout(3000);
 
-      const messages = await page.evaluate(() => {
-        function getConversationTurns(): Element[] {
-          const selectors = [
-            'article[data-testid*="conversation-turn"]',
-            'article[data-testid*="conversation"]',
-            "[data-testid=conversation-turn]",
-          ];
-          const turns: Element[] = [];
-          for (const sel of selectors) {
+      const messagesEval = await safeEvaluateWithRetry<string>(
+        page,
+        () => {
+          function getConversationTurns(): Element[] {
+            const selectors = [
+              'article[data-testid*="conversation-turn"]',
+              'article[data-testid*="conversation"]',
+              "[data-testid=conversation-turn]",
+            ];
+            const turns: Element[] = [];
+            for (const sel of selectors) {
+              try {
+                const els = document.querySelectorAll(sel);
+                for (const el of els) {
+                  if (!turns.includes(el as Element)) turns.push(el as Element);
+                }
+              } catch {}
+            }
+            return turns;
+          }
+
+          function extractAllTextNodes(root: Element): string[] {
+            const texts: string[] = [];
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            let node: Node | null;
+            while ((node = walker.nextNode())) {
+              const value = node.textContent?.trim() || "";
+              if (value.length > 5 && !value.match(/^(Copy|Edit|Regenerate|Stop)$/)) {
+                texts.push(value);
+              }
+            }
+            return texts;
+          }
+
+          function deduplicateTexts(texts: string[]): string[] {
+            const seen = new Set<string>();
+            const unique: string[] = [];
+            for (const t of texts) {
+              if (!seen.has(t)) {
+                seen.add(t);
+                unique.push(t);
+              }
+            }
+            return unique;
+          }
+
+          function getVisibleText(el: Element): string {
+            if (!el) return "";
             try {
-              const els = document.querySelectorAll(sel);
-              for (const el of els) {
-                if (!turns.includes(el as Element)) turns.push(el as Element);
+              const range = document.createRange();
+              range.selectNodeContents(el);
+              const sel = window.getSelection();
+              if (sel) {
+                sel.removeAllRanges();
+                sel.addRange(range);
+                const text = sel.toString();
+                sel.removeAllRanges();
+                return text.trim();
               }
             } catch {}
+            return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
           }
-          return turns;
-        }
 
-        function extractAllTextNodes(root: Element): string[] {
-          const texts: string[] = [];
-          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-          let node: Node | null;
-          while ((node = walker.nextNode())) {
-            const value = node.textContent?.trim() || "";
-            if (value.length > 5 && !value.match(/^(Copy|Edit|Regenerate|Stop)$/)) {
-              texts.push(value);
+          const turns = getConversationTurns();
+          const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
+
+          if (!lastTurn) {
+            const selectors = [
+              '[data-message-author-role="assistant"]',
+              '[class*="message-assistant"]',
+              '[data-testid*="message"]',
+            ];
+            const candidates: { selector: string; text: string }[] = [];
+            for (const sel of selectors) {
+              try {
+                const els = Array.from(document.querySelectorAll(sel));
+                for (const el of els) {
+                  const text = getVisibleText(el as HTMLElement);
+                  if (text.length > 10) candidates.push({ selector: sel, text });
+                }
+              } catch {}
             }
+            if (candidates.length === 0) return "";
+            const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
+            return best.text;
           }
-          return texts;
-        }
 
-        function deduplicateTexts(texts: string[]): string[] {
-          const seen = new Set<string>();
-          const unique: string[] = [];
-          for (const t of texts) {
-            if (!seen.has(t)) {
-              seen.add(t);
-              unique.push(t);
-            }
-          }
-          return unique;
-        }
+          const allTexts = extractAllTextNodes(lastTurn);
+          const uniqueTexts = deduplicateTexts(allTexts);
 
-        function getVisibleText(el: Element): string {
-          if (!el) return "";
-          try {
-            const range = document.createRange();
-            range.selectNodeContents(el);
-            const sel = window.getSelection();
-            if (sel) {
-              sel.removeAllRanges();
-              sel.addRange(range);
-              const text = sel.toString();
-              sel.removeAllRanges();
-              return text.trim();
-            }
-          } catch {}
-          return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
-        }
-
-        const turns = getConversationTurns();
-        const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
-
-        if (!lastTurn) {
-          const selectors = [
-            '[data-message-author-role="assistant"]',
-            '[class*="message-assistant"]',
-            '[data-testid*="message"]',
-          ];
-          const candidates: { selector: string; text: string }[] = [];
-          for (const sel of selectors) {
-            try {
-              const els = Array.from(document.querySelectorAll(sel));
-              for (const el of els) {
-                const text = getVisibleText(el as HTMLElement);
-                if (text.length > 10) candidates.push({ selector: sel, text });
-              }
-            } catch {}
-          }
-          if (candidates.length === 0) return "";
-          const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
-          return best.text;
-        }
-
-        const allTexts = extractAllTextNodes(lastTurn);
-        const uniqueTexts = deduplicateTexts(allTexts);
-
-        return uniqueTexts.join("\n\n");
-      });
+          return uniqueTexts.join("\n\n");
+        },
+        undefined
+      );
+      const messages = messagesEval.result;
       
       if (messages.length > 0) {
         outputText = messages;
@@ -968,53 +1035,58 @@ async function executeDeepSeekWithCDP(prompt: string, traceId: string): Promise<
     while ((Date.now() - responseWaitStart) < DEFAULT_RESPONSE_TIMEOUT_MS) {
       await page.waitForTimeout(3000);
       
-      const messages = await page.evaluate(() => {
-        function getVisibleText(el: Element): string {
-          if (!el) return "";
-          try {
-            const range = document.createRange();
-            range.selectNodeContents(el);
-            const sel = window.getSelection();
-            if (sel) {
-              sel.removeAllRanges();
-              sel.addRange(range);
-              const text = sel.toString();
-              sel.removeAllRanges();
-              return text.trim();
-            }
-          } catch {}
-          return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
-        }
-        
-        const selectors = [
-          '[data-message-author-role="assistant"]',
-          '[class*="message-assistant"]',
-          '[data-testid*="message"]',
-          '[role="article"]',
-        ];
-        
-        const candidates: { selector: string; text: string }[] = [];
-        
-        for (const sel of selectors) {
-          try {
-            const els = Array.from(document.querySelectorAll(sel));
-            for (const el of els) {
-              const text = getVisibleText(el as HTMLElement);
-              if (text.length > 10) {
-                candidates.push({ selector: sel, text });
+      const messagesEval = await safeEvaluateWithRetry<string>(
+        page,
+        () => {
+          function getVisibleText(el: Element): string {
+            if (!el) return "";
+            try {
+              const range = document.createRange();
+              range.selectNodeContents(el);
+              const sel = window.getSelection();
+              if (sel) {
+                sel.removeAllRanges();
+                sel.addRange(range);
+                const text = sel.toString();
+                sel.removeAllRanges();
+                return text.trim();
               }
-            }
-          } catch {}
-        }
-        
-        if (candidates.length === 0) {
-          return "";
-        }
-        
-        const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
-        
-        return best.text;
-      });
+            } catch {}
+            return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
+          }
+          
+          const selectors = [
+            '[data-message-author-role="assistant"]',
+            '[class*="message-assistant"]',
+            '[data-testid*="message"]',
+            '[role="article"]',
+          ];
+          
+          const candidates: { selector: string; text: string }[] = [];
+          
+          for (const sel of selectors) {
+            try {
+              const els = Array.from(document.querySelectorAll(sel));
+              for (const el of els) {
+                const text = getVisibleText(el as HTMLElement);
+                if (text.length > 10) {
+                  candidates.push({ selector: sel, text });
+                }
+              }
+            } catch {}
+          }
+          
+          if (candidates.length === 0) {
+            return "";
+          }
+          
+          const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
+          
+          return best.text;
+        },
+        undefined
+      );
+      const messages = messagesEval.result;
       
       if (messages.length > 0) {
         outputText = messages;
@@ -1205,53 +1277,58 @@ async function executeGrokWithCDP(prompt: string, traceId: string): Promise<Sess
     while ((Date.now() - responseWaitStart) < DEFAULT_RESPONSE_TIMEOUT_MS) {
       await page.waitForTimeout(3000);
       
-      const messages = await page.evaluate(() => {
-        function getVisibleText(el: Element): string {
-          if (!el) return "";
-          try {
-            const range = document.createRange();
-            range.selectNodeContents(el);
-            const sel = window.getSelection();
-            if (sel) {
-              sel.removeAllRanges();
-              sel.addRange(range);
-              const text = sel.toString();
-              sel.removeAllRanges();
-              return text.trim();
-            }
-          } catch {}
-          return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
-        }
-        
-        const selectors = [
-          '[data-message-author-role="assistant"]',
-          '[class*="message-assistant"]',
-          '[data-testid*="message"]',
-          '[role="article"]',
-        ];
-        
-        const candidates: { selector: string; text: string }[] = [];
-        
-        for (const sel of selectors) {
-          try {
-            const els = Array.from(document.querySelectorAll(sel));
-            for (const el of els) {
-              const text = getVisibleText(el as HTMLElement);
-              if (text.length > 10) {
-                candidates.push({ selector: sel, text });
+      const messagesEval = await safeEvaluateWithRetry<string>(
+        page,
+        () => {
+          function getVisibleText(el: Element): string {
+            if (!el) return "";
+            try {
+              const range = document.createRange();
+              range.selectNodeContents(el);
+              const sel = window.getSelection();
+              if (sel) {
+                sel.removeAllRanges();
+                sel.addRange(range);
+                const text = sel.toString();
+                sel.removeAllRanges();
+                return text.trim();
               }
-            }
-          } catch {}
-        }
-        
-        if (candidates.length === 0) {
-          return "";
-        }
-        
-        const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
-        
-        return best.text;
-      });
+            } catch {}
+            return ((el as HTMLElement).innerText || (el as HTMLElement).textContent || "").trim();
+          }
+          
+          const selectors = [
+            '[data-message-author-role="assistant"]',
+            '[class*="message-assistant"]',
+            '[data-testid*="message"]',
+            '[role="article"]',
+          ];
+          
+          const candidates: { selector: string; text: string }[] = [];
+          
+          for (const sel of selectors) {
+            try {
+              const els = Array.from(document.querySelectorAll(sel));
+              for (const el of els) {
+                const text = getVisibleText(el as HTMLElement);
+                if (text.length > 10) {
+                  candidates.push({ selector: sel, text });
+                }
+              }
+            } catch {}
+          }
+          
+          if (candidates.length === 0) {
+            return "";
+          }
+          
+          const best = candidates.sort((a, b) => b.text.length - a.text.length)[0];
+          
+          return best.text;
+        },
+        undefined
+      );
+      const messages = messagesEval.result;
       
       if (messages.length > 0) {
         outputText = messages;
