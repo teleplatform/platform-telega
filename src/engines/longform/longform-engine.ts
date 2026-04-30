@@ -41,6 +41,31 @@ const CHUNK_TIMEOUT_MS = Number(process.env.LONGFORM_CHUNK_TIMEOUT_MS ?? "90000"
 const CHUNK_NUM_PREDICT = 1200;
 const CHUNKED_THRESHOLD = 500; // above this, use chunked mode
 
+type FastMode = "aggressive" | "balanced" | "full";
+
+function detectFastMode(targetWords: number): FastMode {
+  if (targetWords >= 1000) return "aggressive";
+  if (targetWords >= 600) return "balanced";
+  return "full";
+}
+
+interface FastModeProfile {
+  chunkWords: number;
+  chunkTimeoutMs: number;
+  numPredict: number;
+}
+
+function applyFastProfile(fastMode: FastMode): FastModeProfile {
+  switch (fastMode) {
+    case "aggressive":
+      return { chunkWords: 220, chunkTimeoutMs: 60000, numPredict: 800 };
+    case "balanced":
+      return { chunkWords: 280, chunkTimeoutMs: 90000, numPredict: 1000 };
+    case "full":
+      return { chunkWords: 350, chunkTimeoutMs: 120000, numPredict: 1200 };
+  }
+}
+
 // v3.3+v3.5 anti-hallucination + claim safety
 const FORBIDDEN_PATTERNS = [
   "плазменные пушки",
@@ -883,6 +908,7 @@ async function generateChunkedLongformText(
   baseUrl: string,
   model: string,
   onProgress?: (text: string) => Promise<void>,
+  fastModeProfile?: FastModeProfile,
 ): Promise<string> {
   const mode = detectLongformMode(message);
   const title = buildTitle(message, mode);
@@ -894,10 +920,18 @@ async function generateChunkedLongformText(
   const outline = await generateOutline(baseUrl, model, message, targetWords, mode);
 
   // Step 2: build sections from outline
-  const sections = buildSectionsFromOutline(outline, message, region, mode);
+  let sections = buildSectionsFromOutline(outline, message, region, mode);
+
+  // Limit chunks to max 6
+  if (sections.length > 6) {
+    sections = sections.slice(0, 6);
+    console.log("[longform] chunks_limited", { from: outline.length, to: 6 });
+  }
 
   console.log("[longform] mode_applied", { mode, sections: sections.length });
   console.log("[longform] outline_used", { sections: sections.length, outline });
+
+  const profile = fastModeProfile ?? { chunkWords: CHUNK_WORDS, chunkTimeoutMs: CHUNK_TIMEOUT_MS, numPredict: CHUNK_NUM_PREDICT };
 
   // Step 3: generate each section
   const chunks: Array<{ heading: string; text: string }> = [];
@@ -926,8 +960,8 @@ async function generateChunkedLongformText(
           model,
           ANTI_HALLUCINATION_SYSTEM_PROMPT,
           prompt,
-          CHUNK_TIMEOUT_MS,
-          CHUNK_NUM_PREDICT,
+          profile.chunkTimeoutMs,
+          profile.numPredict,
           temp,
         );
 
@@ -968,7 +1002,20 @@ async function generateChunkedLongformText(
     throw new Error("LONGFORM_TOO_FEW_SECTIONS");
   }
 
-  // Step 5: rewrite pass (editor layer) with mode
+  const finalWords = getTextStats(rawText).words;
+  if (finalWords >= targetWords * 0.6) {
+    console.log("[longform] early_accept_chunked", {
+      words: finalWords,
+      required60: Math.floor(targetWords * 0.6),
+    });
+    return rawText;
+  }
+
+  if (fastModeProfile?.numPredict === 800) {
+    console.log("[longform] rewrite_skipped_fast_mode", { mode: "aggressive", words: finalWords });
+    return rawText;
+  }
+
   const improvedText = await rewriteLongformText(baseUrl, model, rawText, mode);
 
   const finalStats = getTextStats(improvedText);
@@ -997,16 +1044,24 @@ export async function generateLongformFile(params: {
 
   const targetWords = extractTargetWords(message) || 800;
   const mode = detectLongformMode(message);
+  const fastMode = detectFastMode(targetWords);
+  const fastProfile = applyFastProfile(fastMode);
 
   console.log("[longform] mode_detected", { mode });
+  console.log("[longform] fast_mode_selected", {
+    mode: fastMode,
+    chunkWords: fastProfile.chunkWords,
+    timeout: fastProfile.chunkTimeoutMs,
+    numPredict: fastProfile.numPredict,
+  });
 
   console.log("[longform] model_profile", {
     model,
     timeoutMs,
     numPredict,
     temperature: DEFAULT_TEMPERATURE,
-    chunkWords: CHUNK_WORDS,
-    chunkTimeoutMs: CHUNK_TIMEOUT_MS,
+    chunkWords: fastProfile.chunkWords,
+    chunkTimeoutMs: fastProfile.chunkTimeoutMs,
   });
 
   console.log("[longform] queued", { messageLength: message.length, model, targetWords });
@@ -1019,7 +1074,7 @@ export async function generateLongformFile(params: {
     let text: string;
 
     if (targetWords > CHUNKED_THRESHOLD) {
-      text = await generateChunkedLongformText(message, targetWords, baseUrl, model, onProgress);
+      text = await generateChunkedLongformText(message, targetWords, baseUrl, model, onProgress, fastProfile);
     } else {
       text = await withRetry(
         async (attemptNum = 1) => {
@@ -1031,7 +1086,7 @@ export async function generateLongformFile(params: {
             ANTI_HALLUCINATION_SYSTEM_PROMPT,
             buildLongformSystemPrompt(message, targetWords, mode),
             timeoutMs,
-            numPredict,
+            fastProfile.numPredict,
             temperature,
           );
 
@@ -1044,6 +1099,16 @@ export async function generateLongformFile(params: {
           validateRussianOnly(extracted);
 
           const stats = getTextStats(extracted);
+
+          if (stats.words >= targetWords * 0.6) {
+            console.log("[longform] early_accept", {
+              words: stats.words,
+              required60: Math.floor(targetWords * 0.6),
+              fastMode,
+            });
+            return extracted;
+          }
+
           const threshold = getWordThreshold(targetWords);
 
           if (stats.words < targetWords * threshold) {
@@ -1064,7 +1129,7 @@ export async function generateLongformFile(params: {
 
           return extracted;
         },
-        MAX_RETRIES,
+        fastMode === "aggressive" ? 0 : MAX_RETRIES,
         1500,
       );
 
@@ -1077,7 +1142,13 @@ export async function generateLongformFile(params: {
     const stats = getTextStats(text);
     const threshold = getWordThreshold(targetWords);
 
-    if (stats.words < targetWords * threshold) {
+    if (stats.words >= targetWords * 0.6) {
+      console.log("[longform] early_accept", {
+        words: stats.words,
+        required60: Math.floor(targetWords * 0.6),
+        fastMode,
+      });
+    } else if (stats.words < targetWords * threshold) {
       console.log("[longform] quality_check_below_threshold", {
         words: stats.words,
         required: Math.floor(targetWords * threshold),
@@ -1088,7 +1159,17 @@ export async function generateLongformFile(params: {
       }
     }
 
-    const progressText = buildProgressText(text, stats);
+    let finalText = text;
+
+    if (fastMode === "aggressive") {
+      console.log("[longform] rewrite_skipped_fast_mode", { fastMode, words: stats.words });
+    } else {
+      finalText = await rewriteLongformText(baseUrl, model, text, mode);
+    }
+
+    const finalStats = getTextStats(finalText);
+
+    const progressText = buildProgressText(finalText, finalStats);
 
     if (onProgress) {
       await onProgress(progressText);
@@ -1097,8 +1178,8 @@ export async function generateLongformFile(params: {
 
     if (mode === "telegram" && chatId) {
       try {
-        const previewLength = text.length > 1200 ? 1200 : text.length > 800 ? 800 : text.length;
-        const previewText = text.slice(0, previewLength) + "\n\n📄 Полный материал — в файле ниже.";
+        const previewLength = finalText.length > 1200 ? 1200 : finalText.length > 800 ? 800 : finalText.length;
+        const previewText = finalText.slice(0, previewLength) + "\n\n📄 Полный материал — в файле ниже.";
         const { sendTelegramMessage } = await import("../../core/telegram/send-document.js");
         await sendTelegramMessage({ chatId, text: previewText }).catch(() => {});
         console.log("[longform] telegram_preview_sent", { previewLength });
@@ -1107,16 +1188,16 @@ export async function generateLongformFile(params: {
       }
     }
 
-    const filePath = createSuccessFile(text, message, model, stats);
+    const filePath = createSuccessFile(finalText, message, model, finalStats);
 
-    console.log("[longform] completed", { filePath, words: stats.words, chars: stats.chars, latencyMs: Date.now() - t0 });
+    console.log("[longform] completed", { filePath, words: finalStats.words, chars: finalStats.chars, latencyMs: Date.now() - t0 });
 
     return {
       status: "done",
       filePath,
-      text,
-      chars: stats.chars,
-      words: stats.words,
+      text: finalText,
+      chars: finalStats.chars,
+      words: finalStats.words,
       fallback: false,
       model,
       latencyMs: Date.now() - t0,
