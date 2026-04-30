@@ -27,9 +27,13 @@ interface OllamaChatReq {
   };
 }
 
-const LONGFORM_TIMEOUT_MS = 8 * 60 * 1000;
-const MIN_REASONABLE_WORDS = 50;
-const WORD_COUNT_THRESHOLD = 0.8;
+// v3.1 fast local profile — configurable via env
+const DEFAULT_MODEL = process.env.LONGFORM_MODEL ?? "qwen2.5:3b-instruct";
+const DEFAULT_TIMEOUT_MS = Number(process.env.LONGFORM_TIMEOUT_MS ?? "120000");
+const DEFAULT_NUM_PREDICT = Number(process.env.LONGFORM_NUM_PREDICT ?? "3500");
+const DEFAULT_TEMPERATURE = Number(process.env.LONGFORM_TEMPERATURE ?? "0.7");
+const DEFAULT_RETRY_TEMPERATURE = Number(process.env.LONGFORM_RETRY_TEMPERATURE ?? "0.85");
+const MAX_RETRIES = 1; // total 2 attempts max
 
 function postJson(
   urlString: string,
@@ -65,7 +69,7 @@ function postJson(
     );
 
     req.setTimeout(timeoutMs, () => {
-      req.destroy(new Error(`Longform request timed out after ${timeoutMs}ms`));
+      req.destroy(new Error(`LONGFORM_TIMEOUT_FAST_AFTER_${timeoutMs}ms`));
     });
 
     req.on("error", reject);
@@ -76,7 +80,7 @@ function postJson(
 
 async function withRetry<T>(
   fn: (attempt: number) => Promise<T>,
-  retries = 2,
+  retries = MAX_RETRIES,
   delayMs = 1500,
 ): Promise<T> {
   let lastError: unknown;
@@ -121,6 +125,10 @@ function extractTargetWords(message: string): number | null {
   return null;
 }
 
+function getWordThreshold(targetWords: number): number {
+  return targetWords <= 1000 ? 0.7 : 0.6;
+}
+
 function buildLongformSystemPrompt(message: string, targetWords: number): string {
   return [
     "Ты профессиональный автор и эксперт по тату-культуре.",
@@ -160,12 +168,22 @@ function buildLongformSystemPrompt(message: string, targetWords: number): string
     "",
     "Ограничения:",
     `- минимум ${targetWords} слов`,
-    `- не меньше 80% от заданного объёма`,
+    `- не меньше ${Math.floor(targetWords * 0.8)} слов (80% от заданного объёма)`,
     "- цельный текст без обрывов",
   ].join("\n");
 }
 
-function buildFallbackMarkdown(message: string, reason: string): string {
+function buildFallbackMarkdown(
+  message: string,
+  reason: string,
+  profile: { model: string; timeoutMs: number; numPredict: number; targetWords: number },
+): string {
+  const isTimeout = reason.includes("LONGFORM_TIMEOUT") || reason.includes("timed out");
+
+  const reasonText = isTimeout
+    ? "Локальная модель не успела сгенерировать материал в заданный лимит."
+    : reason;
+
   return [
     "# Long Form Engine: генерация временно недоступна",
     "",
@@ -174,13 +192,19 @@ function buildFallbackMarkdown(message: string, reason: string): string {
     `> ${message}`,
     "",
     "Причина:",
-    `${reason}`,
+    `${reasonText}`,
+    "",
+    "Параметры генерации:",
+    `- Модель: ${profile.model}`,
+    `- Таймаут: ${profile.timeoutMs}ms`,
+    `- Max tokens: ${profile.numPredict}`,
+    `- Целевой объём: ${profile.targetWords} слов`,
     "",
     "Проверь команды:",
     "",
     "```bash",
     "ollama list",
-    "ollama pull qwen2.5:7b-instruct",
+    `ollama pull ${profile.model}`,
     "ollama serve",
     "```",
   ].join("\n");
@@ -207,11 +231,21 @@ function buildProgressText(text: string, stats: { words: number; chars: number }
   ].join("\n");
 }
 
-function createFallbackFile(message: string, reason: string): { filePath: string; text: string } {
+function createFallbackFile(
+  message: string,
+  reason: string,
+  profile?: { model: string; timeoutMs: number; numPredict: number; targetWords: number },
+): { filePath: string; text: string } {
   const outputDir = ensureOutputDir();
   const fileName = `longform_fallback_${Date.now()}_${randomUUID().slice(0, 8)}.md`;
   const filePath = path.join(outputDir, fileName);
-  const text = buildFallbackMarkdown(message, reason);
+  const defaultProfile = {
+    model: DEFAULT_MODEL,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    numPredict: DEFAULT_NUM_PREDICT,
+    targetWords: 800,
+  };
+  const text = buildFallbackMarkdown(message, reason, profile ?? defaultProfile);
 
   fs.writeFileSync(filePath, text, "utf-8");
   console.log("[longform] fallback_file_created", { filePath });
@@ -249,22 +283,31 @@ export async function generateLongformFile(params: {
   const t0 = Date.now();
   const { message, onProgress } = params;
 
-  const model = process.env.LONGFORM_MODEL || "qwen2.5:7b-instruct";
+  const model = DEFAULT_MODEL;
+  const timeoutMs = DEFAULT_TIMEOUT_MS;
+  const numPredict = DEFAULT_NUM_PREDICT;
   const baseUrl = (process.env.OLLAMA_URL || "http://127.0.0.1:11434").replace(/\/+$/, "");
 
-  console.log("[longform] queued", { messageLength: message.length, model });
+  const targetWords = extractTargetWords(message) || 800;
+
+  console.log("[longform] model_profile", {
+    model,
+    timeoutMs,
+    numPredict,
+    temperature: DEFAULT_TEMPERATURE,
+  });
+
+  console.log("[longform] queued", { messageLength: message.length, model, targetWords });
 
   if (onProgress) {
     await onProgress("⏳ Генерирую большой материал...");
   }
 
   try {
-    const targetWords = extractTargetWords(message) || 800;
-
     const text = await withRetry(
       async (attemptNum = 1) => {
         const url = `${baseUrl}/api/chat`;
-        const temperature = attemptNum === 1 ? 0.7 : 0.9;
+        const temperature = attemptNum === 1 ? DEFAULT_TEMPERATURE : DEFAULT_RETRY_TEMPERATURE;
 
         const body: OllamaChatReq = {
           model,
@@ -275,7 +318,7 @@ export async function generateLongformFile(params: {
           stream: false,
           options: {
             temperature,
-            num_predict: 8000,
+            num_predict: numPredict,
             top_p: 0.9,
           },
         };
@@ -284,9 +327,9 @@ export async function generateLongformFile(params: {
           "content-type": "application/json",
         };
 
-        console.log("[longform] generation_started", { model, url, attempt: attemptNum, temperature });
+        console.log("[longform] generation_started", { model, url, attempt: attemptNum, temperature, numPredict });
 
-        const response = await postJson(url, headers, JSON.stringify(body), LONGFORM_TIMEOUT_MS);
+        const response = await postJson(url, headers, JSON.stringify(body), timeoutMs);
 
         if (response.statusCode < 200 || response.statusCode >= 300) {
           throw new Error(`Ollama error: ${response.statusCode} - ${response.body.slice(0, 500)}`);
@@ -300,12 +343,14 @@ export async function generateLongformFile(params: {
         }
 
         const stats = getTextStats(extracted);
+        const threshold = getWordThreshold(targetWords);
 
-        if (stats.words < targetWords * WORD_COUNT_THRESHOLD) {
+        if (stats.words < targetWords * threshold) {
           console.log("[longform] quality_check_failed", {
             words: stats.words,
-            required: Math.floor(targetWords * WORD_COUNT_THRESHOLD),
+            required: Math.floor(targetWords * threshold),
             attempt: attemptNum,
+            threshold,
           });
           throw new Error("LONGFORM_TOO_SHORT");
         }
@@ -314,7 +359,7 @@ export async function generateLongformFile(params: {
 
         return extracted;
       },
-      2,
+      MAX_RETRIES,
       1500,
     );
 
@@ -345,7 +390,12 @@ export async function generateLongformFile(params: {
 
     console.log("[longform] generation_failed", { error: errorMessage, latencyMs: Date.now() - t0 });
 
-    const fallback = createFallbackFile(message, errorMessage);
+    const fallback = createFallbackFile(message, errorMessage, {
+      model,
+      timeoutMs,
+      numPredict,
+      targetWords,
+    });
     const stats = getTextStats(fallback.text);
 
     if (onProgress) {
