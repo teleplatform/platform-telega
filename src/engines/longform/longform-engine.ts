@@ -14,6 +14,9 @@ export interface LongformResult {
   model: string;
   latencyMs: number;
   error?: string;
+  productOutput?: ProductOutput;
+  productMode?: ProductMode;
+  formattedType?: string;
 }
 
 interface OllamaChatReq {
@@ -182,6 +185,7 @@ function countSections(text: string): number {
 }
 
 type LongformMode = "expert" | "seo" | "telegram" | "social";
+type ProductMode = "product" | "service" | "ad" | null;
 
 function detectLongformMode(message: string): LongformMode {
   const text = message.toLowerCase();
@@ -191,12 +195,112 @@ function detectLongformMode(message: string): LongformMode {
   return "expert";
 }
 
+function detectProductMode(message: string): ProductMode {
+  const text = message.toLowerCase();
+  if (text.includes("карточка товара") || text.includes("карточку товара") || text.includes("описание товара")) return "product";
+  if (text.includes("услуга") || text.includes("услуги") || text.includes("сервис")) return "service";
+  if (text.includes("реклама") || text.includes("рекламный") || text.includes("ad text")) return "ad";
+  return null;
+}
+
+interface ProductCardOutput {
+  name: string;
+  description: string;
+  shortDescription: string;
+  tags: string[];
+}
+
+interface AdTextOutput {
+  title: string;
+  offer: string;
+  cta: string;
+}
+
+interface ServiceCardOutput {
+  serviceName: string;
+  description: string;
+  benefits: string[];
+  price: string;
+}
+
+type ProductOutput = ProductCardOutput | AdTextOutput | ServiceCardOutput;
+
 const MODE_INSTRUCTIONS: Record<LongformMode, string> = {
   expert: "Спокойный экспертный стиль. Объясняй подробно, структурированная подача, профессиональная терминология.",
   seo: "SEO-статья. Используй H2/H3 заголовки с ключевыми словами. Избегай воды. Подзаголовки должны содержать ключи. Чёткая структура.",
   telegram: "Короткие абзацы (1–3 строки). Простой язык. Легко читается. Как пост для Telegram-канала. Без перегрузки.",
   social: "Цепляющий эмоциональный стиль. Короткие блоки. Вовлечение аудитории. Без длинных объяснений. Яркие описания.",
 };
+
+function formatProductCard(text: string): ProductCardOutput {
+  const lines = text.split("\n").filter(Boolean);
+  const name = lines[0]?.replace(/^#+\s*/, "") || "Товар";
+  const firstParagraph = lines.slice(1).find((l) => l.length > 50) || "";
+  const shortDesc = firstParagraph.slice(0, 150).replace(/\n/g, " ");
+  const tagWords = text
+    .split(/\s+/)
+    .filter((w) => /^[а-яёa-z]{4,}$/i.test(w))
+    .slice(0, 8)
+    .map((w) => w.toLowerCase().replace(/[.,;:!?"()]/g, ""));
+
+  return {
+    name,
+    description: text.slice(0, 1000),
+    shortDescription: shortDesc,
+    tags: [...new Set(tagWords)],
+  };
+}
+
+function formatTelegramPost(text: string): string {
+  const clean = text
+    .replace(/^#{1,3}\s+.+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  const paragraphs = clean.split("\n\n").filter(Boolean);
+  const result: string[] = [];
+
+  for (const p of paragraphs.slice(0, 5)) {
+    const trimmed = p.trim();
+    if (trimmed.length > 4000) continue;
+    result.push(trimmed);
+  }
+
+  return result.slice(0, 3).join("\n\n");
+}
+
+function formatAdText(text: string): AdTextOutput {
+  const lines = text.split("\n").filter(Boolean);
+  const firstLine = lines[0]?.replace(/^#+\s*/, "").slice(0, 60) || "";
+  const firstParagraph = lines.slice(1).find((l) => l.length > 30) || "";
+
+  const ctaOptions = ["Подробнее", "Узнать больше", "Заказать сейчас", "Записаться", "Оставить заявку"];
+  const cta = ctaOptions[Math.floor(Math.random() * ctaOptions.length)];
+
+  return {
+    title: firstLine,
+    offer: firstParagraph.slice(0, 300),
+    cta,
+  };
+}
+
+function formatServiceCard(text: string): ServiceCardOutput {
+  const lines = text.split("\n").filter(Boolean);
+  const name = lines[0]?.replace(/^#+\s*/, "") || "Услуга";
+  const firstParagraph = lines.slice(1).find((l) => l.length > 50) || "";
+
+  const benefitLines = text
+    .match(/[-•]\s*(.+)/g)
+    ?.slice(0, 5)
+    .map((m) => m.replace(/^[-•]\s*/, "")) || [];
+
+  return {
+    serviceName: name,
+    description: text.slice(0, 800),
+    benefits: benefitLines.length > 0 ? benefitLines : ["Индивидуальный подход", "Гарантия качества"],
+    price: "По договорённости",
+  };
+}
 
 function buildTitle(message: string, mode?: LongformMode): string {
   const title = message
@@ -1044,10 +1148,14 @@ export async function generateLongformFile(params: {
 
   const targetWords = extractTargetWords(message) || 800;
   const mode = detectLongformMode(message);
+  const productMode = detectProductMode(message);
   const fastMode = detectFastMode(targetWords);
   const fastProfile = applyFastProfile(fastMode);
 
   console.log("[longform] mode_detected", { mode });
+  if (productMode) {
+    console.log("[longform] product_mode_applied", { productMode });
+  }
   console.log("[longform] fast_mode_selected", {
     mode: fastMode,
     chunkWords: fastProfile.chunkWords,
@@ -1169,22 +1277,67 @@ export async function generateLongformFile(params: {
 
     const finalStats = getTextStats(finalText);
 
+    let formattedOutput: string | ProductOutput | null = null;
+    let formattedLog = "";
+
+    if (productMode === "product") {
+      formattedOutput = formatProductCard(finalText);
+      formattedLog = "product_card";
+    } else if (productMode === "service") {
+      formattedOutput = formatServiceCard(finalText);
+      formattedLog = "service_card";
+    } else if (productMode === "ad") {
+      formattedOutput = formatAdText(finalText);
+      formattedLog = "ad_text";
+    } else if (mode === "telegram") {
+      formattedOutput = formatTelegramPost(finalText);
+      formattedLog = "telegram_post";
+    }
+
+    if (formattedOutput) {
+      console.log("[longform] output_formatted", {
+        type: formattedLog,
+        output: JSON.stringify(formattedOutput).slice(0, 300),
+      });
+    }
+
     const progressText = buildProgressText(finalText, finalStats);
 
     if (onProgress) {
       await onProgress(progressText);
+      if (formattedOutput && productMode) {
+        await onProgress(`📦 Формат: ${formattedLog}\n${JSON.stringify(formattedOutput, null, 2).slice(0, 500)}`);
+      }
       await onProgress("📤 Отправляю файл...");
     }
 
-    if (mode === "telegram" && chatId) {
+    if (chatId) {
       try {
-        const previewLength = finalText.length > 1200 ? 1200 : finalText.length > 800 ? 800 : finalText.length;
-        const previewText = finalText.slice(0, previewLength) + "\n\n📄 Полный материал — в файле ниже.";
         const { sendTelegramMessage } = await import("../../core/telegram/send-document.js");
-        await sendTelegramMessage({ chatId, text: previewText }).catch(() => {});
-        console.log("[longform] telegram_preview_sent", { previewLength });
+
+        if (formattedOutput && productMode === "product") {
+          const card = formattedOutput as ProductCardOutput;
+          const cardText = `📦 *${card.name}*\n\n${card.shortDescription}\n\n🏷 Теги: ${card.tags.slice(0, 5).join(", ")}\n\n📄 Полный файл ниже.`;
+          await sendTelegramMessage({ chatId, text: cardText }).catch(() => {});
+          console.log("[longform] product_card_sent", { name: card.name });
+        } else if (formattedOutput && productMode === "ad") {
+          const ad = formattedOutput as AdTextOutput;
+          const adText = `📢 *${ad.title}*\n\n${ad.offer}\n\n👉 ${ad.cta}`;
+          await sendTelegramMessage({ chatId, text: adText }).catch(() => {});
+          console.log("[longform] ad_text_sent", { title: ad.title });
+        } else if (formattedOutput && productMode === "service") {
+          const svc = formattedOutput as ServiceCardOutput;
+          const svcText = `🛠 *${svc.serviceName}*\n\n${svc.benefits.slice(0, 3).map((b) => `✅ ${b}`).join("\n")}\n\n💰 ${svc.price}\n\n📄 Полный файл ниже.`;
+          await sendTelegramMessage({ chatId, text: svcText }).catch(() => {});
+          console.log("[longform] service_card_sent", { name: svc.serviceName });
+        } else if (mode === "telegram" && typeof formattedOutput === "string") {
+          const previewLength = finalText.length > 1200 ? 1200 : finalText.length > 800 ? 800 : finalText.length;
+          const previewText = finalText.slice(0, previewLength) + "\n\n📄 Полный материал — в файле ниже.";
+          await sendTelegramMessage({ chatId, text: previewText }).catch(() => {});
+          console.log("[longform] telegram_preview_sent", { previewLength });
+        }
       } catch (err) {
-        console.log("[longform] telegram_preview_failed", { error: String((err as Error)?.message || err) });
+        console.log("[longform] telegram_send_failed", { error: String((err as Error)?.message || err) });
       }
     }
 
@@ -1201,6 +1354,9 @@ export async function generateLongformFile(params: {
       fallback: false,
       model,
       latencyMs: Date.now() - t0,
+      productOutput: formattedOutput && typeof formattedOutput !== "string" ? formattedOutput : undefined,
+      productMode,
+      formattedType: formattedLog || undefined,
     };
   } catch (e: any) {
     const errorMessage = e?.message || "Unknown error";
@@ -1229,6 +1385,9 @@ export async function generateLongformFile(params: {
       model,
       latencyMs: Date.now() - t0,
       error: errorMessage,
+      productOutput: undefined,
+      productMode,
+      formattedType: undefined,
     };
   }
 }
