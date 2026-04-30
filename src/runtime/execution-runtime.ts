@@ -1,8 +1,8 @@
-import { ChatSession, BridgeOutput } from "../../chat-types";
-import { ProviderRouter } from "../../provider-router";
-import { ResponseExtractor } from "../../response-extractor";
-import { OutputClassifier } from "../../output-normalization";
-import { TelegramRenderer, TelegramRenderResult } from "../../telegram-renderer";
+import { ChatSession, BridgeOutput } from "../types/chat-session";
+import { ProviderRouter } from "../provider/provider-router";
+import { ResponseExtractor } from "../server/middleware/response-extractor";
+import { OutputClassifier } from "../server/middleware/output-normalization";
+import { TelegramRenderer, TelegramRenderResult } from "../surfaces/telegram/renderer";
 
 export class ExecutionRuntime {
   /**

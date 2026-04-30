@@ -1,5 +1,5 @@
-import { BridgeSelectors } from "./response-extractor";
-import { ProviderKind, ProviderProfile, ProviderProfileRegistry, RuntimeRole } from "./chat-types";
+import { BridgeSelectors } from "../server/middleware/response-extractor";
+import { ProviderKind, ProviderProfile, ProviderProfileRegistry, RuntimeRole } from "../types/chat-session";
 
 /**
  * Контракт адаптера провайдера (PHASE 2)

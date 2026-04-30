@@ -1,4 +1,4 @@
-import { ChatSession, RuntimeSessionState, ProviderKind } from "./chat-types";
+import { ChatSession, RuntimeSessionState, ProviderKind } from "../../types/chat-session";
 import crypto from "crypto";
 
 export function createNewChat(state: RuntimeSessionState, provider: ProviderKind = "openai_api"): ChatSession {

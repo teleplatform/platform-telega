@@ -1,5 +1,5 @@
-import { ProviderRouter, PROVIDERS } from "./provider-router";
-import { ChatSession, RuntimeSessionState, FeatureModuleId, FeatureStatus } from "./chat-types";
+import { ProviderRouter, PROVIDERS } from "../../provider/provider-router";
+import { ChatSession, RuntimeSessionState, FeatureModuleId, FeatureStatus } from "../../types/chat-session";
 import { resetToNewChat } from "./session-reset";
 
 const FEATURE_REGISTRY: Record<FeatureModuleId, { status: FeatureStatus; role: string }> = {

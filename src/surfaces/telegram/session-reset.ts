@@ -1,4 +1,4 @@
-import { ChatSession } from "./chat-types";
+import { ChatSession } from "../../types/chat-session";
 import crypto from "crypto";
 
 export async function resetToNewChat(
