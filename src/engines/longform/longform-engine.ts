@@ -156,14 +156,36 @@ function countSections(text: string): number {
   return matches ? matches.length : 0;
 }
 
-function buildTitle(message: string): string {
-  return message
+type LongformMode = "expert" | "seo" | "telegram" | "social";
+
+function detectLongformMode(message: string): LongformMode {
+  const text = message.toLowerCase();
+  if (text.includes("телеграм")) return "telegram";
+  if (text.includes("seo") || text.includes("ключевые слова")) return "seo";
+  if (text.includes("инстаграм") || text.includes("instagram") || text.includes("пост")) return "social";
+  return "expert";
+}
+
+const MODE_INSTRUCTIONS: Record<LongformMode, string> = {
+  expert: "Спокойный экспертный стиль. Объясняй подробно, структурированная подача, профессиональная терминология.",
+  seo: "SEO-статья. Используй H2/H3 заголовки с ключевыми словами. Избегай воды. Подзаголовки должны содержать ключи. Чёткая структура.",
+  telegram: "Короткие абзацы (1–3 строки). Простой язык. Легко читается. Как пост для Telegram-канала. Без перегрузки.",
+  social: "Цепляющий эмоциональный стиль. Короткие блоки. Вовлечение аудитории. Без длинных объяснений. Яркие описания.",
+};
+
+function buildTitle(message: string, mode?: LongformMode): string {
+  const title = message
     .replace(/^напиши статью на \d+ слов про /i, "")
     .replace(/^напиши статью про /i, "")
     .replace(/^write an article about /i, "")
     .replace(/^статья на тему /i, "")
     .trim()
     .replace(/^./, (c) => c.toUpperCase());
+
+  if (mode === "telegram" && title.length > 60) {
+    return title.slice(0, 57) + "...";
+  }
+  return title;
 }
 
 function postJson(
@@ -315,18 +337,22 @@ interface ArticleSection {
   isConclusion?: boolean;
 }
 
-// v3.4 outline-first generation
+// v3.4+v5 outline-first generation with mode
 async function generateOutline(
   baseUrl: string,
   model: string,
   message: string,
   targetWords: number,
+  mode: LongformMode,
 ): Promise<string[]> {
+  const modeHint = MODE_INSTRUCTIONS[mode] || MODE_INSTRUCTIONS.expert;
+
   const outlinePrompt = [
     `Составь план статьи (ТОЛЬКО список разделов, без текста):`,
     "",
     `Тема: ${message}`,
     `Целевой объём: ${targetWords} слов`,
+    `Стиль: ${modeHint}`,
     "",
     "Требования:",
     "- 6–9 разделов",
@@ -345,7 +371,7 @@ async function generateOutline(
     model,
     "Ты профессиональный редактор. Составляй чёткие планы статей.",
     outlinePrompt,
-    30000,
+    60000,
     400,
     0.5,
   );
@@ -371,6 +397,7 @@ function buildSectionPromptFromOutline(
   sectionIndex: number,
   totalSections: number,
   regionHint: string,
+  mode: LongformMode,
 ): string {
   const isTrendSection = /тренд|направлен|стиль|популярн/i.test(sectionTitle);
   const isFirst = sectionIndex === 0;
@@ -382,10 +409,18 @@ function buildSectionPromptFromOutline(
     extraInstructions = `\nОпиши минимум 5 реальных направлений: fine line, blackwork, realism, minimalism, lettering, dotwork, traditional.`;
   }
 
+  const modeRule: Record<LongformMode, string> = {
+    expert: "Пиши спокойно и экспертно. Объясняй подробно, структурированная подача.",
+    seo: "Используй ключевые слова в заголовках и тексте. Чёткие H2/H3. Без воды.",
+    telegram: "Пиши короткими абзацами, легко читаемо, как пост для канала.",
+    social: "Пиши эмоционально, цепляюще, без длинных объяснений.",
+  };
+
   if (isFirst) {
     return [
       `Напиши введение для статьи. Тема: ${message}${regionHint}.`,
-      `Объём ~${CHUNK_WORDS} слов. Объясни, почему тема актуальна сейчас. Пиши как эксперт.`,
+      `Объём ~${CHUNK_WORDS} слов. Объясни, почему тема актуальна сейчас.`,
+      `${modeRule[mode]}`,
       extraInstructions,
     ].filter(Boolean).join("\n");
   }
@@ -394,14 +429,16 @@ function buildSectionPromptFromOutline(
     return [
       `Напиши заключение-вывод для раздела "${sectionTitle}". Тема: ${message}.`,
       `Объём ~${CHUNK_WORDS} слов. Подведи итоги статьи.`,
-    ].join("\n");
+      `${modeRule[mode]}`,
+    ].filter(Boolean).join("\n");
   }
 
   return [
     `Напиши ТОЛЬКО раздел "${sectionTitle}" статьи на тему: ${message}${regionHint}.`,
     "Не пиши всю статью.",
     "Не делай вывод, если это не последний раздел.",
-    `Объём ~${CHUNK_WORDS} слов. Пиши подробно, без воды.`,
+    `Объём ~${CHUNK_WORDS} слов. Пиши подробно.`,
+    `${modeRule[mode]}`,
     extraInstructions,
   ].filter(Boolean).join("\n");
 }
@@ -410,6 +447,7 @@ function buildSectionsFromOutline(
   outline: string[],
   message: string,
   region: string,
+  mode: LongformMode,
 ): ArticleSection[] {
   const regionHint = region ? ` (контекст: ${region})` : "";
   const total = outline.length;
@@ -418,7 +456,7 @@ function buildSectionsFromOutline(
     const safeTitle = sanitizeSectionTitle(title);
     return {
       heading: safeTitle,
-      prompt: buildSectionPromptFromOutline(message, safeTitle, i, total, regionHint),
+      prompt: buildSectionPromptFromOutline(message, safeTitle, i, total, regionHint, mode),
       isConclusion: i === total - 1,
     };
   });
@@ -586,31 +624,62 @@ function buildSections(message: string, chunkCount: number): ArticleSection[] {
   return buildGenericSections(message, chunkCount);
 }
 
-function buildLongformSystemPrompt(message: string, targetWords: number): string {
+function buildLongformSystemPrompt(message: string, targetWords: number, mode: LongformMode = "expert"): string {
+  const modeLayer = MODE_INSTRUCTIONS[mode] || MODE_INSTRUCTIONS.expert;
+
+  const structureRules = mode === "seo"
+    ? [
+        "Структура ОБЯЗАТЕЛЬНА с H2/H3:",
+        "",
+        `# ${buildTitle(message, mode)}`,
+        "",
+        "## Введение (почему тема актуальна, с ключевыми словами)",
+        "",
+        "## Основные тренды (H2/H3 с ключевыми словами)",
+        "Каждый тренд:",
+        "- что это",
+        "- почему популярен",
+        "- как проявляется",
+        "",
+        "## Что выбирают клиенты",
+        "",
+        "## Работа мастеров",
+        "",
+        "## Будущее индустрии",
+        "",
+        "## Вывод",
+      ]
+    : [
+        "Структура ОБЯЗАТЕЛЬНА:",
+        "",
+        `# ${buildTitle(message, mode)}`,
+        "",
+        "## Введение (почему тема актуальна)",
+        "",
+        "## Основные тренды (минимум 5-7 пунктов)",
+        "Каждый тренд:",
+        "- что это",
+        "- почему популярен",
+        "- как проявляется",
+        "",
+        "## Что выбирают клиенты",
+        "",
+        "## Работа мастеров",
+        "",
+        "## Будущее индустрии",
+        "",
+        "## Вывод",
+      ];
+
   return [
     ANTI_HALLUCINATION_SYSTEM_PROMPT,
     "",
+    `Режим: ${mode.toUpperCase()}`,
+    modeLayer,
+    "",
     `Задача:\n${message}`,
     "",
-    "Структура ОБЯЗАТЕЛЬНА:",
-    "",
-    `# ${buildTitle(message)}`,
-    "",
-    "## Введение (почему тема актуальна)",
-    "",
-    "## Основные тренды (минимум 5-7 пунктов)",
-    "Каждый тренд:",
-    "- что это",
-    "- почему популярен",
-    "- как проявляется",
-    "",
-    "## Что выбирают клиенты",
-    "",
-    "## Работа мастеров",
-    "",
-    "## Будущее индустрии",
-    "",
-    "## Вывод",
+    ...structureRules,
     "",
     "Ограничения:",
     `- минимум ${targetWords} слов`,
@@ -730,27 +799,35 @@ function createSuccessFile(text: string, topic: string, model: string, stats: { 
   return filePath;
 }
 
-// v4 rewrite pass (editor layer)
+// v4+v5 rewrite pass (editor layer) with mode awareness
 async function rewriteLongformText(
   baseUrl: string,
   model: string,
   rawText: string,
+  mode: LongformMode = "expert",
 ): Promise<string> {
   const rawWords = getTextStats(rawText).words;
 
-  console.log("[longform] rewrite_started", { rawWords });
+  console.log("[longform] rewrite_started", { rawWords, mode });
+
+  const modeRules: Record<LongformMode, string> = {
+    expert: "Улучши стиль, сделай язык более живым и естественным. Сохрани экспертный тон. Убери канцелярщину.",
+    seo: "Усили структуру: чёткие H2/H3 заголовки с ключевыми словами. Убери воду и повторы. Сделай текст плотным и информативным.",
+    telegram: "Сократи длинные предложения. Разбей длинные абзацы на короткие (1–3 строки). Сделай текст лёгким для чтения в Telegram.",
+    social: "Усиль эмоции. Сделай текст более цепляющим. Короткие яркие блоки. Добавь вовлечение. Убери скучные объяснения.",
+  };
 
   const rewritePrompt = [
     "Ты редактор.",
     "",
-    "Перепиши текст:",
+    `Режим: ${mode.toUpperCase()}`,
+    modeRules[mode],
+    "",
+    "Общие правила:",
     "- убери повторы",
-    "- сделай язык живым и естественным",
-    "- укороти длинные предложения",
-    "- убери канцелярщину",
     "- сохрани смысл",
     "- не добавляй новую информацию",
-    "- не меняй структуру",
+    "- не меняй структуру разделов",
     "",
     "Верни полный текст.",
     "",
@@ -787,6 +864,7 @@ async function rewriteLongformText(
       improvedWords,
       originalChars: rawText.length,
       improvedChars: improvedText.length,
+      mode,
     });
 
     return improvedText;
@@ -798,7 +876,7 @@ async function rewriteLongformText(
   }
 }
 
-// v3.4 chunked generation with outline-first + anti-hallucination
+// v3.4+v5 chunked generation with outline-first + anti-hallucination + mode
 async function generateChunkedLongformText(
   message: string,
   targetWords: number,
@@ -806,15 +884,19 @@ async function generateChunkedLongformText(
   model: string,
   onProgress?: (text: string) => Promise<void>,
 ): Promise<string> {
-  const title = buildTitle(message);
+  const mode = detectLongformMode(message);
+  const title = buildTitle(message, mode);
   const region = detectRegion(message);
 
+  console.log("[longform] mode_detected", { mode, message: message.slice(0, 80) });
+
   // Step 1: generate outline
-  const outline = await generateOutline(baseUrl, model, message, targetWords);
+  const outline = await generateOutline(baseUrl, model, message, targetWords, mode);
 
   // Step 2: build sections from outline
-  const sections = buildSectionsFromOutline(outline, message, region);
+  const sections = buildSectionsFromOutline(outline, message, region, mode);
 
+  console.log("[longform] mode_applied", { mode, sections: sections.length });
   console.log("[longform] outline_used", { sections: sections.length, outline });
 
   // Step 3: generate each section
@@ -886,14 +968,15 @@ async function generateChunkedLongformText(
     throw new Error("LONGFORM_TOO_FEW_SECTIONS");
   }
 
-  // Step 5: rewrite pass (editor layer)
-  const improvedText = await rewriteLongformText(baseUrl, model, rawText);
+  // Step 5: rewrite pass (editor layer) with mode
+  const improvedText = await rewriteLongformText(baseUrl, model, rawText, mode);
 
   const finalStats = getTextStats(improvedText);
   console.log("[longform] chunked_generation_completed", {
     totalWords: finalStats.words,
     chunks: sections.length,
     sections: sectionCount,
+    mode,
   });
 
   return improvedText;
@@ -905,7 +988,7 @@ export async function generateLongformFile(params: {
   onProgress?: (text: string) => Promise<void>;
 }): Promise<LongformResult> {
   const t0 = Date.now();
-  const { message, onProgress } = params;
+  const { message, chatId, onProgress } = params;
 
   const model = DEFAULT_MODEL;
   const timeoutMs = DEFAULT_TIMEOUT_MS;
@@ -913,6 +996,9 @@ export async function generateLongformFile(params: {
   const baseUrl = (process.env.OLLAMA_URL || "http://127.0.0.1:11434").replace(/\/+$/, "");
 
   const targetWords = extractTargetWords(message) || 800;
+  const mode = detectLongformMode(message);
+
+  console.log("[longform] mode_detected", { mode });
 
   console.log("[longform] model_profile", {
     model,
@@ -943,7 +1029,7 @@ export async function generateLongformFile(params: {
             baseUrl,
             model,
             ANTI_HALLUCINATION_SYSTEM_PROMPT,
-            buildLongformSystemPrompt(message, targetWords),
+            buildLongformSystemPrompt(message, targetWords, mode),
             timeoutMs,
             numPredict,
             temperature,
@@ -982,7 +1068,7 @@ export async function generateLongformFile(params: {
         1500,
       );
 
-      const title = buildTitle(message);
+      const title = buildTitle(message, mode);
       if (!text.startsWith("# ")) {
         text = `# ${title}\n\n${text}`;
       }
@@ -1007,6 +1093,18 @@ export async function generateLongformFile(params: {
     if (onProgress) {
       await onProgress(progressText);
       await onProgress("📤 Отправляю файл...");
+    }
+
+    if (mode === "telegram" && chatId) {
+      try {
+        const previewLength = text.length > 1200 ? 1200 : text.length > 800 ? 800 : text.length;
+        const previewText = text.slice(0, previewLength) + "\n\n📄 Полный материал — в файле ниже.";
+        const { sendTelegramMessage } = await import("../../core/telegram/send-document.js");
+        await sendTelegramMessage({ chatId, text: previewText }).catch(() => {});
+        console.log("[longform] telegram_preview_sent", { previewLength });
+      } catch (err) {
+        console.log("[longform] telegram_preview_failed", { error: String((err as Error)?.message || err) });
+      }
     }
 
     const filePath = createSuccessFile(text, message, model, stats);
