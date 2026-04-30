@@ -41,7 +41,7 @@ const CHUNK_TIMEOUT_MS = Number(process.env.LONGFORM_CHUNK_TIMEOUT_MS ?? "90000"
 const CHUNK_NUM_PREDICT = 1200;
 const CHUNKED_THRESHOLD = 500; // above this, use chunked mode
 
-// v3.3 anti-hallucination
+// v3.3+v3.5 anti-hallucination + claim safety
 const FORBIDDEN_PATTERNS = [
   "плазменные пушки",
   "биозиготы",
@@ -56,36 +56,43 @@ const FORBIDDEN_PATTERNS = [
   "биоимплант",
   "нейро-чернила",
   "квантов",
+  "электронные импланты",
+  "тату-код",
+  "ультразвуковое сканирование",
+  "цифровые плазменные",
+  "врачи проводят",
+  "официальные стандарты",
+  "обязательная сертификация",
+  "санитария на высшем уровне",
+  "3d-модели имплантов",
+  "低调",
+  "微",
 ];
 
-const ALLOWED_TATTOO_STYLES = [
+const ALLOWED_LATIN_TERMS = [
   "fine line",
   "blackwork",
   "realism",
-  "реализм",
   "micro tattoo",
   "lettering",
-  "минимализм",
   "minimalism",
   "traditional",
   "neo-traditional",
-  "нео-традишнл",
-  "графика",
   "dotwork",
-  "дотворк",
-  "акварель",
+  "old school",
+  "new school",
   "watercolor",
-  "геометрия",
   "ornamental",
-  "орнаментал",
-  "якудза",
   "irezumi",
-  "blackwork",
-  "блэкворк",
-  "графика",
-  "портрет",
-  "портретная работа",
 ];
+
+const RISKY_SECTION_TITLES: Record<string, string> = {
+  "стандарты безопасности при выполнении татуировок": "Как выбрать безопасную студию",
+  "современные технологии в тату-индустрии": "Современный подход мастеров",
+  "медицинские аспекты тату": "Что важно знать перед татуировкой",
+  "законодательство о татуировках": "Правовые аспекты тату-индустрии",
+  "официальные требования к мастерам": "Квалификация и опыт мастеров",
+};
 
 function checkForbiddenWords(text: string): string | null {
   const lower = text.toLowerCase();
@@ -95,6 +102,53 @@ function checkForbiddenWords(text: string): string | null {
     }
   }
   return null;
+}
+
+function validateRussianOnly(text: string): void {
+  const cjkPattern = /[\u3400-\u9FFF\uF900-\uFAFF]/;
+  if (cjkPattern.test(text)) {
+    console.log("[longform] language_mix_detected", { type: "cjk_characters" });
+    throw new Error("LONGFORM_LANGUAGE_MIX_DETECTED");
+  }
+
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return;
+
+  let latinWordCount = 0;
+  const latinWordPattern = /^[a-zA-Z][a-zA-Z'-]*$/;
+
+  for (const word of words) {
+    if (latinWordPattern.test(word)) {
+      const lowerWord = word.toLowerCase().replace(/[.,;:!?()"'-]/g, "");
+      const isAllowed = ALLOWED_LATIN_TERMS.some(
+        (term) => lowerWord === term.toLowerCase() || term.toLowerCase().includes(lowerWord)
+      );
+      if (!isAllowed) {
+        latinWordCount++;
+      }
+    }
+  }
+
+  const latinRatio = latinWordCount / words.length;
+  if (latinRatio > 0.08) {
+    console.log("[longform] language_mix_detected", {
+      type: "excessive_latin",
+      ratio: Math.round(latinRatio * 100) + "%",
+      threshold: "8%",
+    });
+    throw new Error("LONGFORM_LANGUAGE_MIX_DETECTED");
+  }
+}
+
+function sanitizeSectionTitle(title: string): string {
+  const lower = title.toLowerCase().trim();
+  for (const [risky, safe] of Object.entries(RISKY_SECTION_TITLES)) {
+    if (lower.includes(risky)) {
+      console.log("[longform] risky_title_replaced", { from: title, to: safe });
+      return safe;
+    }
+  }
+  return title;
 }
 
 function countSections(text: string): number {
@@ -216,6 +270,8 @@ async function withRetry<T>(
         console.log("[longform] retry_due_to_short_output", { attempt });
       } else if ((err as Error)?.message === "LONGFORM_HALLUCINATION_DETECTED") {
         console.log("[longform] retry_due_to_hallucination", { attempt });
+      } else if ((err as Error)?.message === "LONGFORM_LANGUAGE_MIX_DETECTED") {
+        console.log("[longform] retry_due_to_language_mix", { attempt });
       } else {
         console.log("[longform] generation_retry", {
           attempt,
@@ -358,11 +414,14 @@ function buildSectionsFromOutline(
   const regionHint = region ? ` (контекст: ${region})` : "";
   const total = outline.length;
 
-  return outline.map((title, i) => ({
-    heading: title,
-    prompt: buildSectionPromptFromOutline(message, title, i, total, regionHint),
-    isConclusion: i === total - 1,
-  }));
+  return outline.map((title, i) => {
+    const safeTitle = sanitizeSectionTitle(title);
+    return {
+      heading: safeTitle,
+      prompt: buildSectionPromptFromOutline(message, safeTitle, i, total, regionHint),
+      isConclusion: i === total - 1,
+    };
+  });
 }
 
 function mergeAndCleanArticle(title: string, chunks: Array<{ heading: string; text: string }>): string {
@@ -430,6 +489,9 @@ const ANTI_HALLUCINATION_SYSTEM_PROMPT = [
   "- вымышленные названия школ или направлений",
   "",
   "Пиши живо, как эксперт, а не как учебник.",
+  "",
+  "Не утверждай неподтверждённые факты о законах, официальной сертификации, медицинских процедурах или статистике.",
+  "Если нет точных данных — пиши осторожно: 'в профессиональных студиях обычно...', 'важно проверять...', 'клиенту стоит уточнить...'.",
 ].join("\n");
 
 function buildTattooTrendSections(message: string, region: string, chunkCount: number): ArticleSection[] {
@@ -564,12 +626,15 @@ function buildFallbackMarkdown(
 ): string {
   const isTimeout = reason.includes("LONGFORM_TIMEOUT") || reason.includes("timed out");
   const isHallucination = reason.includes("LONGFORM_HALLUCINATION");
+  const isLanguageMix = reason.includes("LONGFORM_LANGUAGE_MIX");
 
   let reasonText = reason;
   if (isTimeout) {
     reasonText = "Локальная модель не успела сгенерировать материал в заданный лимит.";
   } else if (isHallucination) {
     reasonText = "Генерация остановлена: обнаружены выдуманные факты или несуществующие стили.";
+  } else if (isLanguageMix) {
+    reasonText = "Генерация остановлена: обнаружены фрагменты на других языках или недопустимые термины.";
   }
 
   return [
@@ -700,12 +765,17 @@ async function generateChunkedLongformText(
     const sectionText = await withRetry(
       async (attemptNum) => {
         const temp = attemptNum === 1 ? DEFAULT_TEMPERATURE : DEFAULT_RETRY_TEMPERATURE;
+        const isRetry = attemptNum > 1;
+
+        const prompt = isRetry
+          ? `${section.prompt}\n\n⚠️ Перепиши раздел на чистом русском языке. Без китайских/английских фраз, кроме названий стилей. Без выдуманных технологий. Не утверждай неподтверждённые факты о законах, сертификации или медицине.`
+          : section.prompt;
 
         const text = await callOllama(
           baseUrl,
           model,
           ANTI_HALLUCINATION_SYSTEM_PROMPT,
-          section.prompt,
+          prompt,
           CHUNK_TIMEOUT_MS,
           CHUNK_NUM_PREDICT,
           temp,
@@ -716,6 +786,8 @@ async function generateChunkedLongformText(
           console.log("[longform] forbidden_detected", { pattern: forbidden, chunk: i + 1 });
           throw new Error("LONGFORM_HALLUCINATION_DETECTED");
         }
+
+        validateRussianOnly(text);
 
         const stats = getTextStats(text);
         if (stats.words < 120) {
@@ -811,6 +883,8 @@ export async function generateLongformFile(params: {
             console.log("[longform] forbidden_detected", { pattern: forbidden });
             throw new Error("LONGFORM_HALLUCINATION_DETECTED");
           }
+
+          validateRussianOnly(extracted);
 
           const stats = getTextStats(extracted);
           const threshold = getWordThreshold(targetWords);
