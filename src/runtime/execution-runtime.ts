@@ -1,5 +1,5 @@
 import { ChatSession, BridgeOutput } from "../types/chat-session";
-import { ProviderRouter } from "../provider/provider-router";
+import { ProviderRouter } from "../providers/provider-router";
 import { ResponseExtractor } from "../server/middleware/response-extractor";
 import { OutputClassifier } from "../server/middleware/output-normalization";
 import { TelegramRenderer, TelegramRenderResult } from "../surfaces/telegram/renderer";

@@ -188,7 +188,7 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
     console.log(`[router] routing to Long Form Engine: ${taskIntent.estimatedLength || "unknown"} chars estimated`);
 
     const chatId = req.meta?.chat_id;
-    const { generateLongformFile } = await import("./longform/longform-engine.js");
+      const { generateLongformFile } = await import("../engines/longform/longform-engine.js");
     const { sendTelegramMessage, sendDocument, buildLongformCaption } = await import("./telegram/send-document.js");
 
     const progressMessages: string[] = [];

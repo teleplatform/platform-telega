@@ -1,4 +1,4 @@
-import { ProviderRouter, PROVIDERS } from "../../provider/provider-router";
+import { ProviderRouter, PROVIDERS } from "../../providers/provider-router";
 import { ChatSession, RuntimeSessionState, FeatureModuleId, FeatureStatus } from "../../types/chat-session";
 import { resetToNewChat } from "./session-reset";
 
