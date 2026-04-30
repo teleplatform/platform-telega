@@ -312,3 +312,11 @@ export async function generateLongformFile(params: {
     };
   }
 }
+
+export async function generateLongformFallbackFile(params: {
+  message: string;
+  error: string;
+}): Promise<{ filePath: string; text: string }> {
+  const fallback = createFallbackFile(params.message, params.error);
+  return { filePath: fallback.filePath, text: fallback.text };
+}

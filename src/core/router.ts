@@ -183,88 +183,96 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
   }
 
   // Route longform tasks to local engine with file delivery
-  // IMPORTANT: Never route longform to openai_web
-  if (shouldRouteToLongform(taskIntent) && (!requestedProvider || requestedProvider === "auto")) {
+  // IMPORTANT: Longform ALWAYS uses local engine, never openai_web
+  // This takes precedence over explicit provider selection
+  // ASYNC: respond immediately, generate in background
+  if (shouldRouteToLongform(taskIntent)) {
     console.log(`[router] routing to Long Form Engine: ${taskIntent.estimatedLength || "unknown"} chars estimated`);
 
     const chatId = req.meta?.chat_id;
-      const { generateLongformFile } = await import("../engines/longform/longform-engine.js");
-    const { sendTelegramMessage, sendDocument, buildLongformCaption } = await import("./telegram/send-document.js");
+    const message = req.message;
 
-    const progressMessages: string[] = [];
-    const onProgress = async (text: string) => {
-      progressMessages.push(text);
-      console.log(`[router] longform progress: ${text.slice(0, 100)}`);
-      if (chatId) {
-        try {
-          await sendTelegramMessage({ chatId, text });
-        } catch (e) {
-          console.error("[router] longform progress message failed", e);
-        }
-      }
-    };
+    void (async () => {
+      try {
+        console.log("[longform] background_job_started");
 
-    try {
-      const longformResult = await generateLongformFile({
-        message: req.message,
-        chatId,
-        onProgress,
-      });
+        const { sendTelegramMessage, sendDocument, buildLongformCaption } = await import("./telegram/send-document.js");
+        const { generateLongformFile, generateLongformFallbackFile } = await import("../engines/longform/longform-engine.js");
 
-      if (longformResult.status === "done" || longformResult.status === "fallback") {
-        if (chatId && longformResult.filePath) {
-          try {
-            const caption = buildLongformCaption(longformResult.words, longformResult.chars);
-            const docResult = await sendDocument({
-              chatId,
-              filePath: longformResult.filePath,
-              caption,
-            });
+        await sendTelegramMessage({
+          chatId,
+          text: "⏳ Генерирую большой материал...",
+        }).catch(() => {});
 
-            console.log("[router] longform document delivery", {
-              ok: docResult.ok,
-            longform_fallback: longformResult.fallback,
-              messageId: docResult.result?.message_id,
-            });
-          } catch (e) {
-            console.error("[router] longform document delivery failed", e);
-            if (chatId) {
-              await sendTelegramMessage({
-                chatId,
-                text: `⚠️ Файл не удалось отправить: ${longformResult.filePath}`,
-              });
-            }
-          }
-        }
-
-        return {
-          id: request_id,
-          model: `local:${longformResult.model}`,
-          output: longformResult.fallback
-            ? `⚠️ Fallback файл создан: ${longformResult.filePath} (${longformResult.words} слов)`
-            : `📄 Материал готов: ${longformResult.filePath} (${longformResult.words} слов / ${longformResult.chars} символов)`,
-          meta: {
-            provider: "longform" as any,
-            model: longformResult.model,
-            longform_file_path: longformResult.filePath,
-            longform_word_count: longformResult.words,
-            longform_char_count: longformResult.chars,
-            intent: "longform",
-            fallback: longformResult.fallback,
+        const result = await generateLongformFile({
+          message,
+          chatId,
+          onProgress: async (text) => {
+            await sendTelegramMessage({ chatId, text }).catch(() => {});
           },
-          request_id,
-          latency_ms: Date.now() - t0,
-        };
-      }
-    } catch (e: any) {
-      console.error("[router] longform engine failed", e?.message || e);
-      if (chatId) {
+        });
+
+        await sendTelegramMessage({
+          chatId,
+          text: `📄 Материал готов.\n\n📊 ${result.words} слов / ${result.chars} символов`,
+        }).catch(() => {});
+
+        await sendDocument({
+          chatId,
+          filePath: result.filePath,
+          caption: buildLongformCaption(result.words, result.chars),
+        });
+
+        console.log("[longform] background_delivery_completed");
+      } catch (err) {
+        console.log("[longform] background_job_failed", {
+          error: String((err as Error)?.message || err),
+        });
+
         try {
-          const { sendTelegramMessage: notify } = await import("./telegram/send-document.js");
-          await notify({ chatId, text: `⚠️ Long Form Engine ошибка: ${e?.message || "unknown"}` });
-        } catch {}
+          const { sendTelegramMessage, sendDocument } = await import("./telegram/send-document.js");
+          const { generateLongformFallbackFile } = await import("../engines/longform/longform-engine.js");
+
+          const fallback = await generateLongformFallbackFile({
+            message,
+            error: String((err as Error)?.message || err),
+          });
+
+          await sendDocument({
+            chatId,
+            filePath: fallback.filePath,
+            caption: "⚠️ Long Form Engine fallback file",
+          });
+
+          console.log("[longform] background_fallback_delivery_completed");
+        } catch (fallbackErr) {
+          console.log("[longform] background_fallback_failed", {
+            error: String((fallbackErr as Error)?.message || fallbackErr),
+          });
+
+          const { sendTelegramMessage } = await import("./telegram/send-document.js");
+          await sendTelegramMessage({
+            chatId,
+            text: "⚠️ Long Form Engine не смог отправить файл. Проверь Ollama и логи.",
+          }).catch(() => {});
+        }
       }
-    }
+    })();
+
+    return {
+      id: request_id,
+      model: "local:longform-async",
+      output: "⏳ Принял задачу. Генерирую большой материал и отправлю файлом.",
+      meta: {
+        provider: "longform" as any,
+        model: "longform-async",
+        task_intent: "longform",
+        intent: "longform",
+        async: true,
+      } as any,
+      request_id,
+      latency_ms: Date.now() - t0,
+    };
   }
   
   let provider: "local" | "openai" | "deepseek_api" | "qwen_api" | "openrouter_kimi";
