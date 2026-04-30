@@ -730,6 +730,74 @@ function createSuccessFile(text: string, topic: string, model: string, stats: { 
   return filePath;
 }
 
+// v4 rewrite pass (editor layer)
+async function rewriteLongformText(
+  baseUrl: string,
+  model: string,
+  rawText: string,
+): Promise<string> {
+  const rawWords = getTextStats(rawText).words;
+
+  console.log("[longform] rewrite_started", { rawWords });
+
+  const rewritePrompt = [
+    "Ты редактор.",
+    "",
+    "Перепиши текст:",
+    "- убери повторы",
+    "- сделай язык живым и естественным",
+    "- укороти длинные предложения",
+    "- убери канцелярщину",
+    "- сохрани смысл",
+    "- не добавляй новую информацию",
+    "- не меняй структуру",
+    "",
+    "Верни полный текст.",
+    "",
+    "Текст:",
+    "---",
+    rawText.slice(0, 8000),
+    "---",
+  ].join("\n");
+
+  try {
+    const improvedText = await callOllama(
+      baseUrl,
+      model,
+      "Ты профессиональный редактор. Улучшай текст, сохраняя смысл и структуру.",
+      rewritePrompt,
+      CHUNK_TIMEOUT_MS,
+      4000,
+      0.5,
+    );
+
+    const improvedWords = getTextStats(improvedText).words;
+
+    if (improvedText.length < rawText.length * 0.7) {
+      console.log("[longform] rewrite_skipped", {
+        reason: "too_short",
+        original: rawText.length,
+        improved: improvedText.length,
+      });
+      return rawText;
+    }
+
+    console.log("[longform] rewrite_completed", {
+      originalWords: rawWords,
+      improvedWords,
+      originalChars: rawText.length,
+      improvedChars: improvedText.length,
+    });
+
+    return improvedText;
+  } catch (err) {
+    console.log("[longform] rewrite_skipped", {
+      reason: String((err as Error)?.message || err),
+    });
+    return rawText;
+  }
+}
+
 // v3.4 chunked generation with outline-first + anti-hallucination
 async function generateChunkedLongformText(
   message: string,
@@ -810,22 +878,25 @@ async function generateChunkedLongformText(
   }
 
   // Step 4: merge and clean
-  const finalText = mergeAndCleanArticle(title, chunks);
+  const rawText = mergeAndCleanArticle(title, chunks);
 
-  const sectionCount = countSections(finalText);
+  const sectionCount = countSections(rawText);
   if (sectionCount < 4) {
     console.log("[longform] structure_invalid", { sectionCount, required: 4 });
     throw new Error("LONGFORM_TOO_FEW_SECTIONS");
   }
 
-  const finalStats = getTextStats(finalText);
+  // Step 5: rewrite pass (editor layer)
+  const improvedText = await rewriteLongformText(baseUrl, model, rawText);
+
+  const finalStats = getTextStats(improvedText);
   console.log("[longform] chunked_generation_completed", {
     totalWords: finalStats.words,
     chunks: sections.length,
     sections: sectionCount,
   });
 
-  return finalText;
+  return improvedText;
 }
 
 export async function generateLongformFile(params: {
