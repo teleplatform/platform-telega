@@ -1,0 +1,311 @@
+{
+  "artifact_id": "production_activation_freeze",
+  "frozen_at": "2026-05-21T10:02:55.286Z",
+  "status": "frozen",
+  "milestone": "A36",
+  "trace_id": "88b6f4549809b970",
+  "production_ready": true,
+  "trace_inspection": {
+    "trace_id": "88b6f4549809b970",
+    "inspected_at": "2026-05-21T10:02:55.254Z",
+    "complete": true,
+    "phases": [
+      {
+        "phase": "preflight",
+        "present": true,
+        "events": [
+          {
+            "type": "chat_route_preflight_started",
+            "timestamp": "2026-05-21T10:02:55.209Z",
+            "evidence_id": "f7b32a7700e4ae76"
+          }
+        ]
+      },
+      {
+        "phase": "decision_point",
+        "present": true,
+        "events": [
+          {
+            "type": "runtime_decision_point_checked",
+            "timestamp": "2026-05-21T10:02:55.210Z",
+            "evidence_id": "5f7bfba30441d9c3"
+          },
+          {
+            "type": "runtime_decision_point_checked",
+            "timestamp": "2026-05-21T10:02:55.210Z",
+            "evidence_id": "9944d685b763f0e2"
+          },
+          {
+            "type": "runtime_decision_point_checked",
+            "timestamp": "2026-05-21T10:02:55.210Z",
+            "evidence_id": "caf88d36d096076c"
+          },
+          {
+            "type": "runtime_decision_point_checked",
+            "timestamp": "2026-05-21T10:02:55.211Z",
+            "evidence_id": "2509cddbf02e6d4c"
+          },
+          {
+            "type": "runtime_decision_point_checked",
+            "timestamp": "2026-05-21T10:02:55.212Z",
+            "evidence_id": "d32589e70179b899"
+          }
+        ]
+      },
+      {
+        "phase": "budget",
+        "present": true,
+        "events": [
+          {
+            "type": "runtime_budget_middleware_checked",
+            "timestamp": "2026-05-21T10:02:55.210Z",
+            "evidence_id": "48f1dc932a365cb8"
+          },
+          {
+            "type": "runtime_budget_middleware_checked",
+            "timestamp": "2026-05-21T10:02:55.211Z",
+            "evidence_id": "62993c6f66e47153"
+          },
+          {
+            "type": "runtime_budget_middleware_checked",
+            "timestamp": "2026-05-21T10:02:55.211Z",
+            "evidence_id": "9fd3a81ae1c5d6ea"
+          },
+          {
+            "type": "runtime_budget_consumed",
+            "timestamp": "2026-05-21T10:02:55.211Z",
+            "evidence_id": "4ca95f67fd3e491d"
+          }
+        ]
+      },
+      {
+        "phase": "execution",
+        "present": true,
+        "events": [
+          {
+            "type": "execution_completed",
+            "timestamp": "2026-05-21T10:02:55.211Z",
+            "evidence_id": "9ed4733806ce04c2"
+          }
+        ]
+      },
+      {
+        "phase": "closure",
+        "present": true,
+        "events": [
+          {
+            "type": "runtime_closure_completed",
+            "timestamp": "2026-05-21T10:02:55.223Z",
+            "evidence_id": "e185023c574f20f9"
+          }
+        ]
+      }
+    ],
+    "missing": []
+  },
+  "governance_failure_matrix": [
+    {
+      "surface": "shell",
+      "blocked": 0,
+      "requires_approval": 0,
+      "reasons": []
+    },
+    {
+      "surface": "file",
+      "blocked": 0,
+      "requires_approval": 0,
+      "reasons": []
+    },
+    {
+      "surface": "browser",
+      "blocked": 0,
+      "requires_approval": 0,
+      "reasons": []
+    },
+    {
+      "surface": "replay",
+      "blocked": 0,
+      "requires_approval": 0,
+      "reasons": []
+    },
+    {
+      "surface": "federation",
+      "blocked": 0,
+      "requires_approval": 0,
+      "reasons": []
+    },
+    {
+      "surface": "evolution",
+      "blocked": 0,
+      "requires_approval": 0,
+      "reasons": []
+    },
+    {
+      "surface": "model",
+      "blocked": 0,
+      "requires_approval": 0,
+      "reasons": []
+    }
+  ],
+  "budget_consistency_audit": {
+    "passed": true,
+    "checked_at": "2026-05-21T10:02:55.267Z",
+    "paths": [
+      {
+        "path": "shell-execution-governance-hook",
+        "risky": true,
+        "mode_forwarded_to_budget": true,
+        "budget_gate": "consumeRuntimeBudget"
+      },
+      {
+        "path": "federation-action-governance-hook",
+        "risky": true,
+        "mode_forwarded_to_budget": true,
+        "budget_gate": "consumeRuntimeBudget"
+      },
+      {
+        "path": "replay-governance-hardening-hook",
+        "risky": true,
+        "mode_forwarded_to_budget": true,
+        "budget_gate": "consumeRuntimeBudget"
+      },
+      {
+        "path": "model-api-call-governance-hook",
+        "risky": true,
+        "mode_forwarded_to_budget": true,
+        "budget_gate": "consumeRuntimeBudget"
+      },
+      {
+        "path": "runtime-route-governance-middleware",
+        "risky": true,
+        "mode_forwarded_to_budget": true,
+        "budget_gate": "checkRuntimeBudget"
+      },
+      {
+        "path": "real-planning-activation-hook",
+        "risky": true,
+        "mode_forwarded_to_budget": true,
+        "budget_gate": "checkRuntimeBudget"
+      },
+      {
+        "path": "file-operation-governance-hook",
+        "risky": true,
+        "mode_forwarded_to_budget": true,
+        "budget_gate": "checkCostGovernance"
+      },
+      {
+        "path": "browser-action-governance-hook",
+        "risky": true,
+        "mode_forwarded_to_budget": true,
+        "budget_gate": "consumeRuntimeBudget"
+      },
+      {
+        "path": "evolution-proposal-governance-hook",
+        "risky": true,
+        "mode_forwarded_to_budget": true,
+        "budget_gate": "checkCostGovernance_after_primary_blocks"
+      }
+    ],
+    "failures": []
+  },
+  "mode_boundary_audit": {
+    "passed": true,
+    "checked_at": "2026-05-21T10:02:55.267Z",
+    "boundaries": [
+      {
+        "surface": "shell",
+        "public_expected": "blocked",
+        "creator_expected": "allowed",
+        "reason": "Public mode blocks shell execution"
+      },
+      {
+        "surface": "file_destructive",
+        "public_expected": "blocked",
+        "creator_expected": "requires_approval",
+        "reason": "Public mode blocks destructive/high-risk file operations"
+      },
+      {
+        "surface": "browser_high_risk",
+        "public_expected": "requires_approval",
+        "creator_expected": "requires_approval",
+        "reason": "Browser high-risk actions require approval"
+      },
+      {
+        "surface": "replay_force",
+        "public_expected": "requires_approval",
+        "creator_expected": "requires_approval",
+        "reason": "Force replay requires approval"
+      },
+      {
+        "surface": "federation_mutation",
+        "public_expected": "blocked",
+        "creator_expected": "requires_approval",
+        "reason": "Public mode blocks federation mutation"
+      },
+      {
+        "surface": "evolution_apply",
+        "public_expected": "blocked",
+        "creator_expected": "requires_approval",
+        "reason": "Public mode blocks evolution apply/change"
+      },
+      {
+        "surface": "model_api",
+        "public_expected": "allowed",
+        "creator_expected": "allowed",
+        "reason": "Model calls are budget/rate limited in both modes"
+      }
+    ]
+  },
+  "mission_control_feed": [],
+  "burn_rate": {
+    "generated_at": "2026-05-21T10:02:55.286Z",
+    "window_minutes": 60,
+    "total_consumed": 8,
+    "burn_rate_per_minute": 0.13333333333333333,
+    "anomalies": [],
+    "budgets": [
+      {
+        "category": "compute",
+        "used": 2,
+        "limit": 1000,
+        "used_ratio": 0.002
+      },
+      {
+        "category": "memory",
+        "used": 0,
+        "limit": 4096,
+        "used_ratio": 0
+      },
+      {
+        "category": "gpu",
+        "used": 0,
+        "limit": 8,
+        "used_ratio": 0
+      },
+      {
+        "category": "storage",
+        "used": 0,
+        "limit": 10240,
+        "used_ratio": 0
+      },
+      {
+        "category": "replay",
+        "used": 0,
+        "limit": 100,
+        "used_ratio": 0
+      },
+      {
+        "category": "federation",
+        "used": 0,
+        "limit": 500,
+        "used_ratio": 0
+      },
+      {
+        "category": "planning",
+        "used": 0,
+        "limit": 50,
+        "used_ratio": 0
+      }
+    ]
+  }
+}

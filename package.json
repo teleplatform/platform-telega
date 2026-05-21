@@ -1,6 +1,6 @@
 {
   "name": "tele-gpt",
-  "version": "1.0.0",
+  "version": "1.1.0-rc.1",
   "main": "index.js",
   "scripts": {
     "dev": "dotenv -e .env.dev -- tsx watch src/server/index.ts",
@@ -52,6 +52,10 @@
     "start:server": "node --enable-source-maps dist/server/index.js",
     "start": "node --enable-source-maps dist/server/index.js",
     "build": "tsc -p tsconfig.server.json",
+    "trace:inspect": "tsx src/runtime/evidence/trace-inspector.cli.ts",
+    "runtime:living-loop-smoke": "TSX_DISABLE_IPC=1 tsx src/runtime/hooks/living-loop-smoke-test.ts",
+    "test:living-loop-hardening": "TSX_DISABLE_IPC=1 node --import tsx --test tests/integration/runtime/livingLoopHardening.test.ts",
+    "test:production-readiness": "TSX_DISABLE_IPC=1 node --import tsx --test tests/integration/runtime/productionReadiness.test.ts",
     "test:authz": "npx tsx tests/unit/authz/actor.test.ts && npx tsx tests/unit/authz/permissions.test.ts && npx tsx tests/unit/authz/guard.test.ts",
     "creator:live:openai": "tsx scripts/creator/creator-session-live-validate.ts openai_web",
     "creator:live:qwen": "tsx scripts/creator/creator-session-live-validate.ts qwen_web",

@@ -1,0 +1,338 @@
+{
+  "artifact_id": "living_loop_baseline",
+  "frozen_at": "2026-05-21T09:54:58.959Z",
+  "status": "frozen",
+  "milestone": "A28",
+  "completeness_gate": {
+    "trace_id": "575c0db6adf8c366",
+    "passed": true,
+    "required": [
+      "preflight",
+      "decision_point",
+      "budget",
+      "execution",
+      "closure"
+    ],
+    "present": {
+      "preflight": true,
+      "decision_point": true,
+      "budget": true,
+      "execution": true,
+      "closure": true
+    },
+    "missing": [],
+    "evidence_count": 29
+  },
+  "replay": {
+    "trace_id": "575c0db6adf8c366",
+    "replay_id": "9eb63694224c9d9b",
+    "passed": true,
+    "events": [
+      {
+        "type": "chat_route_preflight_started",
+        "timestamp": "2026-05-21T09:54:58.888Z",
+        "job_id": "preflight",
+        "evidence_id": "a20873ce4a25ae86"
+      },
+      {
+        "type": "runtime_decision_point_registered",
+        "timestamp": "2026-05-21T09:54:58.888Z",
+        "job_id": "decision_registry",
+        "evidence_id": "df79d329808440e2"
+      },
+      {
+        "type": "runtime_decision_point_checked",
+        "timestamp": "2026-05-21T09:54:58.889Z",
+        "job_id": "decision_registry",
+        "evidence_id": "00e0923b7288a3a6"
+      },
+      {
+        "type": "runtime_mode_allowed",
+        "timestamp": "2026-05-21T09:54:58.889Z",
+        "job_id": "mode",
+        "evidence_id": "d166027cc5afe5d3"
+      },
+      {
+        "type": "runtime_mode_checked",
+        "timestamp": "2026-05-21T09:54:58.889Z",
+        "job_id": "mode",
+        "evidence_id": "8d686d82073291d6"
+      },
+      {
+        "type": "runtime_budget_middleware_checked",
+        "timestamp": "2026-05-21T09:54:58.889Z",
+        "job_id": "budget",
+        "evidence_id": "e4f33cd9418b7d44"
+      },
+      {
+        "type": "chat_route_preflight_allowed",
+        "timestamp": "2026-05-21T09:54:58.889Z",
+        "job_id": "preflight",
+        "evidence_id": "4bfbe5f9e5f48dec"
+      },
+      {
+        "type": "runtime_decision_point_registered",
+        "timestamp": "2026-05-21T09:54:58.889Z",
+        "job_id": "decision_registry",
+        "evidence_id": "f27a52bc081b5fad"
+      },
+      {
+        "type": "runtime_decision_point_checked",
+        "timestamp": "2026-05-21T09:54:58.890Z",
+        "job_id": "decision_registry",
+        "evidence_id": "90b09a22b927ecbf"
+      },
+      {
+        "type": "runtime_mode_allowed",
+        "timestamp": "2026-05-21T09:54:58.890Z",
+        "job_id": "mode",
+        "evidence_id": "3c35e6441f03f07c"
+      },
+      {
+        "type": "runtime_mode_checked",
+        "timestamp": "2026-05-21T09:54:58.890Z",
+        "job_id": "mode",
+        "evidence_id": "78fc33b1e46b5312"
+      },
+      {
+        "type": "runtime_decision_point_checked",
+        "timestamp": "2026-05-21T09:54:58.890Z",
+        "job_id": "decision_registry",
+        "evidence_id": "542a83264dc4c680"
+      },
+      {
+        "type": "runtime_mode_allowed",
+        "timestamp": "2026-05-21T09:54:58.890Z",
+        "job_id": "mode",
+        "evidence_id": "be9160f3103bb378"
+      },
+      {
+        "type": "runtime_mode_checked",
+        "timestamp": "2026-05-21T09:54:58.890Z",
+        "job_id": "mode",
+        "evidence_id": "fdcb42e7cb4d134c"
+      },
+      {
+        "type": "runtime_budget_middleware_checked",
+        "timestamp": "2026-05-21T09:54:58.890Z",
+        "job_id": "budget",
+        "evidence_id": "a606abf7436500c1"
+      },
+      {
+        "type": "runtime_route_governance_checked",
+        "timestamp": "2026-05-21T09:54:58.890Z",
+        "job_id": "route_governance",
+        "evidence_id": "1086a30619a3ebd8"
+      },
+      {
+        "type": "runtime_route_governance_allowed",
+        "timestamp": "2026-05-21T09:54:58.890Z",
+        "job_id": "route_governance",
+        "evidence_id": "43de6271d31c823a"
+      },
+      {
+        "type": "runtime_decision_point_checked",
+        "timestamp": "2026-05-21T09:54:58.890Z",
+        "job_id": "decision_registry",
+        "evidence_id": "e5087bf3af8e38f8"
+      },
+      {
+        "type": "runtime_mode_allowed",
+        "timestamp": "2026-05-21T09:54:58.890Z",
+        "job_id": "mode",
+        "evidence_id": "319c9cfc518a242a"
+      },
+      {
+        "type": "runtime_mode_checked",
+        "timestamp": "2026-05-21T09:54:58.891Z",
+        "job_id": "mode",
+        "evidence_id": "106a6e4b5330722d"
+      },
+      {
+        "type": "runtime_budget_middleware_checked",
+        "timestamp": "2026-05-21T09:54:58.891Z",
+        "job_id": "budget",
+        "evidence_id": "db30dcb339ad71b7"
+      },
+      {
+        "type": "runtime_budget_consumed",
+        "timestamp": "2026-05-21T09:54:58.891Z",
+        "job_id": "budget",
+        "evidence_id": "3772dcba4297fb14"
+      },
+      {
+        "type": "real_planning_activation_checked",
+        "timestamp": "2026-05-21T09:54:58.891Z",
+        "job_id": "planning",
+        "evidence_id": "34fdb273977aedf6"
+      },
+      {
+        "type": "real_planning_skipped",
+        "timestamp": "2026-05-21T09:54:58.891Z",
+        "job_id": "planning",
+        "evidence_id": "b4810698ffb6dd36"
+      },
+      {
+        "type": "execution_completed",
+        "timestamp": "2026-05-21T09:54:58.891Z",
+        "job_id": "smoke",
+        "evidence_id": "0c19c0f2582e1e98"
+      },
+      {
+        "type": "runtime_decision_point_registered",
+        "timestamp": "2026-05-21T09:54:58.891Z",
+        "job_id": "decision_registry",
+        "evidence_id": "3a750cfc3c66e001"
+      },
+      {
+        "type": "runtime_decision_point_checked",
+        "timestamp": "2026-05-21T09:54:58.891Z",
+        "job_id": "decision_registry",
+        "evidence_id": "17c7085ab212630e"
+      },
+      {
+        "type": "runtime_closure_started",
+        "timestamp": "2026-05-21T09:54:58.891Z",
+        "job_id": "closure",
+        "evidence_id": "f96c6a125eb81f58"
+      },
+      {
+        "type": "runtime_closure_completed",
+        "timestamp": "2026-05-21T09:54:58.901Z",
+        "job_id": "closure",
+        "evidence_id": "c6107b4d3db5a146"
+      },
+      {
+        "type": "validation_gate_passed",
+        "timestamp": "2026-05-21T09:54:58.922Z",
+        "job_id": "living_loop_hardening",
+        "evidence_id": "65760b59f7b3749e"
+      }
+    ],
+    "completeness": {
+      "trace_id": "575c0db6adf8c366",
+      "passed": true,
+      "required": [
+        "preflight",
+        "decision_point",
+        "budget",
+        "execution",
+        "closure"
+      ],
+      "present": {
+        "preflight": true,
+        "decision_point": true,
+        "budget": true,
+        "execution": true,
+        "closure": true
+      },
+      "missing": [],
+      "evidence_count": 30
+    }
+  },
+  "snapshot": {
+    "snapshot_id": "op_loop_1779357298941",
+    "created_at": "2026-05-21T09:54:58.949Z",
+    "recent_chat_preflights": 1,
+    "decision_points": 3,
+    "budget_consumption": [
+      {
+        "category": "compute",
+        "used": 2,
+        "limit": 1000
+      },
+      {
+        "category": "memory",
+        "used": 0,
+        "limit": 4096
+      },
+      {
+        "category": "gpu",
+        "used": 0,
+        "limit": 8
+      },
+      {
+        "category": "storage",
+        "used": 0,
+        "limit": 10240
+      },
+      {
+        "category": "replay",
+        "used": 0,
+        "limit": 100
+      },
+      {
+        "category": "federation",
+        "used": 0,
+        "limit": 500
+      },
+      {
+        "category": "planning",
+        "used": 0,
+        "limit": 50
+      }
+    ],
+    "planning_activations": 0,
+    "incidents_open": 0,
+    "live_feed_events": 0,
+    "closures": 1,
+    "health_loop": {
+      "running": false,
+      "enabled": false,
+      "interval_ms": 60000,
+      "run_count": 0
+    },
+    "mode_blocks": 0
+  },
+  "burn_rate": {
+    "generated_at": "2026-05-21T09:54:58.959Z",
+    "window_minutes": 60,
+    "total_consumed": 6,
+    "burn_rate_per_minute": 0.1,
+    "anomalies": [],
+    "budgets": [
+      {
+        "category": "compute",
+        "used": 2,
+        "limit": 1000,
+        "used_ratio": 0.002
+      },
+      {
+        "category": "memory",
+        "used": 0,
+        "limit": 4096,
+        "used_ratio": 0
+      },
+      {
+        "category": "gpu",
+        "used": 0,
+        "limit": 8,
+        "used_ratio": 0
+      },
+      {
+        "category": "storage",
+        "used": 0,
+        "limit": 10240,
+        "used_ratio": 0
+      },
+      {
+        "category": "replay",
+        "used": 0,
+        "limit": 100,
+        "used_ratio": 0
+      },
+      {
+        "category": "federation",
+        "used": 0,
+        "limit": 500,
+        "used_ratio": 0
+      },
+      {
+        "category": "planning",
+        "used": 0,
+        "limit": 50,
+        "used_ratio": 0
+      }
+    ]
+  }
+}
