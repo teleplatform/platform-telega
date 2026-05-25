@@ -44,4 +44,4 @@ export * from "./retry-policy.js";
 
 export const FORGE_BRIDGE_VERSION = "v1";
 
-export type { ForgeTask, ForgeResult, ForgeAdapter } from "./forge-bridge.types.js";
+export type { ForgeTask, ForgeResult, ForgeAdapter, SigmaForgeCapabilityRegistry } from "./forge-bridge.types.js";
