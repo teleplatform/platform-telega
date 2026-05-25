@@ -44,6 +44,7 @@ import { createBuildTaskMissionEvent } from "../runtime/mission-control/build-ta
 import { emitMissionControlLiveEvent } from "../runtime/hooks/mission-control-live-feed-hook.js";
 import { appendMissionControlPersistenceFeed } from "../runtime/mission-control/operational-runtime.js";
 import { deliverBuildTaskMissionEvent } from "../runtime/mission-control/delivery/telegram-build-task-delivery.js";
+import { sigmaForgeRegistry } from "../runtime/forge-bridge/adapters/sigma-forge.adapter.js";
 
 type HeartbeatRequest = {
   runner_id?: string;
@@ -1833,6 +1834,23 @@ export async function buildServer() {
       return response;
     }
   );
+
+  // KCA-10.3: Sigma Forge Health Endpoint
+  app.get("/v1/runtime/executors/sigma-forge/health", async (_req, reply) => {
+    const registry = sigmaForgeRegistry;
+    const manifest = registry.last_sigma_forge_manifest;
+
+    return {
+      executor: "sigma_forge",
+      health: manifest?.health ?? "unavailable",
+      runtime_id: manifest?.runtime_id ?? null,
+      protocol_version: manifest?.protocol_version ?? null,
+      capabilities: manifest?.capabilities ?? [],
+      last_handshake_at: registry.last_handshake_at > 0 ? new Date(registry.last_handshake_at).toISOString() : null,
+      last_error: manifest?.health === "unavailable" ? "runtime_unreachable" : manifest?.health === "degraded" ? "runtime_degraded" : null,
+      execution_enabled: false,
+    };
+  });
 
   return app;
 }
