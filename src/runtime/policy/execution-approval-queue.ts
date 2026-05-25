@@ -2,19 +2,27 @@ import fs from "node:fs";
 import path from "node:path";
 import { appendEvidenceRecord } from "../evidence/execution-evidence-store.js";
 import { hashTraceId } from "../evidence/execution-hash.js";
+import {
+  loadTelegramSenderConfig,
+  sendTelegramMissionControlMessage,
+} from "../mission-control/telegram-sender.js";
+import { renderAndEmitExecutionTelegramKeyboard } from "../mission-control/telegram-inline-keyboard.js";
 
 export type ExecutionApprovalStatus =
   | "pending"
   | "approved"
   | "denied"
   | "expired"
-  | "consumed";
+  | "consumed"
+  | "closed";
 
 export type ExecutionApprovalActionType =
   | "approve"
   | "deny"
   | "consume"
-  | "notify";
+  | "notify"
+  | "view"
+  | "close";
 
 export interface ExecutionApprovalRequest {
   approval_id: string;
@@ -31,6 +39,7 @@ export interface ExecutionApprovalRequest {
   decided_by?: string;
   decision_reason?: string;
   consumed_at?: string;
+  closed_at?: string;
   telegram_message?: {
     chat_id?: string;
     message_id?: number;
@@ -133,6 +142,28 @@ export async function createExecutionApprovalRequest(
       expires_at: expiresAt,
     },
   });
+
+  const senderConfig = loadTelegramSenderConfig();
+  if (senderConfig.enabled || senderConfig.dry_run) {
+    const chatId = senderConfig.default_chat_id || "0";
+    const telegramMessage = await renderAndEmitExecutionTelegramKeyboard(request, chatId);
+    const sendResult = await sendTelegramMissionControlMessage(telegramMessage, {
+      ...senderConfig,
+      enabled: senderConfig.enabled || !!senderConfig.dry_run,
+      dry_run: senderConfig.dry_run !== false,
+    });
+    if (sendResult.message_id) {
+      const recordsWithMessage = readAllExecutionRequests();
+      const idx = recordsWithMessage.findIndex((r) => r.approval_id === approvalId);
+      if (idx !== -1) {
+        recordsWithMessage[idx].telegram_message = {
+          chat_id: sendResult.chat_id || chatId,
+          message_id: sendResult.message_id,
+        };
+        writeAllRequests(recordsWithMessage);
+      }
+    }
+  }
 
   return request;
 }
@@ -243,6 +274,76 @@ export async function markExecutionApprovalConsumed(approvalId: string): Promise
     },
   });
 
+  await appendEvidenceRecord({
+    evidence_id: hashTraceId(approvalId, "approval_lifecycle_executed"),
+    trace_id: request.trace_id || approvalId,
+    job_id: approvalId,
+    type: "approval_lifecycle_executed",
+    timestamp: request.consumed_at,
+    payload: {
+      approval_id: approvalId,
+      lifecycle_state: "executed",
+      task_kind: request.task_kind,
+    },
+  });
+
+  return request;
+}
+
+export async function markExecutionApprovalViewed(
+  approvalId: string,
+  actor = "operator",
+): Promise<ExecutionApprovalRequest | null> {
+  const request = getExecutionApprovalRequest(approvalId);
+  if (!request) return null;
+
+  await appendEvidenceRecord({
+    evidence_id: hashTraceId(approvalId, "approval_lifecycle_viewed"),
+    trace_id: request.trace_id || approvalId,
+    job_id: approvalId,
+    type: "approval_lifecycle_viewed",
+    timestamp: new Date().toISOString(),
+    payload: {
+      approval_id: approvalId,
+      actor,
+      lifecycle_state: "viewed",
+      status: request.status,
+    },
+  });
+
+  return request;
+}
+
+export async function closeExecutionApproval(
+  approvalId: string,
+  actor = "runtime",
+  reason?: string,
+): Promise<ExecutionApprovalRequest | null> {
+  const records = readAllExecutionRequests();
+  const idx = records.findIndex((r) => r.approval_id === approvalId);
+  if (idx === -1) return null;
+
+  const request = records[idx];
+  request.status = "closed";
+  request.closed_at = new Date().toISOString();
+  records[idx] = request;
+  writeAllRequests(records);
+
+  await appendEvidenceRecord({
+    evidence_id: hashTraceId(approvalId, "approval_lifecycle_closed"),
+    trace_id: request.trace_id || approvalId,
+    job_id: approvalId,
+    type: "approval_lifecycle_closed",
+    timestamp: request.closed_at,
+    payload: {
+      approval_id: approvalId,
+      actor,
+      reason,
+      lifecycle_state: "closed",
+      task_kind: request.task_kind,
+    },
+  });
+
   return request;
 }
 
@@ -304,6 +405,16 @@ export async function handleExecutionApprovalAction(
       if (!request) return { ok: false, error: "approval not found" };
       await notifyExecutionApprovalRequired(request);
       return { ok: true };
+    }
+    case "view": {
+      const result = await markExecutionApprovalViewed(payload.approval_id, payload.actor || "action");
+      if (!result) return { ok: false, error: "approval not found" };
+      return { ok: true, result };
+    }
+    case "close": {
+      const result = await closeExecutionApproval(payload.approval_id, payload.actor || "action", payload.reason);
+      if (!result) return { ok: false, error: "approval not found" };
+      return { ok: true, result };
     }
   }
 }

@@ -1,5 +1,6 @@
 import { appendEvidenceRecord } from "../evidence/execution-evidence-store.js";
 import { hashTraceId } from "../evidence/execution-hash.js";
+import { appendMissionControlPersistenceFeed } from "../mission-control/operational-runtime.js";
 import {
   loadTelegramSenderConfig,
   sendTelegramMissionControlMessage,
@@ -10,11 +11,18 @@ export type MissionControlLiveEventKind =
   | "execution_completed"
   | "execution_failed"
   | "approval_required"
+  | "approval_resolved"
   | "incident_opened"
   | "budget_pressure"
   | "doctrine_violation"
   | "federation_risk"
-  | "survival_mode";
+  | "survival_mode"
+  | "attention_queued"
+  | "attention_escalated"
+  | "approval_updated"
+  | "operator_presence_changed"
+  | "digest_generated"
+  | "runtime_freeze";
 
 export interface MissionControlLiveEvent {
   event_id: string;
@@ -63,6 +71,8 @@ export async function emitMissionControlLiveEvent(
     timestamp: event.created_at,
     payload: { ...event },
   });
+
+  appendMissionControlPersistenceFeed(event);
 
   const cfg = loadTelegramSenderConfig();
   const chatId = cfg.default_chat_id || "0";

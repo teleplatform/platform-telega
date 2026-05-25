@@ -69,3 +69,20 @@ export type BuildTaskPriority = "low" | "normal" | "high" | "critical";
 export type BuildTaskMode = "smart" | "deep" | "research";
 export type BuildTaskKind = "forge.build" | "forge.plan" | "forge.patch" | "forge.review" | "forge.test" | string;
 export type BuildTaskTarget = "kilo" | "sigmaforge" | "auto";
+
+export type BuildTaskStreamEventType =
+  | "execution_started"
+  | "execution_progress"
+  | "artifact_generated"
+  | "validation_progress"
+  | "execution_warning"
+  | "execution_completed";
+
+export interface BuildTaskStreamEvent {
+  stream_id: string;
+  task_id: string;
+  sequence: number;
+  event_type: BuildTaskStreamEventType;
+  timestamp: number;
+  payload: Record<string, unknown>;
+}

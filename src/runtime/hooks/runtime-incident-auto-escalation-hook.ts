@@ -3,6 +3,11 @@ import { hashTraceId } from "../evidence/execution-hash.js";
 import { openIncident, type Incident } from "../incidents/runtime-incident-command.js";
 import { classifySeverity, type IncidentSeverity } from "../incidents/incident-severity-matrix.js";
 import { emitMissionControlLiveEvent } from "./mission-control-live-feed-hook.js";
+import {
+  loadTelegramSenderConfig,
+  sendTelegramMissionControlMessage,
+} from "../mission-control/telegram-sender.js";
+import { routeRuntimeAttention, routeRuntimeIncident } from "../mission-control/operational-runtime.js";
 
 export type RuntimeIncidentSignalKind =
   | "execution_failed"
@@ -70,7 +75,76 @@ export async function escalateRuntimeIncident(
     payload: { incident_id: incident.incident_id, kind: input.kind },
   });
 
+  const routing = await routeRuntimeIncident({
+    incident,
+    kind: input.kind,
+    trace_id: input.trace_id || incident.incident_id,
+  });
+
+  await routeRuntimeAttention({
+    severity: severity === "civilization_risk" ? "critical" : severity === "info" ? "low" : severity,
+    title: incident.title,
+    trace_id: input.trace_id || incident.incident_id,
+    payload: {
+      incident_id: incident.incident_id,
+      playbook_id: routing.playbook.playbook_id,
+      escalation_path: routing.escalation_path,
+    },
+  });
+
+  await sendIncidentTelegramAlert(incident, input.trace_id || incident.incident_id, input.kind);
+
   return { escalated: true, severity, incident, reason: "Incident auto-escalated" };
+}
+
+export function renderIncidentTelegramAlert(
+  incident: Incident,
+  traceId: string,
+  kind: RuntimeIncidentSignalKind,
+): string {
+  return [
+    "Mission Control Incident Alert",
+    "",
+    `severity: ${incident.severity}`,
+    `kind: ${kind}`,
+    `title: ${incident.title}`,
+    `incident_id: ${incident.incident_id}`,
+    `trace_id: ${traceId}`,
+    `status: ${incident.status}`,
+    `affected: ${incident.affected.join(", ") || "-"}`,
+    `opened_at: ${incident.opened_at}`,
+    "",
+    incident.description,
+  ].join("\n");
+}
+
+export async function sendIncidentTelegramAlert(
+  incident: Incident,
+  traceId: string,
+  kind: RuntimeIncidentSignalKind,
+): Promise<void> {
+  if (!["high", "critical", "civilization_risk"].includes(incident.severity)) return;
+  const cfg = loadTelegramSenderConfig();
+  const chatId = cfg.default_chat_id || "0";
+  const sendResult = await sendTelegramMissionControlMessage(
+    { chat_id: chatId, text: renderIncidentTelegramAlert(incident, traceId, kind) },
+    { ...cfg, enabled: cfg.enabled || !!cfg.dry_run, dry_run: cfg.dry_run !== false },
+  );
+  await appendEvidenceRecord({
+    evidence_id: hashTraceId(incident.incident_id, "mission_control_incident_alert_sent"),
+    trace_id: traceId,
+    job_id: "incidents",
+    type: "telegram_mission_control_message_sent",
+    timestamp: new Date().toISOString(),
+    payload: {
+      incident_id: incident.incident_id,
+      severity: incident.severity,
+      ok: sendResult.ok,
+      dry_run: sendResult.dry_run,
+      chat_id: sendResult.chat_id,
+      error: sendResult.error,
+    },
+  });
 }
 
 export async function maybeEscalateRuntimeIncident(

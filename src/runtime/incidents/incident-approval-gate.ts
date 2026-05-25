@@ -1,7 +1,13 @@
 import { appendEvidenceRecord } from "../evidence/execution-evidence-store.js";
+import { readEvidenceRecords } from "../evidence/execution-evidence-store.js";
 import { hashTraceId } from "../evidence/execution-hash.js";
 import { getIncident } from "./runtime-incident-command.js";
 import type { IncidentSeverity } from "./incident-severity-matrix.js";
+import {
+  loadTelegramSenderConfig,
+  sendTelegramMissionControlMessage,
+} from "../mission-control/telegram-sender.js";
+import { renderAndEmitIncidentTelegramKeyboard } from "../mission-control/telegram-inline-keyboard.js";
 
 export interface IncidentApproval {
   approval_id: string;
@@ -49,6 +55,17 @@ export async function requestIncidentApproval(
       severity: getIncident(incidentId)?.severity,
     },
   });
+
+  const senderConfig = loadTelegramSenderConfig();
+  if (senderConfig.enabled || senderConfig.dry_run) {
+    const chatId = senderConfig.default_chat_id || "0";
+    const telegramMessage = await renderAndEmitIncidentTelegramKeyboard(approval, chatId);
+    await sendTelegramMissionControlMessage(telegramMessage, {
+      ...senderConfig,
+      enabled: senderConfig.enabled || !!senderConfig.dry_run,
+      dry_run: senderConfig.dry_run !== false,
+    });
+  }
 
   return approval;
 }
@@ -116,4 +133,38 @@ export function getApproval(approvalId: string): IncidentApproval | null {
 
 export function getPendingApprovals(): IncidentApproval[] {
   return Array.from(APPROVALS.values()).filter((a) => a.status === "pending");
+}
+
+export async function restoreIncidentApprovalsFromEvidence(): Promise<IncidentApproval[]> {
+  const restored = new Map<string, IncidentApproval>();
+
+  for (const record of readEvidenceRecords({ order: "asc" })) {
+    if (record.type === "incident_approval_required") {
+      const approvalId = String(record.payload?.approval_id || record.trace_id);
+      restored.set(approvalId, {
+        approval_id: approvalId,
+        incident_id: String(record.payload?.incident_id || ""),
+        action: String(record.payload?.action || "unknown"),
+        requested_at: record.timestamp,
+        status: "pending",
+      });
+    }
+
+    if (record.type === "incident_approval_granted" || record.type === "incident_approval_denied") {
+      const approvalId = String(record.payload?.approval_id || record.trace_id);
+      const approval = restored.get(approvalId);
+      if (!approval) continue;
+      approval.status = record.type === "incident_approval_granted" ? "granted" : "denied";
+      approval.granted_at = record.type === "incident_approval_granted" ? record.timestamp : approval.granted_at;
+      approval.granted_by = record.payload?.granted_by ? String(record.payload.granted_by) : approval.granted_by;
+      approval.reason = record.payload?.reason ? String(record.payload.reason) : approval.reason;
+      restored.set(approvalId, approval);
+    }
+  }
+
+  for (const approval of restored.values()) {
+    APPROVALS.set(approval.approval_id, approval);
+  }
+
+  return Array.from(restored.values());
 }

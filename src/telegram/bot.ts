@@ -303,8 +303,18 @@ export async function startPantheonTelegramBot() {
       case "ollama_local":
         return "qwen2.5:7b-instruct";
       case "auto":
-      default:
+      default: {
+        const llmProvider = (process.env.LLM_PROVIDER || "").toLowerCase();
+        if (llmProvider === "ollama") {
+          return `local:${process.env.OLLAMA_MODEL || "qwen2.5:7b-instruct"}`;
+        }
+        const localUrl = (process.env.LOCAL_OPENAI_BASE_URL || "").trim();
+        const localModel = (process.env.LOCAL_OPENAI_MODEL || process.env.LOCAL_OPENAI_MODEL_DEFAULT || "").trim();
+        if (localUrl && localModel) {
+          return `local:${localModel}`;
+        }
         return "openai:gpt-4o-mini";
+      }
     }
   }
 

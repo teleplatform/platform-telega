@@ -45,6 +45,7 @@ import { emitMissionControlLiveEvent } from "../runtime/hooks/mission-control-li
 import { appendMissionControlPersistenceFeed } from "../runtime/mission-control/operational-runtime.js";
 import { deliverBuildTaskMissionEvent } from "../runtime/mission-control/delivery/telegram-build-task-delivery.js";
 import { sigmaForgeRegistry } from "../runtime/forge-bridge/adapters/sigma-forge.adapter.js";
+import { getExecutionStreamStore } from "../runtime/mission-control/execution-stream-store.js";
 
 type HeartbeatRequest = {
   runner_id?: string;
@@ -1839,6 +1840,9 @@ export async function buildServer() {
   app.get("/v1/runtime/executors/sigma-forge/health", async (_req, reply) => {
     const registry = sigmaForgeRegistry;
     const manifest = registry.last_sigma_forge_manifest;
+    const policy = manifest?.execution_policy || { mode: "sandbox", sandbox_restrictions: [] };
+    const isHealthy = manifest?.health === "healthy";
+    const isAvailable = registry.last_handshake_status !== "unavailable";
 
     return {
       executor: "sigma_forge",
@@ -1848,9 +1852,25 @@ export async function buildServer() {
       capabilities: manifest?.capabilities ?? [],
       last_handshake_at: registry.last_handshake_at > 0 ? new Date(registry.last_handshake_at).toISOString() : null,
       last_error: manifest?.health === "unavailable" ? "runtime_unreachable" : manifest?.health === "degraded" ? "runtime_degraded" : null,
-      execution_enabled: false,
+      execution_enabled: isHealthy && isAvailable,
+      execution_mode: policy.mode,
+      supported_task_kinds: ["analyze_repo", "generate_patch", "verify_runtime", "list_files", "read_file"],
+      artifact_contract: "strict",
+      destructive_operations_allowed: policy.mode === "full",
+      sandbox_restrictions: policy.sandbox_restrictions,
     };
   });
+
+  // KCA-14.1: Execution Stream Events
+  app.get<{ Params: { task_id: string } }>(
+    "/v1/build/tasks/:task_id/stream",
+    async (req, reply) => {
+      const task_id = req.params.task_id;
+      const store = getExecutionStreamStore();
+      const events = store.getStreamEvents(task_id);
+      return { task_id, events };
+    }
+  );
 
   return app;
 }

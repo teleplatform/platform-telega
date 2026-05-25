@@ -1,5 +1,6 @@
 import type { BuildTask, BuildResult } from "../../types/telecore.js";
 import { getForgeBridge } from "./forge-bridge.js";
+import type { ForgeTaskKind } from "./forge-bridge.types.js";
 
 export interface DispatchedBuildResult {
   summary: BuildResult["summary"];
@@ -14,7 +15,7 @@ export interface DispatchedBuildResult {
 function mapToForgeParams(task: BuildTask) {
   const taskId = (task as any).task_id || task.meta?.task_id || `task_${Date.now()}`;
   const rawKind = (task as any).execution?.kind || (task as any).kind || "run_bridge_task";
-  const safeKinds = ["create_file","read_file","update_file","delete_file","list_files","run_code","run_bridge_task","verify_runtime","open_project","generic"] as const;
+  const safeKinds = ["create_file","read_file","update_file","delete_file","list_files","run_code","run_bridge_task","verify_runtime","open_project","generic","analyze_repo","generate_patch"] as const;
   const kind = (safeKinds as readonly string[]).includes(rawKind) ? rawKind : "run_bridge_task";
   const target = (task as any).execution?.target;
   const path = (task as any).execution?.path;
@@ -34,7 +35,7 @@ export async function dispatchBuildTask(
 
   try {
     const bridge = getForgeBridge();
-    const result = await bridge.run({ userId, kind: kind as any, target, path, input });
+    const result = await bridge.run({ userId, kind: kind as ForgeTaskKind, target, path, input });
     const duration_ms = Date.now() - start;
     return {
       summary: {

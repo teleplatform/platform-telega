@@ -28,11 +28,11 @@ export async function executeForgeControl(
 }
 
 async function handleRetry(action: ForgeControlAction, userId: string, role: string): Promise<ForgeControlResult> {
-  return { ok: true, action: "retry", summary: "Retry started", newInvocationId: \`inv_\${Date.now()}_retry\` };
+  return { ok: true, action: "retry", summary: "Retry started", newInvocationId: `inv_${Date.now()}_retry` };
 }
 
 async function handleRerun(action: ForgeControlAction, userId: string, role: string): Promise<ForgeControlResult> {
-  return { ok: true, action: "rerun", summary: "Rerun started", newInvocationId: \`inv_\${Date.now()}_rerun\` };
+  return { ok: true, action: "rerun", summary: "Rerun started", newInvocationId: `inv_${Date.now()}_rerun` };
 }
 
 async function handleCancel(action: ForgeControlAction, userId: string, role: string): Promise<ForgeControlResult> {

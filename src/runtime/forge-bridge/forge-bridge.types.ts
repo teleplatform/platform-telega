@@ -16,6 +16,13 @@ export type ForgeExecutionTarget = "forge_remote" | "kilo_mcp" | "sigma_forge" |
 
 export type SigmaForgeRuntimeHealth = "healthy" | "degraded" | "unavailable";
 
+export type SigmaForgeExecutionMode = "disabled" | "sandbox" | "creator_only" | "full";
+
+export interface SigmaForgeExecutionPolicy {
+  mode: SigmaForgeExecutionMode;
+  sandbox_restrictions?: string[];
+}
+
 export interface SigmaForgeCapabilityManifest {
   runtime_id: string;
   runtime_name: "sigma_forge";
@@ -28,6 +35,7 @@ export interface SigmaForgeCapabilityManifest {
   supports_streaming?: boolean;
   supports_artifacts?: boolean;
   checked_at: string;
+  execution_policy?: SigmaForgeExecutionPolicy;
 }
 
 export type ForgeTaskKind =
@@ -40,7 +48,9 @@ export type ForgeTaskKind =
   | "run_bridge_task"
   | "verify_runtime"
   | "open_project"
-  | "generic";
+  | "generic"
+  | "analyze_repo"
+  | "generate_patch";
 
 export interface ForgeTask {
   taskId: string;
@@ -57,11 +67,16 @@ export interface ForgeTask {
 export type ForgeResultStatus = "done" | "partial" | "blocked" | "failed";
 
 export interface ForgeArtifact {
+  artifact_id: string;
   kind: string;
+  artifact_type: "report" | "patch" | "log" | "validation" | "analysis";
   path?: string;
   name?: string;
   uri?: string;
   content?: string;
+  checksum?: string;
+  created_at: string;
+  source_executor: "sigma_forge" | "forge_remote" | "kilo_mcp";
 }
 
 export interface ForgeDiagnostics {
@@ -140,6 +155,8 @@ export function mapTaskKindToKiloTool(kind: ForgeTaskKind): string {
     verify_runtime: "verify_runtime",
     open_project: "open_project",
     generic: "generic_task",
+    analyze_repo: "analyze_repo",
+    generate_patch: "generate_patch",
   };
   return mapping[kind] || "generic_task";
 }

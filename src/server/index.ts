@@ -16,7 +16,12 @@ import { registerAgentRoute } from "./routes/agent.route.js";
 import { registerForgeRoute } from "./routes/forge.route.js";
 import { registerPatchRoute } from "./routes/patch.route.js";
 import { registerForgeActionRoute } from "./routes/forge-action.route.js";
+import { registerMissionControlRoute } from "./routes/mission-control.route.js";
 import { startTelegramBotIfEnabled } from "../telegram/bot.js";
+import { initializeFacts } from "../runtime/identity/index.js";
+import { initializeIdentityMemory, recordRuntimeEvent } from "../runtime/memory/index.js";
+import { loadGoals, recoverGoals, getAbandonedAlert } from "../runtime/goals/index.js";
+import { loadTasks, recoverTasks } from "../runtime/execution/index.js";
 import { registerPolicyGate } from "../apps/http/registerPolicyGate.js";
 import {
   guardrails429Total,
@@ -63,6 +68,40 @@ const app = Fastify({
   trustProxy: process.env.TELEGPT_TRUST_PROXY === "1",
 });
 
+initializeFacts();
+initializeIdentityMemory();
+recordRuntimeEvent("server_start", `PID ${process.pid}`);
+
+// Recover goals after restart
+loadGoals();
+const goalRecovery = recoverGoals();
+if (goalRecovery.recovered > 0 || goalRecovery.abandoned > 0) {
+  app.log.info({ goalRecovery }, "[goals] recovery complete");
+  if (goalRecovery.recovered > 0) {
+    for (const d of goalRecovery.details.filter(d => d.startsWith("[recovered]"))) {
+      app.log.info({ detail: d }, "[goals] recovered");
+    }
+  }
+} else {
+  app.log.info("[goals] no goals to recover");
+}
+const abandonedAlert = getAbandonedAlert();
+if (abandonedAlert) {
+  app.log.warn({ abandoned: abandonedAlert }, "[goals] abandoned goals detected");
+}
+
+// Recover interrupted tasks after restart
+loadTasks();
+const taskRecovery = recoverTasks();
+if (taskRecovery.recovered > 0 || taskRecovery.failed > 0) {
+  app.log.info({ taskRecovery }, "[execution] task recovery complete");
+  for (const d of taskRecovery.details) {
+    app.log.info({ detail: d }, "[execution] task recovery detail");
+  }
+} else {
+  app.log.info("[execution] no tasks to recover");
+}
+
 void startTelegramBotIfEnabled().catch((err) => {
   app.log.error({ err }, "[telegram] bot start failed");
 });
@@ -76,6 +115,7 @@ await registerAgentRoute(app);
 await registerForgeRoute(app);
 await registerPatchRoute(app);
 await registerForgeActionRoute(app);
+await registerMissionControlRoute(app);
 
 const MAX_CONCURRENCY = Math.max(
   1,

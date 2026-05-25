@@ -19,6 +19,16 @@ export interface TelegramSendResult {
   error?: string;
 }
 
+export interface TelegramConfigValidationResult {
+  ok: boolean;
+  enabled: boolean;
+  dry_run: boolean;
+  has_bot_token: boolean;
+  has_chat_id: boolean;
+  send_test?: TelegramSendResult;
+  errors: string[];
+}
+
 export interface TelegramEditMessagePayload {
   chat_id: string | number;
   message_id: number;
@@ -40,6 +50,48 @@ export function loadTelegramSenderConfig(): TelegramSenderConfig {
     default_chat_id: process.env.TELEGRAM_MISSION_CONTROL_CHAT_ID,
     enabled: process.env.TELEGRAM_MISSION_CONTROL_ENABLED === "true",
     dry_run: process.env.TELEGRAM_MISSION_CONTROL_DRY_RUN !== "false",
+  };
+}
+
+export async function validateTelegramMissionControlConfig(input?: {
+  send_test?: boolean;
+  config?: TelegramSenderConfig;
+}): Promise<TelegramConfigValidationResult> {
+  const cfg = input?.config || loadTelegramSenderConfig();
+  const errors: string[] = [];
+  const hasToken = !!cfg.bot_token;
+  const hasChatId = !!cfg.default_chat_id;
+
+  if (!cfg.dry_run && !hasToken) errors.push("missing bot token");
+  if (!hasChatId) errors.push("missing chat id");
+
+  let sendTest: TelegramSendResult | undefined;
+  if (input?.send_test) {
+    const chatId = cfg.default_chat_id || "0";
+    sendTest = await sendTelegramMissionControlMessage(
+      {
+        chat_id: chatId,
+        text: [
+          "Mission Control config validation",
+          "",
+          `enabled: ${cfg.enabled}`,
+          `dry_run: ${cfg.dry_run !== false}`,
+          `checked_at: ${new Date().toISOString()}`,
+        ].join("\n"),
+      },
+      { ...cfg, enabled: true, dry_run: cfg.dry_run !== false || !hasToken },
+    );
+    if (!sendTest.ok) errors.push(sendTest.error || "test send failed");
+  }
+
+  return {
+    ok: errors.length === 0 || cfg.dry_run !== false,
+    enabled: cfg.enabled,
+    dry_run: cfg.dry_run !== false,
+    has_bot_token: hasToken,
+    has_chat_id: hasChatId,
+    send_test: sendTest,
+    errors,
   };
 }
 
