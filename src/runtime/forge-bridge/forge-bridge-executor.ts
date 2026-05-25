@@ -16,6 +16,7 @@ export class ForgeBridgeExecutor {
   constructor(
     private readonly forgeHttpAdapter: ForgeAdapter,
     private readonly kiloMcpAdapter: ForgeAdapter,
+    private readonly sigmaForgeAdapter: ForgeAdapter,
   ) {}
 
   async execute(task: ForgeTask): Promise<ForgeResult> {
@@ -25,6 +26,9 @@ export class ForgeBridgeExecutor {
 
       case "kilo_mcp":
         return this.kiloMcpAdapter.execute(task);
+
+      case "sigma_forge":
+        return this.sigmaForgeAdapter.execute(task);
 
       default:
         return createForgeResult({
@@ -45,10 +49,11 @@ let executorInstance: ForgeBridgeExecutor | null = null;
 
 export function getForgeBridgeExecutor(
   forgeHttpAdapter: ForgeAdapter,
-  kiloMcpAdapter: ForgeAdapter
+  kiloMcpAdapter: ForgeAdapter,
+  sigmaForgeAdapter: ForgeAdapter
 ): ForgeBridgeExecutor {
   if (!executorInstance) {
-    executorInstance = new ForgeBridgeExecutor(forgeHttpAdapter, kiloMcpAdapter);
+    executorInstance = new ForgeBridgeExecutor(forgeHttpAdapter, kiloMcpAdapter, sigmaForgeAdapter);
   }
   return executorInstance;
 }

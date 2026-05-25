@@ -15,6 +15,7 @@ import type {
   ForgeResult,
   ForgeTaskKind,
   ForgeExecutionTarget,
+  ForgeAdapter,
 } from "./forge-bridge.types.js";
 import { createForgeTask, createForgeResult } from "./forge-bridge.types.js";
 import {
@@ -24,6 +25,7 @@ import {
 import { ForgeBridgeExecutor } from "./forge-bridge-executor.js";
 import { ForgeHttpAdapter } from "./adapters/forge-http.adapter.js";
 import { KiloMcpAdapter } from "./adapters/kilo-mcp.adapter.js";
+import { SigmaForgeAdapter } from "./adapters/sigma-forge.adapter.js";
 
 export class ForgeBridge {
   private executor: ForgeBridgeExecutor;
@@ -68,11 +70,13 @@ let forgeBridgeInstance: ForgeBridge | null = null;
 export function initForgeBridge(config?: {
   forgeHttpAdapter?: ForgeHttpAdapter;
   kiloMcpAdapter?: KiloMcpAdapter;
+  sigmaForgeAdapter?: ForgeAdapter;
 }): ForgeBridge {
   const forgeHttp = config?.forgeHttpAdapter || new ForgeHttpAdapter(async () => ({}));
   const kiloMcp = config?.kiloMcpAdapter || new KiloMcpAdapter();
+  const sigmaForge = config?.sigmaForgeAdapter || new SigmaForgeAdapter();
 
-  const executor = new ForgeBridgeExecutor(forgeHttp, kiloMcp);
+  const executor = new ForgeBridgeExecutor(forgeHttp, kiloMcp, sigmaForge);
   forgeBridgeInstance = new ForgeBridge(executor);
   return forgeBridgeInstance;
 }

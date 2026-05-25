@@ -12,7 +12,7 @@
 // - executor is replaceable without surface change
 // ─────────────────────────────────────────────────────────────
 
-export type ForgeExecutionTarget = "forge_remote" | "kilo_mcp" | "unknown";
+export type ForgeExecutionTarget = "forge_remote" | "kilo_mcp" | "sigma_forge" | "unknown";
 
 export type ForgeTaskKind =
   | "create_file"
