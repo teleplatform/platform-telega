@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
+import type { MissionControlBuildTaskEventSeverity } from "../runtime/mission-control/build-task-event.js";
 import type { ChatRequest, ChatResponse } from "../types/chat.js";
 import { routeChat } from "../core/router.js";
 import { buildAgentSystemPrompt, DEFAULT_SALES_TEMPLATE } from "../core/agent.js";
@@ -33,8 +34,16 @@ import type {
   BuildTaskListItem,
   BuildTaskListResponse,
   TraceListResponse,
+  CreatorDecisionRequest,
+  CreatorDecisionResponse,
 } from "../types/api.js";
 import type { BuildResult, BuildTask } from "../types/telecore.js";
+import { dispatchBuildTask } from "../runtime/forge-bridge/job-dispatcher.js";
+import { getRetryDecision, getNextRetryAt, DEFAULT_BACKOFF_POLICY } from "../runtime/forge-bridge/retry-policy.js";
+import { createBuildTaskMissionEvent } from "../runtime/mission-control/build-task-event.js";
+import { emitMissionControlLiveEvent } from "../runtime/hooks/mission-control-live-feed-hook.js";
+import { appendMissionControlPersistenceFeed } from "../runtime/mission-control/operational-runtime.js";
+import { deliverBuildTaskMissionEvent } from "../runtime/mission-control/delivery/telegram-build-task-delivery.js";
 
 type HeartbeatRequest = {
   runner_id?: string;
@@ -69,7 +78,7 @@ function clampLimit(limit: number | undefined) {
 
 function parseTaskStatus(v: unknown) {
   if (typeof v !== "string") return undefined;
-  if (v === "queued" || v === "running" || v === "done" || v === "partial" || v === "blocked") {
+  if (v === "queued" || v === "running" || v === "retrying" || v === "done" || v === "partial" || v === "blocked" || v === "failed" || v === "cancelled" || v === "timed_out" || v === "self_healing" || v === "needs_creator") {
     return v;
   }
   return "INVALID";
@@ -79,6 +88,10 @@ function parseTaskVisibility(v: unknown) {
   if (typeof v !== "string") return undefined;
   if (v === "public" || v === "creator" || v === "core") return v;
   return "INVALID";
+}
+
+function isValidBuildTask(b: any): b is BuildTask {
+  return !!b && b.type === "build_task" && b.version === "1.0" && b.goal && typeof b.goal.title === "string";
 }
 
 function withStale(
@@ -133,6 +146,165 @@ export async function buildServer() {
     windowMs: 60000,
     cooldownMs: 120000,
   });
+
+  function mapMissionBuildTaskSeverityToLiveSeverity(
+    severity: MissionControlBuildTaskEventSeverity
+  ): "critical" | "high" | "medium" | "low" | "info" {
+    switch (severity) {
+      case "critical":
+        return "critical";
+      case "error":
+        return "high";
+      case "warning":
+        return "medium";
+      case "success":
+        return "low";
+      case "info":
+      default:
+        return "info";
+    }
+  }
+
+  // KCA-6.3a — extracted helpers for single retry/finalize path (shared across dispatch and stale sweep)
+  function finalizeDispatchResult(task_id: string, dispatched: any, traceId: string) {
+    const finalStatus = dispatched.summary.status as any;
+    const effectiveTraceId = dispatched.execution?.trace_id ?? traceId;
+    const canonical: BuildResult = {
+      type: "build_result",
+      version: "1.0",
+      summary: dispatched.summary,
+      execution: dispatched.execution,
+      diagnostics: (dispatched as any).diagnostics,
+    };
+    store.setBuildResult({
+      task_id,
+      status: finalStatus,
+      result_json: JSON.stringify(canonical),
+      updated_at: Date.now(),
+      completed_at: Date.now(),
+      executor_target: (dispatched as any).executor?.target || null,
+      executor_id: (dispatched as any).executor?.id || null,
+      last_error: (dispatched as any).diagnostics?.error || null,
+    });
+
+    store.markBuildTaskCompleted({
+      task_id,
+      now: Date.now(),
+      status: finalStatus,
+      last_error: (dispatched as any).diagnostics?.error || null,
+    });
+  }
+
+  function handleDispatchFailureWithRetryPolicy(
+    task_id: string,
+    failureStatus: string,
+    dispatchedOrError: any,
+    traceId: string
+  ) {
+    const current = store.getBuildTask(task_id);
+    const decision = getRetryDecision({
+      status: failureStatus,
+      retry_count: current?.retry_count ?? 0,
+    });
+
+    const errorMsg = typeof dispatchedOrError === "string" 
+      ? dispatchedOrError 
+      : String(dispatchedOrError?.diagnostics?.error || dispatchedOrError);
+
+    if (decision.can_retry) {
+      const newCount = (current?.retry_count ?? 0) + 1;
+      const now = Date.now();
+      const nextRetryAt = getNextRetryAt(now, newCount - 1, DEFAULT_BACKOFF_POLICY);
+
+      store.updateBuildTaskCAS({
+        task_id,
+        expected_version: current?.version ?? 0,
+        patch: {
+          status: "retrying",
+          retry_count: newCount,
+          last_error: errorMsg,
+          next_retry_at: nextRetryAt,
+        },
+        now,
+      } as any);
+
+      const mcEvent = createBuildTaskMissionEvent({
+        event_type: "build_task.retry_scheduled",
+        task_id,
+        status: "retrying",
+        last_error: errorMsg,
+        retry_count: newCount,
+      });
+
+      void emitMissionControlLiveEvent({
+        kind: "execution_failed",
+        severity: mapMissionBuildTaskSeverityToLiveSeverity(mcEvent.severity),
+        title: `BuildTask retry scheduled (${newCount}/${decision.max_attempts}) after ${nextRetryAt - now}ms: ${task_id}`,
+        trace_id: task_id,
+        payload: mcEvent,
+      });
+      appendMissionControlPersistenceFeed(mcEvent as any);
+      void deliverBuildTaskMissionEvent(mcEvent);
+    } else if (decision.reason === "retry_budget_exhausted") {
+      const resumeToken = crypto.randomUUID();
+      store.updateBuildTaskCAS({
+        task_id,
+        expected_version: current?.version ?? 0,
+        patch: {
+          status: "needs_creator",
+          last_error: errorMsg,
+          needs_creator_reason: "retry_budget_exhausted",
+          decision_options: JSON.stringify(["approve_retry", "cancel_task", "mark_blocked"]),
+          resume_token: resumeToken,
+          creator_decision_status: "pending",
+          creator_decision_at: Date.now(),
+        },
+        now: Date.now(),
+      } as any);
+
+      const mcEvent = createBuildTaskMissionEvent({
+        event_type: "build_task.needs_creator",
+        task_id,
+        status: "needs_creator",
+        last_error: errorMsg,
+      });
+
+      void emitMissionControlLiveEvent({
+        kind: "approval_required",
+        severity: mapMissionBuildTaskSeverityToLiveSeverity(mcEvent.severity),
+        title: `BuildTask needs creator (retries exhausted): ${task_id}`,
+        trace_id: task_id,
+        payload: mcEvent,
+      });
+      appendMissionControlPersistenceFeed(mcEvent as any);
+      void deliverBuildTaskMissionEvent(mcEvent);
+    } else {
+      const canonicalFailed: BuildResult = {
+        type: "build_result",
+        version: "1.0",
+        summary: {
+          status: "failed",
+          task_id,
+          mode_used: "smart",
+          iterations_used: 0,
+        },
+        diagnostics: { error: errorMsg },
+      };
+      store.setBuildResult({
+        task_id,
+        status: "failed",
+        result_json: JSON.stringify(canonicalFailed),
+        updated_at: Date.now(),
+        completed_at: Date.now(),
+        last_error: errorMsg,
+      });
+      store.markBuildTaskFailed({
+        task_id,
+        now: Date.now(),
+        last_error: errorMsg,
+      });
+    }
+  }
 
   app.get("/health", async () => {
     return { ok: true };
@@ -1145,9 +1317,11 @@ export async function buildServer() {
         : "creator";
 
     const task_id =
-      body.meta?.task_id && body.meta.task_id !== "auto"
+      (typeof (body as any).task_id === "string" && (body as any).task_id !== "auto"
+        ? (body as any).task_id
+        : body.meta?.task_id && body.meta.task_id !== "auto"
         ? body.meta.task_id
-        : hexId24();
+        : hexId24());
 
     const now = Date.now();
     const task_json = JSON.stringify({
@@ -1163,9 +1337,65 @@ export async function buildServer() {
       task_json,
       created_at: now,
       updated_at: now,
-    });
+      queued_at: now,
+    } as any);
 
-    return { task_id, status: "queued" };
+    // KCA-5.2: emit queued lifecycle event
+    {
+      const mcEvent = createBuildTaskMissionEvent({
+        event_type: "build_task.queued",
+        task_id,
+        status: "queued",
+        title,
+      });
+      void emitMissionControlLiveEvent({
+        kind: "attention_queued",
+        severity: mcEvent.severity,
+        title: `BuildTask queued: ${task_id}`,
+        trace_id: task_id,
+        payload: mcEvent,
+      });
+      appendMissionControlPersistenceFeed(mcEvent as any);
+
+      void deliverBuildTaskMissionEvent(mcEvent);
+    }
+
+    // KCA-2.1: queue fast, execute owned in background, HTTP returns immediately
+    if (isValidBuildTask(body)) {
+      const traceId = hexId24();
+
+      queueMicrotask(() => {
+        // KCA-4.3: use safe mark method for start
+        const startNow = Date.now();
+        store.markBuildTaskStarted({
+          task_id,
+          now: startNow,
+          executor_target: (body as any).execution?.target || "auto",
+        });
+
+        dispatchBuildTask(body as BuildTask, traceId)
+          .then((dispatched) => {
+            const finalStatus = dispatched.summary.status as any;
+
+            if (finalStatus === "failed" || finalStatus === "timed_out") {
+              handleDispatchFailureWithRetryPolicy(task_id, finalStatus, dispatched, traceId);
+            } else {
+              finalizeDispatchResult(task_id, dispatched, traceId);
+            }
+          })
+          .catch((err) => {
+            handleDispatchFailureWithRetryPolicy(task_id, "failed", err, traceId);
+          });
+      });
+    }
+
+    return {
+      task_id,
+      status: "queued",
+      immediate_status: "queued",
+      dispatch_mode: "async",
+      poll_url: `/v1/build/tasks/${task_id}`,
+    };
   });
 
   app.post<{ Params: { task_id: string }; Body: BuildResult }>(
@@ -1182,13 +1412,14 @@ export async function buildServer() {
       }
 
       const status = body.summary?.status;
-      if (status !== "done" && status !== "partial" && status !== "blocked") {
+      if (status !== "done" && status !== "partial" && status !== "blocked" && status !== "failed" && status !== "cancelled" && status !== "timed_out") {
         return reply
           .status(400)
           .send(apiError(t, "BAD_REQUEST", "invalid status"));
       }
 
-      if (body.summary?.task_id && body.summary.task_id !== task_id) {
+      const resultTaskId = (body as any).task_id || body.summary?.task_id;
+      if (resultTaskId && resultTaskId !== task_id) {
         return reply
           .status(400)
           .send(apiError(t, "BAD_REQUEST", "task_id mismatch"));
@@ -1201,9 +1432,15 @@ export async function buildServer() {
           .send(apiError(task_id, "NOT_FOUND", "task not found"));
       }
 
-      // P11: запрет регрессии терминальных статусов
-      const terminal = new Set(["done", "partial", "blocked"]);
-      if (terminal.has(task.status)) {
+      // KCA-4.1 Lifecycle semantics:
+      // terminal     = final states, no further execution
+      // protected    = cannot regress without explicit Creator action
+      // self_healing = transitional recovery mode (can move to running/failed/needs_creator/done)
+      // needs_creator = paused, waiting for explicit human decision
+      const terminal = new Set(["done", "partial", "blocked", "failed", "cancelled", "timed_out"]);
+      const protectedStates = new Set([...terminal, "needs_creator"]);
+
+      if (protectedStates.has(task.status)) {
         return reply
           .status(409)
           .send(apiError(task_id, "STATUS_CONFLICT", `task already ${task.status}`));
@@ -1333,6 +1570,11 @@ export async function buildServer() {
     const task_json = row.task_json ? safeJsonParse(row.task_json) : null;
     const result_json = row.result_json ? safeJsonParse(row.result_json) : null;
 
+    // KCA-3.1: hydrate key fields from canonical result_json for convenient polling
+    const resultStatus = (result_json as any)?.summary?.status ?? null;
+    const trace_id = (result_json as any)?.execution?.trace_id ?? null;
+    const diagnostics = (result_json as any)?.diagnostics ?? null;
+
     const now = Date.now();
     const details: BuildTaskDetailResponse = {
       task_id: row.task_id,
@@ -1345,6 +1587,22 @@ export async function buildServer() {
       result_json,
       error_code: row.error_code ?? null,
       error_message: row.error_message ?? null,
+      result_status: resultStatus,
+      trace_id,
+      diagnostics,
+      queued_at: row.queued_at ?? null,
+      started_at: row.started_at ?? null,
+      completed_at: row.completed_at ?? null,
+      retry_count: row.retry_count ?? 0,
+      executor_target: row.executor_target ?? null,
+      executor_id: row.executor_id ?? null,
+      last_error: row.last_error ?? null,
+      next_retry_at: row.next_retry_at ?? null,
+      needs_creator_reason: row.needs_creator_reason ?? null,
+      decision_options: row.decision_options ? JSON.parse(row.decision_options) : null,
+      resume_token: row.resume_token ?? null,
+      creator_decision_status: row.creator_decision_status ?? null,
+      creator_decision_at: row.creator_decision_at ?? null,
       ...withStale(row, now, staleMs),
     };
     return details;
@@ -1363,9 +1621,62 @@ export async function buildServer() {
       const cutoff = now - staleMs;
       const out = store.sweepStaleRunning({ visibility: visibilityParsed, now, cutoff });
 
+      // KCA-6.3b: Re-dispatch tasks that transitioned to retrying
+      for (const task of out.redispatch_tasks) {
+        const traceId = hexId24();
+        queueMicrotask(() => {
+          store.markBuildTaskStarted({
+            task_id: task.task_id,
+            now: Date.now(),
+            executor_target: "auto",
+          });
+          dispatchBuildTask(JSON.parse(task.task_json) as BuildTask, traceId)
+            .then((dispatched) => {
+              const finalStatus = dispatched.summary.status as any;
+              if (finalStatus === "failed" || finalStatus === "timed_out") {
+                handleDispatchFailureWithRetryPolicy(task.task_id, finalStatus, dispatched, traceId);
+              } else {
+                finalizeDispatchResult(task.task_id, dispatched, traceId);
+              }
+            })
+            .catch((err) => handleDispatchFailureWithRetryPolicy(task.task_id, "failed", err, traceId));
+        });
+      }
+
       return { ok: true, now, cutoff, ...out };
     }
   );
+
+  // KCA-6.4: Process scheduled retries
+  app.post("/v1/build/tasks/sweep-retry", async (req, reply) => {
+    const now = Date.now();
+    const retryTasks = store.getScheduledRetryTasks({ now });
+    let processed = 0;
+
+    for (const task of retryTasks) {
+      const parsedTask = JSON.parse(task.task_json) as BuildTask;
+      queueMicrotask(() => {
+        store.markBuildTaskStarted({
+          task_id: task.task_id,
+          now: Date.now(),
+          executor_target: "auto",
+        });
+        dispatchBuildTask(parsedTask, hexId24())
+          .then((dispatched) => {
+            const finalStatus = dispatched.summary.status as any;
+            if (finalStatus === "failed" || finalStatus === "timed_out") {
+              handleDispatchFailureWithRetryPolicy(task.task_id, finalStatus, dispatched, hexId24());
+            } else {
+              finalizeDispatchResult(task.task_id, dispatched, hexId24());
+            }
+          })
+          .catch((err) => handleDispatchFailureWithRetryPolicy(task.task_id, "failed", err, hexId24()));
+      });
+      processed++;
+    }
+
+    return { ok: true, now, processed };
+  });
 
   app.get<{ Querystring: { visibility?: string } }>(
     "/v1/build/tasks/summary",
@@ -1398,6 +1709,128 @@ export async function buildServer() {
         counts,
       };
       return res;
+    }
+  );
+
+  // KCA-7.2: Creator Decision API
+  app.post<{ Params: { task_id: string }; Body: CreatorDecisionRequest }>(
+    "/v1/build/tasks/:task_id/creator-decision",
+    async (req, reply) => {
+      const task_id = req.params.task_id;
+      const body = req.body as CreatorDecisionRequest | undefined;
+
+      if (!body || !body.decision) {
+        return reply.status(400).send(apiError(hexId24(), "BAD_REQUEST", "decision is required"));
+      }
+
+      const validDecisions: Array<"approve_retry" | "cancel_task" | "mark_blocked" | "resume_with_note"> = [
+        "approve_retry",
+        "cancel_task",
+        "mark_blocked",
+        "resume_with_note",
+      ];
+      if (!validDecisions.includes(body.decision)) {
+        return reply.status(400).send(apiError(hexId24(), "BAD_REQUEST", "invalid decision"));
+      }
+
+      const task = store.getBuildTask(task_id);
+      if (!task) {
+        return reply.status(404).send(apiError(task_id, "NOT_FOUND", "task not found"));
+      }
+
+      if (task.status !== "needs_creator") {
+        return reply.status(409).send(apiError(task_id, "STATUS_CONFLICT", "task is not in needs_creator status"));
+      }
+
+      if (task.creator_decision_status && task.creator_decision_status !== "pending") {
+        return reply.status(409).send(apiError(task_id, "STATUS_CONFLICT", "creator decision already processed"));
+      }
+
+      if (body.note && !task.resume_token) {
+        return reply.status(400).send(apiError(task_id, "BAD_REQUEST", "resume_token required for note"));
+      }
+
+      const now = Date.now();
+      let newStatus: string;
+      let nextRetryAt: number | null = null;
+
+      if (body.decision === "approve_retry") {
+        newStatus = "retrying";
+        nextRetryAt = getNextRetryAt(now, (task.retry_count ?? 0) + 1, DEFAULT_BACKOFF_POLICY);
+      } else if (body.decision === "cancel_task") {
+        newStatus = "cancelled";
+      } else if (body.decision === "mark_blocked") {
+        newStatus = "blocked";
+      } else {
+        newStatus = "retrying";
+        nextRetryAt = null;
+      }
+
+      const updateResult = store.updateBuildTaskCAS({
+        task_id,
+        expected_version: task.version ?? 0,
+        patch: {
+          status: newStatus as any,
+          creator_decision_status: "approved",
+          creator_decision_at: now,
+          note: body.note ?? null,
+          ...(nextRetryAt ? { next_retry_at: nextRetryAt } : {}),
+        },
+        now,
+      });
+
+      if (updateResult.changed <= 0) {
+        return reply.status(409).send(apiError(task_id, "STATUS_CONFLICT", "failed to update task"));
+      }
+
+      const mcEvent = createBuildTaskMissionEvent({
+        event_type: "build_task.creator_decision",
+        task_id,
+        status: newStatus,
+        decision: body.decision,
+        note: body.note,
+      });
+
+      void emitMissionControlLiveEvent({
+        kind: "approval_resolved",
+        severity: mapMissionBuildTaskSeverityToLiveSeverity(mcEvent.severity),
+        title: `Creator decision: ${body.decision} for ${task_id}`,
+        trace_id: task_id,
+        payload: mcEvent,
+      });
+      appendMissionControlPersistenceFeed(mcEvent as any);
+      void deliverBuildTaskMissionEvent(mcEvent);
+
+      const response: CreatorDecisionResponse = {
+        task_id,
+        status: newStatus as any,
+        creator_decision_status: "approved",
+        note: body.note ?? null,
+      };
+
+      return response;
+    }
+  );
+
+  // KCA-7.2: Get creator decision status
+  app.get<{ Params: { task_id: string } }>(
+    "/v1/build/tasks/:task_id/creator-decision",
+    async (req, reply) => {
+      const task_id = req.params.task_id;
+
+      const task = store.getBuildTask(task_id);
+      if (!task) {
+        return reply.status(404).send(apiError(task_id, "NOT_FOUND", "task not found"));
+      }
+
+      const response: CreatorDecisionResponse = {
+        task_id,
+        status: task.status as any,
+        creator_decision_status: task.creator_decision_status ?? "none",
+        note: task.note ?? null,
+      };
+
+      return response;
     }
   );
 

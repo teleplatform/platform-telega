@@ -172,4 +172,31 @@ export type BuildTaskDetailResponse = BuildTaskListItem & {
   result_json: unknown | null;
   error_code?: string | null;
   error_message?: string | null;
+  queued_at?: number | null;
+  started_at?: number | null;
+  completed_at?: number | null;
+  retry_count?: number;
+  executor_target?: string | null;
+  executor_id?: string | null;
+  last_error?: string | null;
+  next_retry_at?: number | null;
+  needs_creator_reason?: string | null;
+  decision_options?: unknown | null;
+  resume_token?: string | null;
+  creator_decision_status?: string | null;
+  creator_decision_at?: number | null;
+};
+
+export type CreatorDecisionOption = "approve_retry" | "cancel_task" | "mark_blocked" | "resume_with_note";
+
+export type CreatorDecisionRequest = {
+  decision: CreatorDecisionOption;
+  note?: string;
+};
+
+export type CreatorDecisionResponse = {
+  task_id: string;
+  status: BuildTaskStatus;
+  creator_decision_status: string;
+  note?: string | null;
 };
