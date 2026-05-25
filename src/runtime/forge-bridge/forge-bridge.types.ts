@@ -14,6 +14,22 @@
 
 export type ForgeExecutionTarget = "forge_remote" | "kilo_mcp" | "sigma_forge" | "unknown";
 
+export type SigmaForgeRuntimeHealth = "healthy" | "degraded" | "unavailable";
+
+export interface SigmaForgeCapabilityManifest {
+  runtime_id: string;
+  runtime_name: "sigma_forge";
+  version: string;
+  protocol_version: "telecore-build-v1";
+  health: SigmaForgeRuntimeHealth;
+  capabilities: string[];
+  supported_targets: string[];
+  max_concurrent_tasks?: number;
+  supports_streaming?: boolean;
+  supports_artifacts?: boolean;
+  checked_at: string;
+}
+
 export type ForgeTaskKind =
   | "create_file"
   | "read_file"

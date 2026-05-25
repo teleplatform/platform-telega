@@ -38,6 +38,9 @@ export * from "./forge-evidence-operator-smoke.js";
 
 export * from "./adapters/forge-http.adapter.js";
 export * from "./adapters/kilo-mcp.adapter.js";
+export * from "./adapters/sigma-forge.adapter.js";
+
+export * from "./retry-policy.js";
 
 export const FORGE_BRIDGE_VERSION = "v1";
 
