@@ -563,6 +563,45 @@ async function runTests() {
     
     assert.ok(waveCount <= 2, "should not exceed max iterations");
   });
+
+  console.log("\nScheduler Result Aggregation:");
+
+  await beforeEachAsync();
+  await asyncTest("scheduler result has structured fields", async () => {
+    const { runScheduler } = await import("../../../src/runtime/forge-bridge/dag-wave-scheduler-loop.js");
+    const store = getTestStore();
+    await store.create({
+      group_id: "group_agg",
+      child_task_ids: ["t1", "t2"],
+      group_strategy: "parallel",
+    });
+    const result = await runScheduler("group_agg", { maxIterations: 1 });
+    
+    assert.equal(result.group_id, "group_agg");
+    assert.equal(typeof result.status, "string");
+    assert.equal(typeof result.waves_run, "number");
+    assert.equal(typeof result.tasks_dispatched, "number");
+    assert.ok(Array.isArray(result.tasks_completed));
+    assert.ok(Array.isArray(result.tasks_failed));
+    assert.ok(Array.isArray(result.tasks_blocked));
+    assert.equal(typeof result.started_at, "string");
+    assert.equal(typeof result.completed_at, "string");
+  });
+
+  await beforeEachAsync();
+  await asyncTest("scheduler tracks completed tasks", async () => {
+    const { runScheduler } = await import("../../../src/runtime/forge-bridge/dag-wave-scheduler-loop.js");
+    const store = getTestStore();
+    await store.create({
+      group_id: "group_agg2",
+      child_task_ids: ["t1", "t2"],
+      group_strategy: "parallel",
+    });
+    const result = await runScheduler("group_agg2", { maxIterations: 2 });
+    
+    assert.ok(result.tasks_completed.length >= 0);
+    assert.ok(result.tasks_completed.length <= 4);
+  });
 }
 
 runTests().then(() => {
