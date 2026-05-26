@@ -383,7 +383,7 @@ async function runTests() {
 
   await beforeEachAsync();
   await asyncTest("controlled dispatch skips blocked tasks", async () => {
-    const store = getTaskGroupStore();
+    const store = getTestStore();
     await store.create({
       group_id: "group_controlled",
       child_task_ids: ["t1", "t2", "t3"],
@@ -401,6 +401,71 @@ async function runTests() {
     assert.ok(failedTasks.includes("t2"));
     assert.ok(failedTasks.includes("t3"));
     assert.equal(readyTasks.length, 1, "only 1 task should be ready to dispatch");
+  });
+
+  console.log("\nReady Queue Scheduler:");
+
+  await beforeEachAsync();
+  await asyncTest("ready queue built from dependency truth", async () => {
+    const { getReadyQueueScheduler } = await import("../../../src/runtime/forge-bridge/dag-ready-queue-scheduler.js");
+    const store = getTestStore();
+    await store.create({
+      group_id: "group_queue",
+      child_task_ids: ["t1", "t2", "t3"],
+      group_strategy: "sequential",
+    });
+    const evaluations = await store.evaluateTaskReadiness("group_queue");
+    const scheduler = getReadyQueueScheduler();
+    const snapshot = await scheduler.buildReadyQueue("group_queue", evaluations);
+    
+    assert.equal(snapshot.group_id, "group_queue");
+    assert.equal(snapshot.ready.length, 3);
+    assert.equal(snapshot.ready[0].task_id, "t1");
+    assert.equal(snapshot.ready[1].task_id, "t2");
+    assert.equal(snapshot.ready[2].task_id, "t3");
+    assert.equal(snapshot.blocked.length, 0);
+    assert.equal(snapshot.failed.length, 0);
+  });
+
+  await beforeEachAsync();
+  await asyncTest("blocked tasks excluded from ready queue", async () => {
+    const { getReadyQueueScheduler } = await import("../../../src/runtime/forge-bridge/dag-ready-queue-scheduler.js");
+    const store = getTestStore();
+    await store.create({
+      group_id: "group_queue_blocked",
+      child_task_ids: ["t1", "t2", "t3"],
+      group_strategy: "sequential",
+    });
+    await store.addDependency({ group_id: "group_queue_blocked", task_id: "t2", depends_on: "t1" });
+    const evaluations = await store.evaluateTaskReadiness("group_queue_blocked");
+    const scheduler = getReadyQueueScheduler();
+    const snapshot = await scheduler.buildReadyQueue("group_queue_blocked", evaluations);
+    
+    assert.equal(snapshot.ready.length, 2);
+    assert.ok(snapshot.ready.map(r => r.task_id).includes("t1"));
+    assert.ok(snapshot.ready.map(r => r.task_id).includes("t3"));
+    assert.deepEqual(snapshot.blocked, ["t2"]);
+  });
+
+  await beforeEachAsync();
+  await asyncTest("failed tasks excluded from ready queue", async () => {
+    const { getReadyQueueScheduler } = await import("../../../src/runtime/forge-bridge/dag-ready-queue-scheduler.js");
+    const store = getTestStore();
+    await store.create({
+      group_id: "group_queue_failed",
+      child_task_ids: ["t1", "t2", "t3"],
+      group_strategy: "sequential",
+    });
+    await store.addDependency({ group_id: "group_queue_failed", task_id: "t2", depends_on: "t1" });
+    await store.addDependency({ group_id: "group_queue_failed", task_id: "t3", depends_on: "t2" });
+    await store.updateDependencyState("t2", "t1", "failed");
+    const evaluations = await store.evaluateTaskReadiness("group_queue_failed");
+    const scheduler = getReadyQueueScheduler();
+    const snapshot = await scheduler.buildReadyQueue("group_queue_failed", evaluations);
+    
+    assert.equal(snapshot.ready.length, 1);
+    assert.ok(snapshot.ready.map(r => r.task_id).includes("t1"));
+    assert.deepEqual(snapshot.failed, ["t2", "t3"]);
   });
 }
 
