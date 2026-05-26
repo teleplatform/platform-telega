@@ -346,6 +346,7 @@ async function runTests() {
     assert.ok(dag.failed_tasks.includes("t3"));
     assert.equal(dag.nodes.length, 3);
     assert.equal(dag.edges.length, 2);
+    assert.ok(dag.blocking_tasks.includes("t1"));
   });
 }
 
