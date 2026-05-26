@@ -103,3 +103,24 @@ export interface DagResponse {
   failed_tasks: string[];
   blocking_tasks: string[];
 }
+
+export type GroupEventType =
+  | "group_created"
+  | "group_dispatch_started"
+  | "child_task_started"
+  | "child_task_completed"
+  | "group_progress"
+  | "group_partial"
+  | "group_done"
+  | "group_failed"
+  | "group_needs_creator"
+  | "group_cancelled"
+  | "dependency_added"
+  | "dependency_blocked"
+  | "dependency_ready"
+  | "dependency_completed"
+  | "dependency_failed"
+  | "dag_created"
+  | "dag_status_changed";
+
+export type GroupEventPayload = Record<string, unknown>;

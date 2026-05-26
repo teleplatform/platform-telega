@@ -56,8 +56,9 @@ function computeChecksum(content: string): string {
 
 function emitStreamEvent(taskId: string, eventType: BuildTaskStreamEvent["event_type"], payload: Record<string, unknown>): void {
   const store = getExecutionStreamStore();
-  const sequence = store.getStreamEvents(taskId).length + 1;
-  store.append({
+  const events = store.get(taskId) ?? [];
+  const sequence = events.length + 1;
+  events.push({
     stream_id: `stream_${taskId}`,
     task_id: taskId,
     sequence,
@@ -65,6 +66,7 @@ function emitStreamEvent(taskId: string, eventType: BuildTaskStreamEvent["event_
     timestamp: Date.now(),
     payload,
   });
+  store.set(taskId, events);
 }
 
 function createArtifact(params: {

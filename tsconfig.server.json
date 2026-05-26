@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
-    "module": "commonjs",
-    "moduleResolution": "node",
-    "noEmit": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
     "target": "ES2022",
     "strict": true,
     "esModuleInterop": true,
@@ -13,17 +13,60 @@
     "paths": {
       "#i18n/messages": ["src/i18n/messages.ts"],
       "#i18n/keypath-runtime": ["src/i18n/messages.keypath.runtime.ts"]
-    },
-    "allowImportingTsExtensions": true
+    }
   },
   "include": [
     "src/server/index.ts",
     "src/channels/**/*.ts",
-    "src/runtime/**/*.ts",
-    "src/core/**/*.ts"
+    "src/runtime/forge-bridge/task-group-store.ts",
+    "src/runtime/forge-bridge/task-group-stream-store.ts",
+    "src/runtime/forge-bridge/task-group-backend.ts",
+    "src/runtime/forge-bridge/task-group-types.ts",
+    "src/runtime/forge-bridge/job-dispatcher.ts",
+    "src/runtime/forge-bridge/forge-bridge-policy.ts",
+    "src/runtime/forge-bridge/forge-bridge.ts",
+    "src/runtime/forge-bridge/forge-control.ts",
+    "src/runtime/forge-bridge/forge-bridge-executor.ts",
+    "src/runtime/forge-bridge/adapters/sigma-forge.adapter.ts",
+    "src/runtime/forge-bridge/adapters/kilo-mcp.adapter.ts",
+    "src/runtime/forge-bridge/adapters/forge-http.adapter.ts",
+    "src/runtime/forge-bridge/executor-router.ts",
+    "src/runtime/identity/index.ts",
+    "src/runtime/memory/index.ts",
+    "src/runtime/goals/index.ts",
+    "src/runtime/execution/index.ts",
+    "src/server/routes/mission-control.route.ts",
+    "src/core/auth/runtime-access.ts",
+    "src/core/models.ts",
+    "src/types/telecore.ts"
   ],
   "exclude": [
     "src/server/routes/*.ts",
-    "src/telegram/**/*.ts"
+    "src/telegram/**/*.ts",
+    "src/runtime/mesh/**/*.ts",
+    "src/runtime/chat-surface/**/*.ts",
+    "src/runtime/workers/**/*.ts",
+    "src/runtime/transport/**/*.ts",
+    "src/runtime/hooks/**/*.ts",
+    "src/runtime/incidents/**/*.ts",
+    "src/runtime/browser/**/*.ts",
+    "src/runtime/planning/**/*.ts",
+    "src/runtime/knowledge/**/*.ts",
+    "src/runtime/economy/**/*.ts",
+    "src/runtime/audit/**/*.ts",
+    "src/runtime/capability/**/*.ts",
+    "src/runtime/providers/**/*.ts",
+    "src/runtime/regulation/**/*.ts",
+    "src/runtime/self/**/*.ts",
+    "src/runtime/sigma-forge/**/*.ts",
+    "src/runtime/delivery/**/*.ts",
+    "src/runtime/events/**/*.ts",
+    "src/runtime/evidence/**/*.ts",
+    "src/runtime/mission-control/**/*.ts",
+    "src/runtime/surfaces/**/*.ts",
+    "src/surfaces/**/*.ts",
+    "src/core/lrl/**/*.ts",
+    "src/core/observability/**/*.ts",
+    "src/core/useStudioActions.ts"
   ]
 }

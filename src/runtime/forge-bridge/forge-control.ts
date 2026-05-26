@@ -1,7 +1,7 @@
-import type { ForgeControlAction } from "./forge-control.types";
-import type { ForgeControlResult } from "./forge-control.types";
-import type { ForgeControlEvent } from "./forge-control.types";
-import { assertForgeControlAllowed } from "./forge-control-policy";
+import type { ForgeControlAction } from "./forge-control.types.js";
+import type { ForgeControlResult } from "./forge-control.types.js";
+import type { ForgeControlEvent } from "./forge-control.types.js";
+import { assertForgeControlAllowed } from "./forge-control-policy.js";
 
 export async function runForgeControl(
   userId: string,
@@ -17,13 +17,15 @@ export async function executeForgeControl(
   userId: string,
   role: string,
 ): Promise<ForgeControlResult> {
-  switch (action.type) {
+  // TODO(RD-2): replace temporary runtime governance type narrowing
+  const actionType = (action as any).type;
+  switch (actionType) {
     case "retry": return handleRetry(action, userId, role);
     case "rerun": return handleRerun(action, userId, role);
     case "cancel": return handleCancel(action, userId, role);
     case "mark_reviewed": return handleMarkReviewed(action, userId, role);
     case "attach_note": return handleAttachNote(action, userId, role);
-    default: return { ok: false, action: action.type, summary: "Unknown control action" };
+    default: return { ok: false, action: actionType as string, summary: "Unknown control action" };
   }
 }
 
@@ -43,6 +45,7 @@ async function handleMarkReviewed(action: ForgeControlAction, userId: string, ro
   return { ok: true, action: "mark_reviewed", summary: "Marked as reviewed" };
 }
 
-async function handleAttachNote(action: ForgeControlAction & { note: string }, userId: string, role: string): Promise<ForgeControlResult> {
+async function handleAttachNote(action: ForgeControlAction, userId: string, role: string): Promise<ForgeControlResult> {
+  // TODO(RD-2): replace temporary runtime governance type narrowing
   return { ok: true, action: "attach_note", summary: "Note attached" };
 }

@@ -59,7 +59,8 @@ export class ForgeBridge {
         path,
         input,
       };
-      resolvedTarget = router.resolveExecutor(forgeTask as any).target;
+      const resolved = router.resolveExecutor(forgeTask);
+      resolvedTarget = resolved?.target ?? (target || resolveDefaultForgeTarget(userId));
     } else {
       resolvedTarget = target || resolveDefaultForgeTarget(userId);
     }
