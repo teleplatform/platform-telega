@@ -380,6 +380,28 @@ async function runTests() {
     const depFailed = events.find(e => e.event_type === "dependency_failed");
     assert.ok(!!depFailed, "dependency_failed event should be emitted");
   });
+
+  await beforeEachAsync();
+  await asyncTest("controlled dispatch skips blocked tasks", async () => {
+    const store = getTaskGroupStore();
+    await store.create({
+      group_id: "group_controlled",
+      child_task_ids: ["t1", "t2", "t3"],
+      group_strategy: "sequential",
+    });
+    await store.addDependency({ group_id: "group_controlled", task_id: "t2", depends_on: "t1" });
+    await store.addDependency({ group_id: "group_controlled", task_id: "t3", depends_on: "t2" });
+    await store.updateDependencyState("t2", "t1", "failed");
+    
+    const results = await store.evaluateTaskReadiness("group_controlled");
+    const readyTasks = results.filter(r => r.readiness === "ready").map(r => r.task_id);
+    const failedTasks = results.filter(r => r.readiness === "failed").map(r => r.task_id);
+    
+    assert.ok(readyTasks.includes("t1"));
+    assert.ok(failedTasks.includes("t2"));
+    assert.ok(failedTasks.includes("t3"));
+    assert.equal(readyTasks.length, 1, "only 1 task should be ready to dispatch");
+  });
 }
 
 runTests().then(() => {

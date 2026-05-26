@@ -124,19 +124,48 @@ export async function dispatchTaskGroup(group_id: string): Promise<TaskGroupDisp
     };
   }
 
+  return dispatchReadyDagTasks(group, store);
+}
+
+async function dispatchReadyDagTasks(
+  group: TaskGroup,
+  store: ReturnType<typeof getTaskGroupStore>
+): Promise<TaskGroupDispatchResult> {
   const maxConcurrency = group.group_strategy === "parallel" ? 2 : 1;
   const dispatched_tasks: string[] = [];
   const failed_tasks: string[] = [];
 
-  emitGroupEvent(group_id, "group_dispatch_started", { max_concurrency: maxConcurrency });
-  await store.updateStatus(group_id, "running");
+  emitGroupEvent(group.group_id, "group_dispatch_started", { max_concurrency: maxConcurrency });
+  await store.updateStatus(group.group_id, "running");
 
-  for (let i = 0; i < group.child_task_ids.length; i += maxConcurrency) {
-    const batch = group.child_task_ids.slice(i, i + maxConcurrency);
+  let remainingTasks = [...group.child_task_ids];
+  
+  while (remainingTasks.length > 0) {
+    const readiness = await store.evaluateTaskReadiness(group.group_id);
+    const readyTaskIds = readiness.filter(r => r.readiness === "ready").map(r => r.task_id);
+    
+    if (readyTaskIds.length === 0) {
+      const blockedTasks = readiness.filter(r => r.readiness === "blocked").map(r => r.task_id);
+      const failedTasks = readiness.filter(r => r.readiness === "failed").map(r => r.task_id);
+      failed_tasks.push(...failedTasks);
+      remainingTasks = [...blockedTasks];
+      if (blockedTasks.length > 0) {
+        await store.updateStatus(group.group_id, "partial");
+        return {
+          group_id: group.group_id,
+          dispatched_tasks,
+          failed_tasks,
+          summary: `Blocked: ${blockedTasks.join(", ")}. Completed: ${dispatched_tasks.length}`,
+        };
+      }
+      break;
+    }
+
+    const batch = readyTaskIds.slice(0, maxConcurrency);
     
     const results = await Promise.all(
       batch.map(async (taskId) => {
-        emitGroupEvent(group_id, "child_task_started", { task_id: taskId });
+        emitGroupEvent(group.group_id, "child_task_started", { task_id: taskId });
         try {
           const bridge = getForgeBridge();
           await bridge.run({
@@ -146,28 +175,30 @@ export async function dispatchTaskGroup(group_id: string): Promise<TaskGroupDisp
             input: { group_task: true },
           });
           dispatched_tasks.push(taskId);
-          emitGroupEvent(group_id, "child_task_completed", { task_id: taskId, status: "done" });
+          emitGroupEvent(group.group_id, "child_task_completed", { task_id: taskId, status: "done" });
           return { task_id: taskId, status: "done" as ChildTaskStatus };
         } catch (err) {
           failed_tasks.push(taskId);
-          emitGroupEvent(group_id, "child_task_completed", { task_id: taskId, status: "failed" });
+          emitGroupEvent(group.group_id, "child_task_completed", { task_id: taskId, status: "failed" });
           return { task_id: taskId, status: "failed" as ChildTaskStatus };
         }
       })
     );
+
+    remainingTasks = remainingTasks.filter(id => !dispatched_tasks.includes(id) && !failed_tasks.includes(id));
   }
 
   const finalStatus = failed_tasks.length > 0 ? "partial" : "done";
-  await store.updateStatus(group_id, finalStatus);
+  await store.updateStatus(group.group_id, finalStatus);
   
   if (finalStatus === "done") {
-    emitGroupEvent(group_id, "group_done", { dispatched_count: dispatched_tasks.length });
+    emitGroupEvent(group.group_id, "group_done", { dispatched_count: dispatched_tasks.length });
   } else {
-    emitGroupEvent(group_id, "group_partial", { failed_count: failed_tasks.length });
+    emitGroupEvent(group.group_id, "group_partial", { failed_count: failed_tasks.length });
   }
 
   return {
-    group_id,
+    group_id: group.group_id,
     dispatched_tasks,
     failed_tasks,
     summary: `Dispatched ${dispatched_tasks.length} tasks, ${failed_tasks.length} failed`,
