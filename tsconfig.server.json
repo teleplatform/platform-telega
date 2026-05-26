@@ -32,6 +32,7 @@
     "src/runtime/forge-bridge/adapters/forge-http.adapter.ts",
     "src/runtime/forge-bridge/executor-router.ts",
     "src/runtime/forge-bridge/dag-ready-queue-scheduler.ts",
+    "src/runtime/forge-bridge/dag-wave-dispatch.ts",
     "src/runtime/identity/index.ts",
     "src/runtime/memory/index.ts",
     "src/runtime/goals/index.ts",

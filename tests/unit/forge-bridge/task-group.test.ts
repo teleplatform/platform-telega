@@ -467,6 +467,61 @@ async function runTests() {
     assert.ok(snapshot.ready.map(r => r.task_id).includes("t1"));
     assert.deepEqual(snapshot.failed, ["t2", "t3"]);
   });
+
+  console.log("\nDag Wave Dispatch:");
+
+  await beforeEachAsync();
+  await asyncTest("wave dispatches max concurrency tasks", async () => {
+    const { buildAndDispatchWave } = await import("../../../src/runtime/forge-bridge/dag-wave-dispatch.js");
+    const store = getTestStore();
+    await store.create({
+      group_id: "group_wave",
+      child_task_ids: ["t1", "t2", "t3", "t4"],
+      group_strategy: "parallel",
+    });
+    const result = await buildAndDispatchWave("group_wave", 2);
+    
+    assert.equal(result.group_id, "group_wave");
+    assert.equal(result.dispatched_tasks.length, 2);
+    assert.deepEqual(result.skipped_tasks, ["t3", "t4"]);
+    assert.ok(result.summary.includes("dispatched"));
+  });
+
+  await beforeEachAsync();
+  await asyncTest("wave emits started and completed events", async () => {
+    const { buildAndDispatchWave } = await import("../../../src/runtime/forge-bridge/dag-wave-dispatch.js");
+    const store = getTestStore();
+    await store.create({
+      group_id: "group_wave_events",
+      child_task_ids: ["t1", "t2"],
+      group_strategy: "parallel",
+    });
+    await buildAndDispatchWave("group_wave_events", 2);
+    
+    const streamStore = getTaskGroupStreamStore();
+    const events = streamStore.getStreamEvents("group_wave_events");
+    const waveStarted = events.find(e => e.event_type === "dag_wave_started");
+    const waveCompleted = events.find(e => e.event_type === "dag_wave_completed");
+    
+    assert.ok(!!waveStarted, "dag_wave_started event should be emitted");
+    assert.ok(!!waveCompleted, "dag_wave_completed event should be emitted");
+  });
+
+  await beforeEachAsync();
+  await asyncTest("wave skips blocked tasks", async () => {
+    const { buildAndDispatchWave } = await import("../../../src/runtime/forge-bridge/dag-wave-dispatch.js");
+    const store = getTestStore();
+    await store.create({
+      group_id: "group_wave_blocked",
+      child_task_ids: ["t1", "t2", "t3"],
+      group_strategy: "sequential",
+    });
+    await store.addDependency({ group_id: "group_wave_blocked", task_id: "t2", depends_on: "t1" });
+    const result = await buildAndDispatchWave("group_wave_blocked", 3);
+    
+    assert.equal(result.dispatched_tasks.length, 2);
+    assert.deepEqual(result.dispatched_tasks.map(t => t.task_id).sort(), ["t1", "t3"]);
+  });
 }
 
 runTests().then(() => {

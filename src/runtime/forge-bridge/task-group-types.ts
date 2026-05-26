@@ -121,6 +121,8 @@ export type GroupEventType =
   | "dependency_completed"
   | "dependency_failed"
   | "dag_created"
-  | "dag_status_changed";
+  | "dag_status_changed"
+  | "dag_wave_started"
+  | "dag_wave_completed";
 
 export type GroupEventPayload = Record<string, unknown>;
