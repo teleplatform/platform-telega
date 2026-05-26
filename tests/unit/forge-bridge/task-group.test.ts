@@ -522,6 +522,47 @@ async function runTests() {
     assert.equal(result.dispatched_tasks.length, 2);
     assert.deepEqual(result.dispatched_tasks.map(t => t.task_id).sort(), ["t1", "t3"]);
   });
+
+  console.log("\nWave Scheduler Loop:");
+
+  await beforeEachAsync();
+  await asyncTest("loop runs waves with controlled concurrency", async () => {
+    const { runWaveSchedulerLoop } = await import("../../../src/runtime/forge-bridge/dag-wave-scheduler-loop.js");
+    const store = getTestStore();
+    await store.create({
+      group_id: "group_loop_runs",
+      child_task_ids: ["t1", "t2", "t3", "t4"],
+      group_strategy: "parallel",
+    });
+    
+    const dispatchedPerWave: number[] = [];
+    const result = await runWaveSchedulerLoop("group_loop_runs", {
+      maxIterations: 1,
+      onWaveComplete: (waveResult) => { dispatchedPerWave.push(waveResult.dispatched_tasks.length); }
+    });
+    
+    assert.equal(result.group_id, "group_loop_runs");
+    assert.equal(dispatchedPerWave[0], 2, "first wave dispatches max 2 tasks");
+  });
+
+  await beforeEachAsync();
+  await asyncTest("loop respects max iterations safety", async () => {
+    const { runWaveSchedulerLoop } = await import("../../../src/runtime/forge-bridge/dag-wave-scheduler-loop.js");
+    const store = getTestStore();
+    await store.create({
+      group_id: "group_loop_max2",
+      child_task_ids: ["t1", "t2", "t3"],
+      group_strategy: "parallel",
+    });
+    
+    let waveCount = 0;
+    await runWaveSchedulerLoop("group_loop_max2", {
+      maxIterations: 2,
+      onWaveComplete: () => { waveCount++; }
+    });
+    
+    assert.ok(waveCount <= 2, "should not exceed max iterations");
+  });
 }
 
 runTests().then(() => {
