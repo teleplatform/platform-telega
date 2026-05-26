@@ -11,7 +11,7 @@
 // Vault NOT in business logic — only at client bootstrap.
 // ─────────────────────────────────────────────────────────────
 
-import { hasCapability, getRuntimeRole, type RuntimeRole } from "../../../core/auth/runtime-access.js";
+import { hasCapability, getRuntimeRole, type RuntimeRole } from "../../core/auth/runtime-access.js";
 
 export type ForgeCapability = "forge_access" | "forge_remote_access" | "kilo_mcp_access";
 
