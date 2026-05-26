@@ -12,6 +12,7 @@ import { recordReplayAttempt } from "./replay-rate-limiter.js";
 import { linkReplayTraces } from "./trace-lineage.js";
 import { checkRuntimePreflight } from "./runtime-preflight-gate.js";
 import { checkReplayGovernanceHardening } from "../hooks/replay-governance-hardening-hook.js";
+import { saveReplayRecoveryCheckpoint } from "../mission-control/replay-recovery-checkpoints.js";
 
 export interface ReplayExecutionOptions {
   requested_by?: "manual" | "system" | "mission_control";
@@ -40,6 +41,13 @@ export async function executeReplay(
 ): Promise<ReplayExecutionResult> {
   const opts = options || {};
   const traceIdNew = hashTraceId(traceId, "replay");
+  await saveReplayRecoveryCheckpoint({
+    original_trace_id: traceId,
+    replay_trace_id: traceIdNew,
+    status: "checking_governance",
+    updated_at: new Date().toISOString(),
+    options: opts as Record<string, unknown>,
+  });
 
   const gate = await checkReplayGovernanceHardening({
     trace_id: traceId,
@@ -69,6 +77,13 @@ export async function executeReplay(
       reason: opts.reason || "manual_request",
       replay_trace_id: traceIdNew,
     },
+  });
+  await saveReplayRecoveryCheckpoint({
+    original_trace_id: traceId,
+    replay_trace_id: traceIdNew,
+    status: "started",
+    updated_at: new Date().toISOString(),
+    options: opts as Record<string, unknown>,
   });
 
   const preflight = await checkRuntimePreflight({
@@ -120,7 +135,7 @@ export async function executeReplay(
 
   const originalJobId = summary?.job_id || traceId;
   const suggestedTarget = candidate?.suggested_runtime || "kilo_mcp";
-  const targetOverride = opts.target_override || suggestedTarget;
+  const targetOverride = String(opts.target_override || suggestedTarget);
 
   const replayTask: BuildTask = taskSnapshot
     ? {
@@ -152,7 +167,7 @@ export async function executeReplay(
         target: targetOverride as any,
       });
 
-  const replayJobId = replayTask.task_id;
+  const replayJobId = String(replayTask.task_id || replayTask.meta?.task_id || `replay_${traceIdNew}`);
 
   await appendEvidenceRecord({
     evidence_id: hashTraceId(traceIdNew, "replay_started"),
@@ -194,6 +209,14 @@ export async function executeReplay(
         duration_ms: buildResult.execution?.duration_ms,
       },
     });
+    await saveReplayRecoveryCheckpoint({
+      original_trace_id: traceId,
+      replay_trace_id: traceIdNew,
+      status: "finished",
+      updated_at: new Date().toISOString(),
+      replay_job_id: replayJobId,
+      options: opts as Record<string, unknown>,
+    });
 
     await recordReplayAttempt({ trace_id: traceId, force: opts.force || false });
     await linkReplayTraces(traceId, traceIdNew);
@@ -220,6 +243,15 @@ export async function executeReplay(
         original_trace_id: traceId,
         error: e.message,
       },
+    });
+    await saveReplayRecoveryCheckpoint({
+      original_trace_id: traceId,
+      replay_trace_id: traceIdNew,
+      status: "failed",
+      updated_at: new Date().toISOString(),
+      replay_job_id: replayJobId,
+      error: e.message,
+      options: opts as Record<string, unknown>,
     });
 
     return {

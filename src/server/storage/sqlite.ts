@@ -386,6 +386,81 @@ export function initSqlite(dbFile: string) {
     ON lrl_rules (event_type);
   `);
 
+  // --- TaskGroup Persistence (KCA-15.9) ---
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS task_groups (
+      group_id TEXT PRIMARY KEY,
+      parent_task_id TEXT,
+      group_status TEXT NOT NULL,
+      group_strategy TEXT NOT NULL,
+      group_trace_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      metadata_json TEXT
+    );
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_task_groups_parent
+    ON task_groups (parent_task_id);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS task_group_children (
+      group_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      child_order INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (group_id, task_id)
+    );
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_task_group_children_group
+    ON task_group_children (group_id, child_order);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS task_group_events (
+      event_id TEXT PRIMARY KEY,
+      group_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      event_type TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      payload_json TEXT,
+      FOREIGN KEY(group_id) REFERENCES task_groups(group_id) ON DELETE CASCADE
+    );
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_task_group_events_group_seq
+    ON task_group_events (group_id, sequence);
+  `);
+
+  // --- TaskGroup Dependencies (KCA-16.1) ---
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS task_dependencies (
+      id TEXT PRIMARY KEY,
+      group_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      depends_on TEXT NOT NULL,
+      state TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(group_id) REFERENCES task_groups(group_id) ON DELETE CASCADE
+    );
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_task_dependencies_group_task
+    ON task_dependencies (group_id, task_id);
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_task_dependencies_blocked
+    ON task_dependencies (group_id, state);
+  `);
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS review_gate (
       review_id TEXT PRIMARY KEY,

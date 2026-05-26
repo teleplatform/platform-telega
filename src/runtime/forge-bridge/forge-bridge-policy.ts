@@ -24,14 +24,14 @@ export function assertForgeBridgeAllowed(userId: string | number | null): void {
 
 export function assertForgeRemoteAllowed(userId: string | number | null): void {
   const role = getRuntimeRole(userId);
-  if (!hasCapability(userId, "forge_remote_access") && !role.startsWith("owner_")) {
+  if (!hasCapability(userId, "forge_remote_access" as any) && !role.startsWith("owner_")) {
     throw new Error("forge_remote_access_forbidden");
   }
 }
 
 export function assertKiloMcpAllowed(userId: string | number | null): void {
   const role = getRuntimeRole(userId);
-  if (!hasCapability(userId, "kilo_mcp_access") && !role.startsWith("owner_")) {
+  if (!hasCapability(userId, "kilo_mcp_access" as any) && !role.startsWith("owner_")) {
     throw new Error("kilo_mcp_access_forbidden");
   }
 }
@@ -41,7 +41,7 @@ export function checkForgeCapability(
   capability: ForgeCapability
 ): { allowed: boolean; reason?: string } {
   const role = getRuntimeRole(userId);
-  const allowed = hasCapability(userId, capability) || role.startsWith("owner_");
+  const allowed = hasCapability(userId, capability as any) || role.startsWith("owner_");
   return {
     allowed,
     reason: allowed ? undefined : `${capability}_forbidden`,
@@ -53,7 +53,7 @@ export function getAllowedForgeTargets(userId: string | number | null): string[]
   if (!role.startsWith("owner_") && !hasCapability(userId, "forge_access")) {
     return [];
   }
-  if (!role.startsWith("owner_") && !hasCapability(userId, "forge_remote_access")) {
+  if (!role.startsWith("owner_") && !hasCapability(userId, "forge_remote_access" as any)) {
     return ["kilo_mcp"];
   }
   return ["forge_remote", "kilo_mcp"];

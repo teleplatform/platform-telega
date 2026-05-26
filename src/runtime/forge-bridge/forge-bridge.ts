@@ -26,6 +26,8 @@ import { ForgeBridgeExecutor } from "./forge-bridge-executor.js";
 import { ForgeHttpAdapter } from "./adapters/forge-http.adapter.js";
 import { KiloMcpAdapter } from "./adapters/kilo-mcp.adapter.js";
 import { SigmaForgeAdapter } from "./adapters/sigma-forge.adapter.js";
+import { getExecutorRouter, initExecutorRouter } from "./executor-router.js";
+import { sigmaForgeRegistry } from "./adapters/sigma-forge.adapter.js";
 
 export class ForgeBridge {
   private executor: ForgeBridgeExecutor;
@@ -45,7 +47,22 @@ export class ForgeBridge {
 
     assertForgeBridgeAllowed(userId);
 
-    const resolvedTarget = target || resolveDefaultForgeTarget(userId);
+    const router = getExecutorRouter();
+    let resolvedTarget: ForgeExecutionTarget;
+
+    if (router && target !== "unknown") {
+      const forgeTask = {
+        taskId: `forge_${Date.now()}`,
+        target: target || "kilo_mcp",
+        kind,
+        userId,
+        path,
+        input,
+      };
+      resolvedTarget = router.resolveExecutor(forgeTask as any).target;
+    } else {
+      resolvedTarget = target || resolveDefaultForgeTarget(userId);
+    }
 
     const task = createForgeTask({
       userId,
@@ -78,6 +95,14 @@ export function initForgeBridge(config?: {
 
   const executor = new ForgeBridgeExecutor(forgeHttp, kiloMcp, sigmaForge);
   forgeBridgeInstance = new ForgeBridge(executor);
+
+  initExecutorRouter({
+    sigmaForgeRegistry,
+    kiloMcpAvailable: true,
+    forgeRemoteAvailable: true,
+    defaultMode: "sandbox",
+  });
+
   return forgeBridgeInstance;
 }
 

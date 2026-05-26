@@ -1,6 +1,7 @@
 import http from "node:http";
 import https from "node:https";
 import type { ChatRequest, ChatResponse } from "../../types/chat.js";
+import { getFullSystemPrompt } from "../../runtime/identity/index.js";
 
 type OpenAIChatReq = {
   model: string;
@@ -8,6 +9,7 @@ type OpenAIChatReq = {
   temperature?: number;
   max_tokens?: number;
   top_p?: number;
+  stream?: boolean;
 };
 
 type OpenAIChatResp = {
@@ -79,6 +81,8 @@ export async function chat(req: ChatRequest): Promise<ChatResponse> {
 
   const url = `${base}/api/chat`;
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
+  const identityPrompt = getFullSystemPrompt();
+  messages.push({ role: "system", content: identityPrompt });
   if (req.system) {
     messages.push({ role: "system", content: req.system });
   }
@@ -91,6 +95,7 @@ export async function chat(req: ChatRequest): Promise<ChatResponse> {
     temperature: typeof meta.temperature === "number" ? meta.temperature : 0.2,
     max_tokens: typeof meta.max_tokens === "number" ? meta.max_tokens : 192,
     top_p: typeof meta.top_p === "number" ? meta.top_p : 0.9,
+    stream: false,
   };
   const timeoutMs = typeof meta.timeout_ms === "number" ? meta.timeout_ms : LOCAL_OPENAI_TIMEOUT_MS;
 

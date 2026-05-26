@@ -2,6 +2,10 @@ import type { ChatRequest, ChatResponse } from "../types/chat.js";
 import { localDemo } from "../providers/local/demo.js";
 import { chat as localChat } from "../providers/local/chat.js";
 import { openaiChat } from "../providers/openai/chat.js";
+import { evaluateMessage, getFullSystemPrompt } from "../runtime/identity/index.js";
+import { updateCreatorInteraction, getCreatorSummary, addTurn, getRecentTurns, getOperationalSummary, recordOperation } from "../runtime/memory/index.js";
+import { getGoalInventory, getWhatMatters, getUnfinishedBusiness } from "../runtime/goals/index.js";
+import { taskSummary, getInterruptedTasks } from "../runtime/execution/index.js";
 
 function hasOpenAI(): boolean {
   const key = (process.env.OPENAI_API_KEY || "").trim();
@@ -98,8 +102,18 @@ function modelForSelectedProvider(provider: SelectedProvider): string {
     case "ollama_local":
       return "qwen2.5:7b-instruct";
     case "auto":
-    default:
+    default: {
+      const llmProvider = (process.env.LLM_PROVIDER || "").toLowerCase();
+      if (llmProvider === "ollama") {
+        const ollamaModel = process.env.OLLAMA_MODEL || "qwen2.5:7b-instruct";
+        return `local:${ollamaModel}`;
+      }
+      const { LOCAL_OPENAI_BASE_URL, LOCAL_OPENAI_MODEL, LOCAL_OPENAI_MODEL_DEFAULT } = process.env;
+      if (LOCAL_OPENAI_BASE_URL && (LOCAL_OPENAI_MODEL || LOCAL_OPENAI_MODEL_DEFAULT)) {
+        return `local:${LOCAL_OPENAI_MODEL || LOCAL_OPENAI_MODEL_DEFAULT}`;
+      }
       return "openai:gpt-4o-mini";
+    }
   }
 }
 
@@ -133,7 +147,7 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       ? modelForSelectedProvider(requestedProvider)
       : (req.model || modelForSelectedProvider("auto")).trim();
   const taskType = req.task?.type || "chat";
-  const effectiveSystem = [STRICT_CONTROL_SYSTEM_PROMPT, req.system].filter(Boolean).join("\n\n");
+  let effectiveSystem = [STRICT_CONTROL_SYSTEM_PROMPT, req.system].filter(Boolean).join("\n\n");
   console.log(`[router] routeChat start request_id=${request_id} model="${rawModel}" selectedProvider="${requestedProvider || ""}" taskType=${taskType}`);
   
   // 1. Check user limits (if user_id provided in meta)
@@ -170,7 +184,86 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       console.error("[router] user limit check failed", e);
     }
   }
-  
+
+  // 1b. Anti-drift / truth arbitration
+  const driftCheck = evaluateMessage(req.message);
+  if (driftCheck.shouldBlock && driftCheck.replyText) {
+    console.log("[router] anti-drift blocked message:", { message: req.message.slice(0, 80) });
+    return {
+      id: request_id,
+      model: rawModel,
+      output: driftCheck.replyText,
+      meta: { provider: "identity", anti_drift: true } as any,
+      request_id,
+      latency_ms: Date.now() - t0,
+    };
+  }
+  if (driftCheck.systemPromptOverride) {
+    console.log("[router] anti-drift override system prompt for message:", { message: req.message.slice(0, 80) });
+    effectiveSystem = driftCheck.systemPromptOverride;
+  }
+
+  // 1c. Memory tracking
+  const chatId = req.meta?.chat_id || req.meta?.chatId || "";
+  const userId = req.meta?.user_id || req.meta?.telegram_user_id || "";
+  if (userId) {
+    updateCreatorInteraction(userId);
+  }
+  if (chatId) {
+    addTurn(chatId, "user", req.message);
+    const recentTurns = getRecentTurns(chatId, 3);
+    if (recentTurns.length > 0) {
+      const memoryContext = recentTurns.map(t => `${t.role}: ${t.content}`).join("\n");
+      effectiveSystem = [
+        effectiveSystem,
+        "",
+        "=== RECENT CONVERSATION ===",
+        memoryContext,
+        "=== END RECENT CONVERSATION ===",
+      ].join("\n");
+    }
+  }
+  if (userId) {
+    const creatorSummary = getCreatorSummary(userId);
+    effectiveSystem = [
+      effectiveSystem,
+      "",
+      "=== CREATOR CONTEXT ===",
+      creatorSummary,
+      "=== END CREATOR CONTEXT ===",
+    ].join("\n");
+  }
+
+  // 1d. Goal context injection
+  const goalInventory = getGoalInventory();
+  const whatMatters = getWhatMatters();
+  const unfinished = getUnfinishedBusiness();
+  if (goalInventory !== "No goals in inventory.") {
+    effectiveSystem = [
+      effectiveSystem,
+      "",
+      goalInventory,
+      whatMatters,
+      "=== END GOAL CONTEXT ===",
+    ].join("\n");
+  }
+
+  // 1e. Execution context injection
+  const execSummary = taskSummary();
+  if (execSummary !== "No tasks.") {
+    const interrupted = getInterruptedTasks();
+    effectiveSystem = [
+      effectiveSystem,
+      "",
+      "=== EXECUTION CONTEXT ===",
+      execSummary,
+      interrupted.length > 0 ? `WARNING: ${interrupted.length} tasks were interrupted — may need recovery` : "",
+      "=== END EXECUTION CONTEXT ===",
+    ].join("\n");
+  }
+
+  recordOperation("chat_request", `user=${userId || "unknown"} message="${req.message.slice(0, 50)}"`);
+
   // 2. Intent detection (code vs longform vs chat)
   const { detectTaskIntent, shouldRouteToLongform, shouldRouteToOpenAIWeb, detectProductMode } = await import("./router/intent-router.js");
 
@@ -838,6 +931,11 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       : undefined);
 
   console.log(`[router] routeChat returning ok provider=${provider} model=${resolved_model}`);
+
+  if (chatId && base.output) {
+    addTurn(chatId, "assistant", base.output);
+  }
+
   return {
     ...base,
     request_id,

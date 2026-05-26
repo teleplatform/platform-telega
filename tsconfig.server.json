@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "noEmit": false,
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "noEmit": true,
     "target": "ES2022",
     "strict": true,
     "esModuleInterop": true,
@@ -13,11 +13,14 @@
     "paths": {
       "#i18n/messages": ["src/i18n/messages.ts"],
       "#i18n/keypath-runtime": ["src/i18n/messages.keypath.runtime.ts"]
-    }
+    },
+    "allowImportingTsExtensions": true
   },
   "include": [
     "src/server/index.ts",
-    "src/channels/**/*.ts"
+    "src/channels/**/*.ts",
+    "src/runtime/**/*.ts",
+    "src/core/**/*.ts"
   ],
   "exclude": [
     "src/server/routes/*.ts",
