@@ -1,6 +1,7 @@
 import type { TaskGroup, TaskGroupStatus, TaskDependency, DependencyState, TaskReadinessEvaluation, DagResponse, TaskReadiness } from "./task-group-types.js";
 import type { TaskGroupBackend } from "./task-group-backend.js";
 import { SQLiteTaskGroupBackend } from "./sqlite-task-group-backend.js";
+import { emitGroupEvent } from "./task-group-stream-store.js";
 
 export class TaskGroupStore {
   private groups: Map<string, TaskGroup> = new Map();
@@ -41,6 +42,7 @@ export class TaskGroupStore {
     const group = await this.backend.updateGroupStatus(group_id, status);
     if (group) {
       this.groups.set(group_id, group);
+      emitGroupEvent(group_id, "dag_status_changed", { status });
     }
     return group;
   }
@@ -75,7 +77,9 @@ export class TaskGroupStore {
   }
 
   async addDependency(params: { group_id: string; task_id: string; depends_on: string }): Promise<TaskDependency> {
-    return this.backend.addDependency(params);
+    const dep = await this.backend.addDependency(params);
+    emitGroupEvent(params.group_id, "dependency_added", { task_id: params.task_id, depends_on: params.depends_on });
+    return dep;
   }
 
   async listDependencies(group_id: string): Promise<TaskDependency[]> {
@@ -83,7 +87,16 @@ export class TaskGroupStore {
   }
 
   async updateDependencyState(task_id: string, depends_on: string, state: DependencyState): Promise<void> {
-    return this.backend.updateDependencyState(task_id, depends_on, state);
+    const group_id = await this.backend.updateDependencyState(task_id, depends_on, state) as string;
+    if (group_id && group_id !== "unknown") {
+      if (state === "blocked") {
+        emitGroupEvent(group_id, "dependency_blocked", { task_id, depends_on });
+      } else if (state === "failed") {
+        emitGroupEvent(group_id, "dependency_failed", { task_id, depends_on });
+      } else if (state === "ready" || state === "completed") {
+        emitGroupEvent(group_id, "dependency_ready", { task_id, depends_on });
+      }
+    }
   }
 
   async getBlockedTasks(group_id: string): Promise<string[]> {

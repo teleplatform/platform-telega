@@ -348,6 +348,38 @@ async function runTests() {
     assert.equal(dag.edges.length, 2);
     assert.ok(dag.blocking_tasks.includes("t1"));
   });
+
+  await beforeEachAsync();
+  await asyncTest("DAG stream events: dag_created emitted", async () => {
+    await getTaskGroupStore().create({
+      group_id: "group_dag_stream",
+      child_task_ids: ["t1", "t2"],
+      group_strategy: "sequential",
+    });
+    const store = getTaskGroupStore();
+    await store.getTaskGroupDag("group_dag_stream");
+    const streamStore = getTaskGroupStreamStore();
+    const events = streamStore.getStreamEvents("group_dag_stream");
+    const dagCreated = events.find(e => e.event_type === "dag_created");
+    assert.ok(!!dagCreated, "dag_created event should be emitted");
+    assert.equal((dagCreated?.payload as any)?.child_count, 2);
+  });
+
+  await beforeEachAsync();
+  await asyncTest("DAG stream events: dependency_failed emitted", async () => {
+    const store = getTaskGroupStore();
+    await store.create({
+      group_id: "group_dep_fail_stream",
+      child_task_ids: ["t1", "t2"],
+      group_strategy: "sequential",
+    });
+    await store.addDependency({ group_id: "group_dep_fail_stream", task_id: "t2", depends_on: "t1" });
+    await store.updateDependencyState("t2", "t1", "failed");
+    const streamStore = getTaskGroupStreamStore();
+    const events = streamStore.getStreamEvents("group_dep_fail_stream");
+    const depFailed = events.find(e => e.event_type === "dependency_failed");
+    assert.ok(!!depFailed, "dependency_failed event should be emitted");
+  });
 }
 
 runTests().then(() => {

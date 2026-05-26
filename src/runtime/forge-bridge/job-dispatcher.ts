@@ -1,6 +1,10 @@
 import type { BuildTask, BuildResult } from "../../types/telecore.js";
 import { getForgeBridge } from "./forge-bridge.js";
 import type { ForgeTaskKind } from "./forge-bridge.types.js";
+import { getExecutorRouter } from "./executor-router.js";
+import { getTaskGroupStore } from "./task-group-store.js";
+import type { CreateTaskGroupParams, TaskGroup, TaskGroupDispatchResult, ChildTaskStatus, TaskGroupCancelParams } from "./task-group-types.js";
+import { emitGroupEvent } from "./task-group-stream-store.js";
 
 export interface DispatchedBuildResult {
   summary: BuildResult["summary"];
@@ -9,7 +13,165 @@ export interface DispatchedBuildResult {
     duration_ms?: number;
   };
   diagnostics?: { error?: string; [k: string]: unknown };
-  executor?: { target?: string; id?: string };
+  executor?: {
+    target?: string;
+    id?: string;
+  };
+}
+
+export async function createTaskGroup(params: CreateTaskGroupParams): Promise<TaskGroup> {
+  const store = getTaskGroupStore();
+  const group_id = `group_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const group = await store.create({
+    group_id,
+    parent_task_id: params.parent_task_id,
+    child_task_ids: params.child_task_ids,
+    group_strategy: params.group_strategy ?? "parallel",
+    execution_mode: params.execution_mode,
+  });
+  emitGroupEvent(group_id, "group_created", { group_strategy: params.group_strategy ?? "parallel" });
+  return group;
+}
+
+export async function getTaskGroup(group_id: string): Promise<TaskGroup | undefined> {
+  const store = getTaskGroupStore();
+  return store.get(group_id);
+}
+
+export interface TaskGroupCancelResult {
+  group_id: string;
+  cancelled_tasks: string[];
+  needs_creator_tasks: string[];
+  summary: string;
+}
+
+export async function cancelTaskGroup(group_id: string, params: TaskGroupCancelParams = {}): Promise<TaskGroupCancelResult> {
+  const store = getTaskGroupStore();
+  const group = await store.get(group_id);
+  
+  if (!group) {
+    return {
+      group_id,
+      cancelled_tasks: [],
+      needs_creator_tasks: [],
+      summary: "Group not found",
+    };
+  }
+
+  const cancelled_tasks: string[] = [];
+  const needs_creator_tasks: string[] = [];
+
+  if (group.group_status === "done" || group.group_status === "cancelled") {
+    return {
+      group_id,
+      cancelled_tasks: [],
+      needs_creator_tasks: [],
+      summary: `Group already ${group.group_status}`,
+    };
+  }
+
+  const mode = params.mode ?? "graceful";
+  const reason = params.reason ?? "Creator requested cancellation";
+
+  if (mode === "needs_creator") {
+    group.child_task_ids.forEach((taskId) => {
+      needs_creator_tasks.push(taskId);
+    });
+    await store.updateStatus(group_id, "needs_creator");
+    emitGroupEvent(group_id, "group_needs_creator", { reason });
+  } else {
+    group.child_task_ids.forEach((taskId) => {
+      cancelled_tasks.push(taskId);
+    });
+    await store.updateStatus(group_id, "cancelled");
+    emitGroupEvent(group_id, "group_cancelled", { reason, cancelled_count: cancelled_tasks.length });
+  }
+
+  return {
+    group_id,
+    cancelled_tasks,
+    needs_creator_tasks,
+    summary: mode === "needs_creator" 
+      ? `Group needs creator decision: ${reason}`
+      : `Group cancelled: ${reason}`,
+  };
+}
+
+export async function dispatchTaskGroup(group_id: string): Promise<TaskGroupDispatchResult> {
+  const store = getTaskGroupStore();
+  const group = await store.get(group_id);
+  
+  if (!group) {
+    emitGroupEvent(group_id, "group_failed", { reason: "Group not found" });
+    return {
+      group_id,
+      dispatched_tasks: [],
+      failed_tasks: [],
+      summary: "Group not found",
+    };
+  }
+
+  emitGroupEvent(group_id, "dag_created", { child_count: group.child_task_ids.length, phase: "dispatch" });
+  emitGroupEvent(group_id, "group_created", { group_strategy: group.group_strategy });
+
+  if (group.group_strategy === "race") {
+    emitGroupEvent(group_id, "group_failed", { reason: "Race strategy not yet implemented" });
+    return {
+      group_id,
+      dispatched_tasks: [],
+      failed_tasks: group.child_task_ids,
+      summary: "Race strategy not yet implemented",
+    };
+  }
+
+  const maxConcurrency = group.group_strategy === "parallel" ? 2 : 1;
+  const dispatched_tasks: string[] = [];
+  const failed_tasks: string[] = [];
+
+  emitGroupEvent(group_id, "group_dispatch_started", { max_concurrency: maxConcurrency });
+  await store.updateStatus(group_id, "running");
+
+  for (let i = 0; i < group.child_task_ids.length; i += maxConcurrency) {
+    const batch = group.child_task_ids.slice(i, i + maxConcurrency);
+    
+    const results = await Promise.all(
+      batch.map(async (taskId) => {
+        emitGroupEvent(group_id, "child_task_started", { task_id: taskId });
+        try {
+          const bridge = getForgeBridge();
+          await bridge.run({
+            userId: "dispatch",
+            kind: "run_bridge_task",
+            target: "kilo_mcp",
+            input: { group_task: true },
+          });
+          dispatched_tasks.push(taskId);
+          emitGroupEvent(group_id, "child_task_completed", { task_id: taskId, status: "done" });
+          return { task_id: taskId, status: "done" as ChildTaskStatus };
+        } catch (err) {
+          failed_tasks.push(taskId);
+          emitGroupEvent(group_id, "child_task_completed", { task_id: taskId, status: "failed" });
+          return { task_id: taskId, status: "failed" as ChildTaskStatus };
+        }
+      })
+    );
+  }
+
+  const finalStatus = failed_tasks.length > 0 ? "partial" : "done";
+  await store.updateStatus(group_id, finalStatus);
+  
+  if (finalStatus === "done") {
+    emitGroupEvent(group_id, "group_done", { dispatched_count: dispatched_tasks.length });
+  } else {
+    emitGroupEvent(group_id, "group_partial", { failed_count: failed_tasks.length });
+  }
+
+  return {
+    group_id,
+    dispatched_tasks,
+    failed_tasks,
+    summary: `Dispatched ${dispatched_tasks.length} tasks, ${failed_tasks.length} failed`,
+  };
 }
 
 function mapToForgeParams(task: BuildTask) {
@@ -30,12 +192,31 @@ export async function dispatchBuildTask(
 ): Promise<DispatchedBuildResult> {
   const { taskId, kind, target, path, input, userId } = mapToForgeParams(task);
   const start = Date.now();
-  const executorTarget = target || "auto";
-  const executorId = target === "kilo" || !target ? "kilo_mcp" : target === "sigma_forge" ? "sigma_forge" : "forge_http";
 
   try {
+    const router = getExecutorRouter();
+    let resolvedTarget: string | undefined;
+    let executorId: string | undefined;
+
+    if (router) {
+      const forgeTask = {
+        taskId,
+        target: target || "auto",
+        kind,
+        userId,
+        path,
+        input,
+      };
+      const resolution = router.resolveExecutor(forgeTask as any);
+      resolvedTarget = resolution.target;
+      executorId = resolution.target;
+    } else {
+      resolvedTarget = target || "kilo_mcp";
+      executorId = resolvedTarget;
+    }
+
     const bridge = getForgeBridge();
-    const result = await bridge.run({ userId, kind: kind as ForgeTaskKind, target, path, input });
+    const result = await bridge.run({ userId, kind: kind as ForgeTaskKind, target: resolvedTarget as any, path, input });
     const duration_ms = Date.now() - start;
     return {
       summary: {
@@ -45,7 +226,7 @@ export async function dispatchBuildTask(
         iterations_used: 1,
       },
       execution: { trace_id: traceId, duration_ms },
-      executor: { target: executorTarget, id: executorId },
+      executor: { target: resolvedTarget, id: executorId },
     };
   } catch (err: any) {
     return {
@@ -57,7 +238,7 @@ export async function dispatchBuildTask(
       },
       execution: { trace_id: traceId, duration_ms: Date.now() - start },
       diagnostics: { error: String(err) },
-      executor: { target: executorTarget, id: executorId },
+      executor: { target: target || "auto", id: undefined },
     };
   }
 }

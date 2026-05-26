@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import type { TaskGroup, TaskGroupStatus, TaskGroupStrategy, TaskDependency, DependencyState, DagResponse, DagNode, DagEdge, TaskState } from "./task-group-types.js";
 import type { TaskGroupBackend } from "./task-group-backend.js";
+import { emitGroupEvent } from "./task-group-stream-store.js";
 
 export class SQLiteTaskGroupBackend implements TaskGroupBackend {
   constructor(private db: Database.Database) {}
@@ -197,11 +198,14 @@ export class SQLiteTaskGroupBackend implements TaskGroupBackend {
     return rows.map(r => ({ task_id: r.task_id, depends_on: r.depends_on, state: r.state }));
   }
 
-  async updateDependencyState(task_id: string, depends_on: string, state: DependencyState): Promise<void> {
+  async updateDependencyState(task_id: string, depends_on: string, state: DependencyState): Promise<string> {
     const now = new Date().toISOString();
     this.db.prepare(`
       UPDATE task_dependencies SET state = ?, updated_at = ? WHERE task_id = ? AND depends_on = ?
     `).run(state, now, task_id, depends_on);
+    const stmt = this.db.prepare(`SELECT group_id FROM task_dependencies WHERE task_id = ? AND depends_on = ?`);
+    const row = stmt.get(task_id, depends_on) as { group_id: string } | undefined;
+    return row?.group_id ?? "unknown";
   }
 
   async getBlockedTasks(group_id: string): Promise<string[]> {
@@ -223,6 +227,8 @@ export class SQLiteTaskGroupBackend implements TaskGroupBackend {
     if (!group) {
       throw new Error(`Group ${group_id} not found`);
     }
+
+    emitGroupEvent(group_id, "dag_created", { child_count: group.child_task_ids.length });
 
     const dependencies = await this.listDependencies(group_id);
     const readinessEval = await this.evaluateReadiness(group_id, group.child_task_ids);

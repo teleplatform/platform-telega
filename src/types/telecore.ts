@@ -37,34 +37,6 @@ export type BuildResult = {
   };
 } & Record<string, unknown>;
 
-export function createBuildTask(input: {
-  title: string;
-  kind?: string;
-  target?: string;
-  description?: string;
-}): BuildTask {
-  const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  return {
-    type: "build_task",
-    version: "1.0",
-    task_id: taskId,
-    meta: {
-      task_id: taskId,
-      created_at: Date.now(),
-      priority: "normal",
-      mode: "smart",
-      persona: "runtime",
-      ecosystem: "telega",
-      visibility: "core",
-    },
-    goal: {
-      title: input.title,
-      description: input.description || input.kind,
-    },
-    execution: input.target ? { target: input.target } : undefined,
-  };
-}
-
 export type BuildTaskPriority = "low" | "normal" | "high" | "critical";
 export type BuildTaskMode = "smart" | "deep" | "research";
 export type BuildTaskKind = "forge.build" | "forge.plan" | "forge.patch" | "forge.review" | "forge.test" | string;
@@ -83,6 +55,60 @@ export interface BuildTaskStreamEvent {
   task_id: string;
   sequence: number;
   event_type: BuildTaskStreamEventType;
+  timestamp: number;
+  payload: Record<string, unknown>;
+}
+
+export function createBuildTask(args: {
+  title: string;
+  kind: BuildTaskKind;
+  target: BuildTaskTarget;
+}): BuildTask {
+  const now = Date.now();
+  return {
+    type: "build_task",
+    version: "1.0",
+    meta: {
+      task_id: `task_${now}`,
+      created_at: now,
+      priority: "normal",
+      mode: "smart",
+      persona: "tele-gpt",
+      ecosystem: "telega",
+      visibility: "creator",
+    },
+    goal: {
+      title: args.title,
+    },
+    kind: args.kind,
+    target: args.target,
+  } as BuildTask;
+}
+
+export type TaskGroupStreamEventType =
+  | "group_created"
+  | "group_dispatch_started"
+  | "child_task_started"
+  | "child_task_completed"
+  | "group_progress"
+  | "group_partial"
+  | "group_done"
+  | "group_failed"
+  | "group_needs_creator"
+  | "group_cancelled"
+  | "dependency_added"
+  | "dependency_blocked"
+  | "dependency_ready"
+  | "dependency_completed"
+  | "dependency_failed"
+  | "dag_created"
+  | "dag_status_changed";
+
+export interface TaskGroupStreamEvent {
+  stream_id: string;
+  group_id: string;
+  sequence: number;
+  event_type: TaskGroupStreamEventType;
   timestamp: number;
   payload: Record<string, unknown>;
 }
