@@ -153,83 +153,247 @@ export function registerCallbackHandlers(bot: Telegraf, deps: CallbackHandlerCon
     }
   });
 
-  bot.action("split:v2:providers", async (ctx) => {
+   bot.action("split:v2:providers", async (ctx) => {
+      try {
+        console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "split:v2:providers" });
+        await ctx.answerCbQuery("Providers").catch(() => {});
+        return ctx.reply(
+          "⚡ TeleGPT Provider Control\n\nSelect an option below:",
+          providerKeyboard(settingsOf(ctx), getTelegramRole(userIdOf(ctx)))
+        );
+     } catch (e: any) {
+       console.error("[telegram:callback:error]", {
+         action: "split:v2:providers",
+         user_id: ctx.from?.id,
+         chat_id: ctx.chat?.id,
+         error: e?.message || e,
+       });
+       try { await ctx.answerCbQuery("⚠️ Error"); } catch {}
+       try { await ctx.reply("⚠️ split:v2:providers error. Check logs."); } catch {}
+     }
+   });
+   
+   // Provider status header (non-functional)
+   bot.action("provider:status:header", async (ctx) => {
      try {
-       console.log("[telegram-menu] callback_received", { user_id: userIdOf(ctx), action: "split:v2:providers" });
-       await ctx.answerCbQuery("Providers").catch(() => {});
-       return ctx.reply(
-         "🧠 Providers",
-         providerKeyboard(settingsOf(ctx), getTelegramRole(userIdOf(ctx)))
-       );
-    } catch (e: any) {
-      console.error("[telegram:callback:error]", {
-        action: "split:v2:providers",
-        user_id: ctx.from?.id,
-        chat_id: ctx.chat?.id,
-        error: e?.message || e,
-      });
-      try { await ctx.answerCbQuery("⚠️ Error"); } catch {}
-      try { await ctx.reply("⚠️ split:v2:providers error. Check logs."); } catch {}
-    }
-  });
+       await ctx.answerCbQuery("Provider Status").catch(() => {});
+     } catch (e: any) {
+       console.error("[telegram:callback:error]", {
+         action: "provider:status:header",
+         user_id: ctx.from?.id,
+         chat_id: ctx.chat?.id,
+         error: e?.message || e,
+       });
+       try { await ctx.answerCbQuery("⚠️ Error"); } catch {}
+       try { await ctx.reply("⚠️ provider:status:header error. Check logs."); } catch {}
+     }
+   });
+   
+   // Separator (non-functional)
+   bot.action("provider:separator", async (ctx) => {
+     try {
+       await ctx.answerCbQuery("").catch(() => {});
+     } catch (e: any) {
+       console.error("[telegram:callback:error]", {
+         action: "provider:separator",
+         user_id: ctx.from?.id,
+         chat_id: ctx.chat?.id,
+         error: e?.message || e,
+       });
+       try { await ctx.answerCbQuery("⚠️ Error"); } catch {}
+       try { await ctx.reply("⚠️ provider:separator error. Check logs."); } catch {}
+     }
+   });
+   
+   // Provider mode selection
+   bot.action("provider:mode:api", async (ctx) => {
+     try {
+       await ctx.answerCbQuery("API Mode Selected").catch(() => {});
+       const userId = userIdOf(ctx);
+       const settings = settingsOf(ctx);
+       const newSettings = { ...settings, provider: "auto" }; // Auto will determine actual mode based on env
+       userRuntimeSettings.set(userId, newSettings);
+       
+       const keyboard = providerKeyboard(newSettings, getTelegramRole(userId));
+       await editOrReply(ctx, "⚡ TeleGPT Provider Control\n\nMode set to API (auto-select based on configuration)", keyboard);
+     } catch (e: any) {
+       console.error("[telegram:callback:error]", {
+         action: "provider:mode:api",
+         user_id: ctx.from?.id,
+         chat_id: ctx.chat?.id,
+         error: e?.message || e,
+       });
+       try { await ctx.answerCbQuery("⚠️ Error"); } catch {}
+       try { await ctx.reply("⚠️ provider:mode:api error. Check logs."); } catch {}
+     }
+   });
+   
+   bot.action("provider:mode:web", async (ctx) => {
+     try {
+       await ctx.answerCbQuery("Web Mode Selected").catch(() => {});
+       const userId = userIdOf(ctx);
+       const settings = settingsOf(ctx);
+       const newSettings = { ...settings, provider: "openai_web", bridgeEnabled: true, creatorMode: false };
+       userRuntimeSettings.set(userId, newSettings);
+       
+       const keyboard = providerKeyboard(newSettings, getTelegramRole(userId));
+       await editOrReply(ctx, "⚡ TeleGPT Provider Control\n\nMode set to Web (OpenAI Web)", keyboard);
+     } catch (e: any) {
+       console.error("[telegram:callback:error]", {
+         action: "provider:mode:web",
+         user_id: ctx.from?.id,
+         chat_id: ctx.chat?.id,
+         error: e?.message || e,
+       });
+       try { await ctx.answerCbQuery("⚠️ Error"); } catch {}
+       try { await ctx.reply("⚠️ provider:mode:web error. Check logs."); } catch {}
+     }
+   });
+   
+   // Provider selection handlers
+   bot.action(/^provider:set:(auto|openai_web|qwen_web|deepseek_web|kimi_web|ollama_local)$/i, async (ctx) => {
+     try {
+       const uid = String((ctx as any)?.from?.id || "");
+       const priv = String((ctx as any)?.chat?.type || "") === "private";
+       const role = getTelegramRole(uid);
 
-  bot.action("provider:view", async (ctx) => {
-    try {
-      await ctx.answerCbQuery("Provider info in settings");
-    } catch (e: any) {
-      console.error("[telegram:callback:error]", {
-        action: "provider:view",
-        user_id: ctx.from?.id,
-        chat_id: ctx.chat?.id,
-        error: e?.message || e,
-      });
-      try { await ctx.answerCbQuery("⚠️ Error"); } catch {}
-      try { await ctx.reply("⚠️ provider:view error. Check logs."); } catch {}
-    }
-  });
+       if (!isMaker(uid, priv)) {
+         await ctx.answerCbQuery(MSG.makerOnly);
+         return;
+       }
 
-  bot.action(/^provider:set:(auto|openai_web|qwen_web|deepseek_web|kimi_web|ollama_local)$/i, async (ctx) => {
-    try {
-      const uid = String((ctx as any)?.from?.id || "");
-      const priv = String((ctx as any)?.chat?.type || "") === "private";
-      const role = getTelegramRole(uid);
+       const provider = String((ctx as any)?.match?.[1] || "auto") as TelegramProvider;
+       const userId = userIdOf(ctx);
+       const oldSettings = settingsOf(ctx);
+       
+       // Determine model based on provider
+       let model = "";
+       if (provider === "ollama_local") {
+         model = "qwen2.5:7b-instruct"; // Default local model
+       } else if (provider === "openai_web") {
+         model = "openai_web:gpt-4o-mini";
+       } else if (provider === "qwen_web") {
+         model = "qwen_web:qwen-plus";
+       } else if (provider === "deepseek_web") {
+         model = "deepseek_web:deepseek-r1";
+       } else if (provider === "kimi_web") {
+         model = "kimi_web:kimi-k2.5";
+       } else {
+         // Auto mode - determine from environment
+         model = providerToModel(provider);
+       }
+       
+       const newSettings = { ...oldSettings, provider, model, 
+         ...(provider === "openai_web" || provider === "qwen_web" || provider === "deepseek_web" || provider === "kimi_web" 
+           ? { bridgeEnabled: false, creatorMode: false } 
+           : { bridgeEnabled: oldSettings.bridgeEnabled ?? false, creatorMode: oldSettings.creatorMode ?? false }) };
+       userRuntimeSettings.set(userId, newSettings);
 
-      if (!isMaker(uid, priv)) {
-        await ctx.answerCbQuery(MSG.makerOnly);
-        return;
-      }
+       const label = deps.getAccountLabel(uid);
+       console.log("[telegram-menu] provider:set", {
+         user_id: uid,
+         label,
+         provider,
+         model: newSettings.model,
+         role,
+         priv,
+       });
 
-      const provider = String((ctx as any)?.match?.[1] || "auto") as TelegramProvider;
-      const userId = userIdOf(ctx);
-      const oldSettings = settingsOf(ctx);
-      const newSettings = { ...oldSettings, provider, model: providerToModel(provider) };
-      userRuntimeSettings.set(userId, newSettings);
+       await ctx.answerCbQuery(`Provider: ${providerLabel(provider)}`);
 
-      const label = deps.getAccountLabel(uid);
-      console.log("[telegram-menu] provider:set", {
-        user_id: uid,
-        label,
-        provider,
-        model: newSettings.model,
-        role,
-        priv,
-      });
+       const keyboard = providerKeyboard(newSettings, getTelegramRole(userId));
+       await editOrReply(ctx, `⚡ TeleGPT Provider Control\n\nProvider set to ${providerLabel(provider)}`, keyboard);
+     } catch (e: any) {
+       console.error("[telegram:callback:error]", {
+         action: "provider:set",
+         user_id: ctx.from?.id,
+         chat_id: ctx.chat?.id,
+         error: e?.message || e,
+       });
+       try { await ctx.answerCbQuery("⚠️ Error"); } catch {}
+       try { await ctx.reply("⚠️ provider:set error. Check logs."); } catch {}
+     }
+   });
+   
+   // Provider action handlers
+   bot.action("provider:action:api_smoke", async (ctx) => {
+     try {
+       await ctx.answerCbQuery("Running API Smoke Test...").catch(() => {});
+       const userId = userIdOf(ctx);
+       const { ApiProviderSmoke } = await import("../../runtime/provider/api/index.js");
+       const smoke = new ApiProviderSmoke(new (await import("../../runtime/provider/api/api-provider-registry.js")).ApiProviderRegistry());
+       
+       // Run smoke test for all API providers
+       const results = await smoke.runAllSmokeTests();
+       
+       // Format results
+       const lines = ["## API Smoke Results"];
+       for (const r of results) {
+         const icon = r.health_status === "healthy" ? "🟢" : r.health_status === "missing_credentials" ? "🟡" : "🔴";
+         lines.push(`${icon} \`${r.provider_id}\`: ${r.health_status}${r.error ? ` — ${r.error}` : ""}`);
+       }
+       
+       await editOrReply(ctx, lines.join("\n"), { parse_mode: "Markdown" });
+       
+       // Refresh the provider keyboard
+       const settings = settingsOf(ctx);
+       const keyboard = providerKeyboard(settings, getTelegramRole(userIdOf(ctx)));
+       await ctx.reply("⚡ TeleGPT Provider Control\n\nSelect an option below:", keyboard);
+     } catch (e: any) {
+       console.error("[telegram:callback:error]", {
+         action: "provider:action:api_smoke",
+         user_id: ctx.from?.id,
+         chat_id: ctx.chat?.id,
+         error: e?.message || e,
+       });
+       try { await ctx.answerCbQuery("⚠️ Error"); } catch {}
+       try { await ctx.reply("⚠️ provider:action:api_smoke error. Check logs."); } catch {}
+     }
+   });
+   
+   bot.action("provider:action:web_health", async (ctx) => {
+     try {
+       await ctx.answerCbQuery("Checking Web Bridge Health...").catch(() => {});
+       const userId = userIdOf(ctx);
+       const { ProviderMenuRenderer, ProviderFeatureRegistry } = await import("../../runtime/provider/web/native/index.js");
+       const registry = new ProviderFeatureRegistry();
+       const menuRenderer = new ProviderMenuRenderer(registry);
+       
+       // Get web bridge status
+       const status = await menuRenderer.getBridgeStatus();
+       
+       const lines = [
+         "## Web Bridge Health Status",
+         "",
+         `**Endpoint:** ${status.endpoint || "Not configured"}`,
+         `**Connection:** ${status.connected ? "🟢 Connected" : "🔴 Disconnected"}`,
+         `**Last Check:** ${new Date(status.lastChecked || 0).toLocaleTimeString()}`,
+         "",
+         "**Providers:**",
+         `OpenAI Web: ${status.providers?.openai_web ? "🟢 Ready" : "🔴 Not Ready"}`,
+         `Qwen Web: ${status.providers?.qwen_web ? "🟢 Ready" : "🔴 Not Ready"}`,
+         `DeepSeek Web: ${status.providers?.deepseek_web ? "🟢 Ready" : "🔴 Not Ready"}`
+       ];
+       
+       await editOrReply(ctx, lines.join("\n"), { parse_mode: "Markdown" });
+       
+       // Refresh the provider keyboard
+       const settings = settingsOf(ctx);
+       const keyboard = providerKeyboard(settings, getTelegramRole(userIdOf(ctx)));
+       await ctx.reply("⚡ TeleGPT Provider Control\n\nSelect an option below:", keyboard);
+     } catch (e: any) {
+       console.error("[telegram:callback:error]", {
+         action: "provider:action:web_health",
+         user_id: ctx.from?.id,
+         chat_id: ctx.chat?.id,
+         error: e?.message || e,
+       });
+       try { await ctx.answerCbQuery("⚠️ Error"); } catch {}
+       try { await ctx.reply("⚠️ provider:action:web_health error. Check logs."); } catch {}
+     }
+   });
 
-      await ctx.answerCbQuery(`Provider: ${providerLabel(provider)}`);
-
-      const keyboard = providerKeyboard(settingsOf(ctx), getTelegramRole(userIdOf(ctx)));
-      await editOrReply(ctx, `🌐 Provider: *${providerLabel(provider)}*\nModel: *\`${newSettings.model}\`*`, keyboard);
-    } catch (e: any) {
-      console.error("[telegram:callback:error]", {
-        action: "provider:set",
-        user_id: ctx.from?.id,
-        chat_id: ctx.chat?.id,
-        error: e?.message || e,
-      });
-      try { await ctx.answerCbQuery("⚠️ Error"); } catch {}
-      try { await ctx.reply("⚠️ provider:set error. Check logs."); } catch {}
-    }
-  });
+   // Provider action handlers (continued from above)
 
   bot.action("split:v2:bridge", async (ctx) => {
     try {

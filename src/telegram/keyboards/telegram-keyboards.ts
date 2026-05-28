@@ -44,17 +44,93 @@ export function compactMenuKeyboard(role: TelegramRole) {
  }
 
 export function providerKeyboard(settings: UserRuntimeSettings, role: TelegramRole) {
-   const rows = TELEGRAM_PROVIDERS.map((provider) => {
-     const selected = (settings.provider || "auto") === provider.id ? "✅ " : "";
-     const callback =
-       role === "public"
-         ? "provider:view"
-         : `provider:set:${provider.id}`;
-     return [Markup.button.callback(`${selected}${provider.label}`, callback)];
-   });
-   rows.push([Markup.button.callback("⬅️ Back", "split:v2:main")]);
-   return Markup.inlineKeyboard(rows);
- }
+    const rows: any[][] = [];
+    
+    if (role !== "public") {
+      // Add header with current status for creators
+      const currentProvider = settings.provider || "auto";
+      const providerLabelText = providerLabel(currentProvider);
+      
+      // Determine mode
+      let mode = "Auto";
+      if (currentProvider === "ollama_local") mode = "Local";
+      else if (["openai_web", "qwen_web", "deepseek_web", "kimi_web"].includes(currentProvider)) mode = "Web";
+      else if (currentProvider === "auto") {
+        // Determine actual mode for auto
+        const llmProvider = (process.env.LLM_PROVIDER || "").toLowerCase();
+        if (llmProvider === "ollama") mode = "Local";
+        else {
+          const localUrl = (process.env.LOCAL_OPENAI_BASE_URL || "").trim();
+          const localModel = (process.env.LOCAL_OPENAI_MODEL || "").trim();
+          if (localUrl && localModel) mode = "Local";
+          else mode = "API";
+        }
+      }
+      
+      // Add status header
+      rows.push([
+        Markup.button.callback(`⚡ Provider Control\nMode: ${mode}\nActive: ${providerLabelText}`, "provider:status:header")
+      ]);
+      rows.push([Markup.button.callback("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "provider:separator")]);
+    }
+    
+    // Main provider selection buttons
+    if (role === "public") {
+      // Public users see only basic controls
+      rows.push([Markup.button.callback("🤖 Chat", "split:v2:chat")]);
+      rows.push([Markup.button.callback("❓ Help", "split:v2:help")]);
+      rows.push([Markup.button.callback("⚙️ Settings", "split:v2:settings")]);
+    } else {
+      // Creator users see full provider controls
+      // Mode selection
+      rows.push([
+        Markup.button.callback(`🔄 Auto${(settings.provider || "auto") === "auto" ? " ✅" : ""}`, "provider:set:auto"),
+        Markup.button.callback(`💻 Local${(settings.provider || "auto") === "ollama_local" ? " ✅" : ""}`, "provider:set:ollama_local")
+      ]);
+      rows.push([
+        Markup.button.callback(`🌐 API${(settings.provider || "auto") === "openai_web" || (settings.provider || "auto") === "qwen_web" || (settings.provider || "auto") === "deepseek_web" || (settings.provider || "auto") === "kimi_web" ? " ✅" : ""}`, "provider:mode:api"),
+        Markup.button.callback(`🌍 Web${settings.bridgeEnabled ? " ✅" : ""}`, "provider:mode:web")
+      ]);
+      
+      // API provider buttons
+      rows.push([Markup.button.callback("━━━ API Providers ━━━", "provider:separator")]);
+      const apiProviders = [
+        { id: "openai_web", label: "OpenAI API" },
+        { id: "qwen_web", label: "Qwen API" },
+        { id: "deepseek_web", label: "DeepSeek API" }
+      ];
+      
+      for (const provider of apiProviders) {
+        const selected = (settings.provider || "auto") === provider.id ? "✅ " : "";
+        rows.push([Markup.button.callback(`${selected}${provider.label}`, `provider:set:${provider.id}`)]);
+      }
+      
+      // Web provider buttons
+      rows.push([Markup.button.callback("━━━ Web Providers ━━━", "provider:separator")]);
+      const webProviders = [
+        { id: "openai_web", label: "OpenAI Web" },
+        { id: "qwen_web", label: "Qwen Web" },
+        { id: "deepseek_web", label: "DeepSeek Web" }
+      ];
+      
+      for (const provider of webProviders) {
+        const selected = (settings.provider || "auto") === provider.id ? "✅ " : "";
+        rows.push([Markup.button.callback(`${selected}${provider.label}`, `provider:set:${provider.id}`)]);
+      }
+      
+      // Health check buttons
+      rows.push([Markup.button.callback("━━━ Diagnostics ━━━", "provider:separator")]);
+      rows.push([
+        Markup.button.callback("🔍 API Smoke", "provider:action:api_smoke"),
+        Markup.button.callback("🌐 Web Health", "provider:action:web_health")
+      ]);
+    }
+    
+    // Back button (always shown)
+    rows.push([Markup.button.callback("⬅️ Back to Main Menu", "split:v2:main")]);
+    
+    return Markup.inlineKeyboard(rows);
+  }
 
 export function bridgeKeyboard(settings: UserRuntimeSettings, currentProviderLabel: string) {
    return Markup.inlineKeyboard([

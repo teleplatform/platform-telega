@@ -708,29 +708,148 @@ export function registerCoreCommands(bot: Telegraf, deps: CommandHandlerContext)
   
     });
 
-    bot.command("help", async (ctx) => {
-  
-      try {
-  
-        const uid = String((ctx as any)?.from?.id || "");
-  
-        const username = String((ctx as any)?.from?.username || "");
-  
-        const label = deps.getAccountLabel(uid);
-  
-        const lang = detectLanguage(username);
-  
-        const { renderAllCommands } = await import("../lib/commands.js");
-  
-        await ctx.reply(renderAllCommands(lang, label));
-  
-      } catch (e: any) {
-  
-        console.error("[telegram] /help failed", e?.message || e);
-  
-      }
-  
-    });
+     bot.command("help", async (ctx) => {
+   
+       try {
+   
+         const uid = String((ctx as any)?.from?.id || "");
+         const username = String((ctx as any)?.from?.username || "");
+         const label = deps.getAccountLabel(uid);
+         const lang = detectLanguage(username);
+         const { renderAllCommands } = await import("../lib/commands.js");
+   
+         await ctx.reply(renderAllCommands(lang, label));
+   
+       } catch (e: any) {
+   
+         console.error("[telegram] /help failed", e?.message || e);
+   
+       }
+   
+     });
+     
+     bot.command("provider_current", async (ctx) => {
+       try {
+         const { getTelegramRole, userIdOf, settingsOf, editOrReply } = await import("../utils/telegram-utils.js");
+         const { providerLabel, providerKeyboard } = await import("../keyboards/telegram-keyboards.js");
+         const { ApiProviderRegistry, ApiProviderSwitcher, ApiProviderHealth, ApiProviderRenderer } = await import("../../runtime/provider/api/index.js");
+         
+         const userId = userIdOf(ctx);
+         const role = getTelegramRole(userId);
+         const settings = settingsOf(ctx);
+         
+         // For public users, show minimal information
+         if (role === "public") {
+           await ctx.reply("TeleGPT is ready.");
+           return;
+         }
+         
+         // For creator users, show detailed provider information
+         const apiRegistry = new ApiProviderRegistry();
+         const apiSwitcher = new ApiProviderSwitcher(apiRegistry);
+         const apiHealth = new ApiProviderHealth(apiRegistry);
+         const apiRenderer = new ApiProviderRenderer();
+         
+         // Get current provider status
+         const currentProvider = settings.provider || "auto";
+         const currentModel = settings.model || "";
+         
+         // Get provider health status
+         let healthStatus = "unknown";
+         let hasCredentials = false;
+         
+         // Map telegram provider to api provider for health check
+         let apiProviderId: string | undefined;
+         switch (currentProvider) {
+           case "openai_web":
+             apiProviderId = "openai:api";
+             break;
+           case "qwen_web":
+             apiProviderId = "qwen:api";
+             break;
+           case "deepseek_web":
+             apiProviderId = "deepseek:api";
+             break;
+           case "ollama_local":
+             // Local provider - assume healthy if selected
+             healthStatus = "healthy";
+             hasCredentials = true;
+             break;
+           case "auto":
+             // Auto mode - determine based on environment
+             const llmProvider = (process.env.LLM_PROVIDER || "").toLowerCase();
+             if (llmProvider === "ollama") {
+               apiProviderId = "local"; // Special case for local
+               healthStatus = "healthy";
+               hasCredentials = true;
+             } else {
+               const localUrl = (process.env.LOCAL_OPENAI_BASE_URL || "").trim();
+               const localModel = (process.env.LOCAL_OPENAI_MODEL || "").trim();
+               if (localUrl && localModel) {
+                 apiProviderId = "local";
+                 healthStatus = "healthy";
+                 hasCredentials = true;
+               } else {
+                 apiProviderId = "openai:api"; // Default to openai
+               }
+             }
+             break;
+           default:
+             apiProviderId = undefined;
+         }
+         
+         // Get health status for API providers
+         if (apiProviderId && apiProviderId !== "local") {
+           const status = await apiHealth.getProviderStatus(apiProviderId);
+           if (status) {
+             healthStatus = status.health;
+             hasCredentials = status.has_credentials;
+           }
+         }
+         
+         const healthIcon = healthStatus === "healthy" ? "🟢" : 
+                         healthStatus === "missing_credentials" ? "🟡" : 
+                         healthStatus === "failed" ? "🔴" : "⚪";
+         
+         // Format mode
+         let mode = "Auto";
+         if (currentProvider === "ollama_local") mode = "Local";
+         else if (["openai_web", "qwen_web", "deepseek_web", "kimi_web"].includes(currentProvider)) mode = "Web";
+         else if (currentProvider === "auto") {
+           // Determine actual mode for auto
+           const llmProvider = (process.env.LLM_PROVIDER || "").toLowerCase();
+           if (llmProvider === "ollama") mode = "Local";
+           else {
+             const localUrl = (process.env.LOCAL_OPENAI_BASE_URL || "").trim();
+             const localModel = (process.env.LOCAL_OPENAI_MODEL || "").trim();
+             if (localUrl && localModel) mode = "Local";
+             else mode = "API";
+           }
+         }
+         
+         const lines = [
+           "⚡ TeleGPT Provider Control",
+           "",
+           `**Mode:** ${mode}`,
+           `**Active:** \`${providerLabel(currentProvider)}\``,
+           `**Health:** ${healthIcon} ${healthStatus}`,
+           "",
+           settings.bridgeEnabled !== undefined || settings.creatorMode !== undefined ? 
+             "**Web Bridge:**" : "",
+           settings.bridgeEnabled !== undefined ? 
+             `OpenAI: ${settings.bridgeEnabled ? "🟢" : "🔴"}` : "",
+           settings.bridgeEnabled !== undefined ? 
+             `Qwen: ${settings.bridgeEnabled ? "🟢" : "🔴"}` : "",
+           settings.bridgeEnabled !== undefined ? 
+             `DeepSeek: ${settings.bridgeEnabled ? "🟢" : "🔴"}` : "",
+         ].filter(Boolean).join("\n");
+         
+         await ctx.reply(lines, { parse_mode: "Markdown" });
+       } catch (e: any) {
+         console.error("[telegram] /provider_current failed", e?.message || e);
+         await ctx.reply("❌ Failed to get provider information");
+       }
+     });
 
     bot.command("commands", async (ctx) => {
   
