@@ -90,6 +90,15 @@ export function filterByBudget(
       openai_api: "premium",
       qwen_api: "cheap",
       deepseek_api: "cheap",
+      glm_local_web_api: "free",
+      kimi_local_web_api: "free",
+      glm_api: "cheap",
+      kimi_api: "cheap",
+      zyloo_api: "cheap",
+      mimo_api: "cheap",
+      mimo_browser_discovery: "free",
+      minimax: "free",
+      kimi_free_local: "free",
     };
     
     const providerTier = providerTiers[provider] || "premium";

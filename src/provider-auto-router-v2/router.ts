@@ -91,6 +91,7 @@ function getDefaultModel(provider: ProviderId): string {
     qwen_api: "qwen-plus",
     kimi_api: "kimi-k3",
     kimi_local_web_api: "kimi-k3",
+    zyloo_api: "zyloo/kimi-k3",
     kimi_free_local: "kimi-k2",
   };
   return map[provider] ?? provider;

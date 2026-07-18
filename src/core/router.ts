@@ -456,6 +456,58 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       }
       providerUnavailable("openai", e);
     }
+  } else if (model.startsWith("zyloo:")) {
+    resolved_model = stripPrefix(model, "zyloo:");
+    const hasZylooKey = Boolean((process.env.ZYLOO_API_KEY || process.env.ZYLOO_API_KEY_2 || "").trim());
+    if (!hasZylooKey) {
+      noProviderConfigured({
+        requested_model: `zyloo:${resolved_model}`,
+        available_providers: listAvailableProviders(),
+        disabled_providers: listDisabledProviders(),
+        rejection_reasons: ["ZYLOO_API_KEY / ZYLOO_API_KEY_2 not set"],
+      });
+    }
+    provider = "zyloo_api";
+    console.log("[router:routeChat:zyloo]", { model: resolved_model, request_id });
+    try {
+      const { resolveZylooApiKeyWithSlot, isZylooModel } = await import("../providers/zyloo_api/index.js");
+      if (!isZylooModel(resolved_model)) {
+        noProviderConfigured({
+          requested_model: `zyloo:${resolved_model}`,
+          available_providers: listAvailableProviders(),
+          disabled_providers: listDisabledProviders(),
+          rejection_reasons: [`Model "${resolved_model}" is not a Zyloo model`],
+        });
+      }
+      const keyWithSlot = resolveZylooApiKeyWithSlot()!;
+      const baseURL = "https://api.zyloo.io/v1";
+      const zylooBody: Record<string, unknown> = {
+        model: resolved_model,
+        messages: [
+          ...(req.system ? [{ role: "system", content: req.system }] : []),
+          { role: "user", content: req.message || "" },
+        ],
+      };
+      const resp = await fetch(`${baseURL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${keyWithSlot.key}`,
+        },
+        body: JSON.stringify(zylooBody),
+        signal: AbortSignal.timeout(120_000),
+      });
+      const data = await resp.json().catch(() => ({})) as any;
+      if (!resp.ok) {
+        const errMsg = data?.error?.message || `HTTP ${resp.status}`;
+        providerUnavailable("zyloo_api", new Error(errMsg));
+      }
+      const choice = data?.choices?.[0];
+      const text = choice?.message?.content || "";
+      base = { id: `zyloo-${Date.now()}`, model: resolved_model, output: text, meta: { provider: "zyloo_api" as const, model: resolved_model } } as ChatResponse;
+    } catch (e) {
+      providerUnavailable("zyloo_api", e);
+    }
   } else if (model.startsWith("local:")) {
     provider = "local";
     resolved_model = stripPrefix(model, "local:");

@@ -54,8 +54,8 @@ const INTENT_PROVIDER_MAP: Record<IntentClass, ProviderRecommendation> = {
   code_generation: {
     intent: "code_generation",
     primary: "kimi_local_web_api",
-    fallbacks: ["kimi_api", "deepseek_web", "openai_api", "local"],
-    reason: "Kimi strong at code, browser fallback available",
+    fallbacks: ["zyloo_api", "kimi_api", "deepseek_web", "openai_api", "local"],
+    reason: "Kimi strong at code, Zyloo K3 as API alternative, browser fallback available",
   },
   code_review: {
     intent: "code_review",
@@ -72,8 +72,8 @@ const INTENT_PROVIDER_MAP: Record<IntentClass, ProviderRecommendation> = {
   deep_research: {
     intent: "deep_research",
     primary: "glm_local_web_api",
-    fallbacks: ["kimi_api", "glm_api", "kimi_local_web_api", "deepseek_web"],
-    reason: "GLM search models excel at deep research, Kimi K3 for long-context research",
+    fallbacks: ["zyloo_api", "kimi_api", "glm_api", "kimi_local_web_api", "deepseek_web"],
+    reason: "GLM search models excel at deep research, Zyloo K3 for long-context research",
   },
   web_research: {
     intent: "web_research",
@@ -102,8 +102,8 @@ const INTENT_PROVIDER_MAP: Record<IntentClass, ProviderRecommendation> = {
   reasoning: {
     intent: "reasoning",
     primary: "deepseek_web",
-    fallbacks: ["kimi_api", "glm_local_web_api", "kimi_local_web_api", "openai_api"],
-    reason: "DeepSeek strongest at reasoning and logic, Kimi K3 for always-on reasoning",
+    fallbacks: ["zyloo_api", "kimi_api", "glm_local_web_api", "kimi_local_web_api", "openai_api"],
+    reason: "DeepSeek strongest at reasoning and logic, Zyloo K3 for always-on reasoning",
   },
   multi_opinion: {
     intent: "multi_opinion",

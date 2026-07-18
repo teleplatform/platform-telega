@@ -23,6 +23,7 @@ export type ProviderId =
   | "qwen_api" | "qwen_web"
   | "deepseek_api" | "deepseek_web"
   | "kimi_web" | "kimi_free_local" | "kimi_api" | "kimi_local_web_api"
+  | "zyloo_api"
   | "gemini_web" | "claude_web"
   | "glm_local_web_api"
   | "minimax" | "grok_web"

@@ -171,6 +171,16 @@ function toFallbackProvider(target: ProviderId): ResolvedProviderConfig {
       source: "fallback",
       rawInput: `kimi_api:kimi-k3`,
     },
+    zyloo_api: {
+      provider: "zyloo_api",
+      model: "zyloo/kimi-k3",
+      fallbackTo: ["kimi_local_web_api", "kimi_api", "local"],
+      baseURL: "https://api.zyloo.io/v1",
+      apiKeyEnv: "ZYLOO_API_KEY",
+      role: "user",
+      source: "fallback",
+      rawInput: "zyloo_api:zyloo/kimi-k3",
+    },
     mimo_api: {
       provider: "mimo_api",
       model: process.env.MIMO_MODEL || "mimo-v2.5-pro",
@@ -627,6 +637,67 @@ async function callProvider(
       const text = choice?.message?.content || "";
       const reasoning = choice?.message?.reasoning_content || "";
       result = { output: reasoning ? `${reasoning}\n\n${text}` : text };
+    } else if (provider === "zyloo_api") {
+      const { resolveZylooApiKeyWithSlot, isZylooModel } = await import("../providers/zyloo_api/index.js");
+      if (!isZylooModel(model)) {
+        return {
+          ok: false,
+          provider: "zyloo_api",
+          model,
+          error: { type: "invalid_request", message: `Model "${model}" is not a Zyloo model. Use zyloo_api for Zyloo models only (e.g. zyloo/kimi-k3).` },
+          fallbackUsed: false,
+        };
+      }
+      const keyWithSlot = resolveZylooApiKeyWithSlot();
+      if (!keyWithSlot) {
+        return {
+          ok: false,
+          provider: "zyloo_api",
+          model,
+          error: { type: "auth", message: "ZYLOO_API_KEY / ZYLOO_API_KEY_2 not configured" },
+          fallbackUsed: false,
+        };
+      }
+      const { key: apiKey, slot: credentialSlot } = keyWithSlot;
+      const baseURL = "https://api.zyloo.io/v1";
+      const body: Record<string, unknown> = {
+        model,
+        messages: messages.map(m => ({ role: m.role, content: m.content })),
+      };
+      if (systemPrompt) {
+        body.messages = [
+          { role: "system", content: systemPrompt },
+          ...body.messages as Array<{ role: string; content: string }>,
+        ];
+      }
+      const resp = await fetch(`${baseURL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(120_000),
+      });
+      const data = await resp.json().catch(() => ({})) as any;
+      if (!resp.ok) {
+        const errMsg = data?.error?.message || `HTTP ${resp.status}`;
+        const isAuth = /401|unauthorized|invalid.*key/i.test(errMsg);
+        const isBilling = /billing|insufficient|quota|payment/i.test(errMsg);
+        return {
+          ok: false,
+          provider: "zyloo_api",
+          model,
+          error: {
+            type: isAuth ? "auth" : isBilling ? "rate_limit" : "unknown",
+            message: errMsg,
+          },
+          fallbackUsed: false,
+        };
+      }
+      const choice = data?.choices?.[0];
+      const text = choice?.message?.content || "";
+      result = { output: text };
     } else if (provider === "kimi_local_web_api") {
       const { isKimiFamilyModel } = await import("../providers/kimi_api/index.js");
       if (!isKimiFamilyModel(model)) {

@@ -125,6 +125,7 @@ export function registerChatCompletionsRoute(app: FastifyInstance): void {
 }
 
 function resolveProviderForModel(model: string): string {
+  if (model.startsWith("zyloo")) return "zyloo_api";
   if (model.startsWith("kimi")) return "kimi_api";
   if (model.startsWith("glm")) return "glm_api";
   if (model.startsWith("qwen")) return "qwen_api";

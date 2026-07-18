@@ -1,11 +1,12 @@
 import { appendEvidenceRecord } from "../runtime/evidence/execution-evidence-store.js";
 import { ProviderOps } from "./providerOpsService.js";
 
-export type FailoverProvider = "glm_local_web_api" | "kimi_local_web_api" | "deepseek_web" | "local";
+export type FailoverProvider = "glm_local_web_api" | "kimi_local_web_api" | "deepseek_web" | "zyloo_api" | "local";
 
 const FALLBACK_CHAINS: Record<string, FailoverProvider[]> = {
   glm_local_web_api: ["kimi_local_web_api", "deepseek_web", "local"],
   kimi_local_web_api: ["glm_local_web_api", "deepseek_web", "local"],
+  zyloo_api: ["kimi_local_web_api", "deepseek_web", "local"],
 };
 
 const BASE_URL = "http://127.0.0.1:9766";
@@ -72,6 +73,7 @@ async function tryProvider(model: string): Promise<{ ok: boolean; latency: numbe
 const MODEL_MAP: Record<string, string> = {
   glm_local_web_api: "glm-5-thinking",
   kimi_local_web_api: "kimi-k3",
+  zyloo_api: "zyloo/kimi-k3",
   deepseek_web: "deepseek-chat",
   local: "local-demo",
 };

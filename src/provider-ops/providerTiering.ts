@@ -17,6 +17,7 @@ const TIER_REGISTRY: TieredProvider[] = [
   { providerId: "gemini_web", displayName: "Gemini Web", tier: "stable" },
   { providerId: "claude_web", displayName: "Claude Web", tier: "stable" },
   { providerId: "kimi_api", displayName: "Kimi API", tier: "experimental", reason: "K3 registered, pending smoke verification" },
+  { providerId: "zyloo_api", displayName: "Zyloo API", tier: "experimental", reason: "Zyloo K3 registered, pending live smoke verification" },
   { providerId: "kimi_local_web_api", displayName: "Kimi Browser", tier: "stable" },
   { providerId: "glm_local_web_api", displayName: "GLM Browser", tier: "stable" },
   { providerId: "minimax", displayName: "MiniMax Agent", tier: "stable" },

@@ -3,6 +3,7 @@ import { appendEvidenceRecord } from "../runtime/evidence/execution-evidence-sto
 export type ProviderMatrixProvider =
   | "glm_api" | "glm_local_web_api"
   | "kimi_api" | "kimi_local_web_api"
+  | "zyloo_api"
   | "mimo_api" | "mimo_browser_discovery";
 
 export interface MatrixEntry {
@@ -29,6 +30,14 @@ const MATRIX: Record<string, MatrixEntry> = {
     displayName: "Kimi API",
     apiBaseUrl: "https://api.moonshot.ai/v1",
     model: "kimi-k3",
+    browserFallback: "kimi_local_web_api",
+  },
+  zyloo_api: {
+    provider: "zyloo_api",
+    officialKey: "ZYLOO_API_KEY",
+    displayName: "Zyloo API",
+    apiBaseUrl: "https://api.zyloo.io/v1",
+    model: "zyloo/kimi-k3",
     browserFallback: "kimi_local_web_api",
   },
   mimo_api: {

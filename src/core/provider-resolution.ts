@@ -20,6 +20,7 @@ export type ProviderId =
   | "glm_local_web_api"
   | "kimi_api"
   | "kimi_local_web_api"
+  | "zyloo_api"
   | "mimo_api"
   | "mimo_browser_discovery"
   | "minimax"
@@ -202,6 +203,20 @@ const PROVIDER_REGISTRY: Record<string, ProviderRegistryEntry> = {
       role: "user",
     }),
   },
+  zyloo_api: {
+    prefix: "zyloo",
+    provider: "zyloo_api",
+    defaultModel: "zyloo/kimi-k3",
+    role: "user",
+    resolve: (rawModel) => ({
+      provider: "zyloo_api",
+      model: rawModel || "zyloo/kimi-k3",
+      fallbackTo: ["kimi_local_web_api", "kimi_api", "local"],
+      apiKeyEnv: "ZYLOO_API_KEY",
+      baseURL: "https://api.zyloo.io/v1",
+      role: "user",
+    }),
+  },
   kimi_local_web_api: {
     prefix: "kimi_local_web_api",
     provider: "kimi_local_web_api",
@@ -252,6 +267,7 @@ export function resolveModel(input?: string, role?: RuntimeRole): ResolvedProvid
     : prefix === "deepseek" ? "deepseek_api"
     : prefix === "chatgpt" ? "chatgpt_web"
     : prefix === "kimi" ? "kimi_api"
+    : prefix === "zyloo" ? "zyloo_api"
     : prefix;
 
   const entry = PROVIDER_REGISTRY[normalizedPrefix];

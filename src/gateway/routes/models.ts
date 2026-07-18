@@ -8,6 +8,7 @@ import { appendEvidenceRecord } from "../../runtime/evidence/execution-evidence-
 const GATEWAY_MODELS = [
   { id: "kimi-k3", owned_by: "telegpt", source: "kimi_api" },
   { id: "kimi-k2.7-code", owned_by: "telegpt", source: "kimi_api" },
+  { id: "zyloo/kimi-k3", owned_by: "telegpt", source: "zyloo_api" },
 ];
 
 export function registerModelsRoute(app: FastifyInstance): void {

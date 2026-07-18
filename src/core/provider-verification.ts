@@ -1,6 +1,7 @@
 import { appendEvidenceRecord } from "../runtime/evidence/execution-evidence-store.js";
 import { isKimiFamilyModel, isKimiApiProvider, resolveKimiApiKey } from "../providers/kimi_api/index.js";
 import { isKimiLocalWebApiProvider } from "../providers/kimi_local_web_api/index.js";
+import { resolveZylooApiKey, isZylooModel, isZylooUpstreamModel } from "../providers/zyloo_api/index.js";
 
 export interface VerificationCheck {
   providerIdMatch: boolean;
@@ -18,20 +19,23 @@ export interface VerificationResult {
   requestedProvider: string;
   resolvedProvider: string;
   model: string;
-  executionLane: "official_api" | "browser_bridge" | "local" | "unknown";
+  executionLane: "official_api" | "browser_bridge" | "local" | "external_api" | "unknown";
   authSource: string;
 }
 
 const KIMI_FAMILY_PROVIDERS = ["kimi_api", "kimi_local_web_api", "kimi_web", "kimi_free_local"] as const;
+const ZYLOO_PROVIDERS = ["zyloo_api"] as const;
 
 const PROVIDER_ENDPOINTS: Record<string, string> = {
   kimi_api: "https://api.moonshot.ai/v1",
   kimi_local_web_api: "http://127.0.0.1:9766",
+  zyloo_api: "https://api.zyloo.io/v1",
 };
 
 const PROVIDER_AUTH_SOURCES: Record<string, string> = {
   kimi_api: "KIMI_API_KEY / MOONSHOT_API_KEY",
   kimi_local_web_api: "browser_session",
+  zyloo_api: "ZYLOO_API_KEY",
 };
 
 function recordEvidence(type: string, payload: Record<string, unknown>): void {
@@ -45,8 +49,9 @@ function recordEvidence(type: string, payload: Record<string, unknown>): void {
   }).catch(() => {});
 }
 
-function detectExecutionLane(provider: string): "official_api" | "browser_bridge" | "local" | "unknown" {
+function detectExecutionLane(provider: string): "official_api" | "browser_bridge" | "local" | "external_api" | "unknown" {
   if (provider === "kimi_api") return "official_api";
+  if (provider === "zyloo_api") return "external_api";
   if (provider === "kimi_local_web_api") return "browser_bridge";
   if (provider === "kimi_web") return "browser_bridge";
   if (provider === "kimi_free_local") return "local";
@@ -60,10 +65,17 @@ function isKimiEndpoint(provider: string, lane: string): boolean {
   if (lane === "official_api") {
     return provider === "kimi_api";
   }
+  if (lane === "external_api") {
+    return provider === "zyloo_api";
+  }
   if (lane === "browser_bridge") {
     return provider === "kimi_local_web_api" || provider === "kimi_web";
   }
   return false;
+}
+
+function isZylooEndpoint(provider: string, lane: string): boolean {
+  return provider === "zyloo_api" && lane === "external_api";
 }
 
 export const ProviderVerification = {
@@ -94,13 +106,19 @@ export const ProviderVerification = {
 
     // 2. Model family match: model must belong to provider family
     const isKimiProvider = KIMI_FAMILY_PROVIDERS.includes(requestedProvider as any);
+    const isZylooProvider = ZYLOO_PROVIDERS.includes(requestedProvider as any);
     if (isKimiProvider) {
       checks.modelFamilyMatch = isKimiFamilyModel(model);
       if (!checks.modelFamilyMatch) {
         reasons.push(`model_family_mismatch: "${model}" is not a Kimi-family model for provider "${requestedProvider}"`);
       }
+    } else if (isZylooProvider) {
+      checks.modelFamilyMatch = isZylooModel(model) || isZylooUpstreamModel(model);
+      if (!checks.modelFamilyMatch) {
+        reasons.push(`model_family_mismatch: "${model}" is not a Zyloo model for provider "${requestedProvider}"`);
+      }
     } else {
-      // Non-Kimi provider — model family check passes (other providers have their own validation)
+      // Non-Kimi/Zyloo provider — model family check passes
       checks.modelFamilyMatch = true;
     }
 
@@ -121,11 +139,15 @@ export const ProviderVerification = {
 
     // 4. Execution lane match: provider type must match execution path
     const lane = detectExecutionLane(resolvedProvider);
-    checks.executionLaneMatch = isKimiEndpoint(resolvedProvider, lane);
-    if (!checks.executionLaneMatch && isKimiProvider) {
+    if (isZylooProvider) {
+      checks.executionLaneMatch = isZylooEndpoint(resolvedProvider, lane);
+    } else {
+      checks.executionLaneMatch = isKimiEndpoint(resolvedProvider, lane);
+    }
+    if (!checks.executionLaneMatch && (isKimiProvider || isZylooProvider)) {
       reasons.push(`execution_lane_mismatch: provider="${resolvedProvider}" lane="${lane}"`);
     }
-    if (!isKimiProvider) {
+    if (!isKimiProvider && !isZylooProvider) {
       checks.executionLaneMatch = true;
     }
 
@@ -134,6 +156,11 @@ export const ProviderVerification = {
       checks.authMatch = !!resolveKimiApiKey();
       if (!checks.authMatch) {
         reasons.push("auth_unavailable: KIMI_API_KEY / MOONSHOT_API_KEY not configured");
+      }
+    } else if (resolvedProvider === "zyloo_api") {
+      checks.authMatch = !!resolveZylooApiKey();
+      if (!checks.authMatch) {
+        reasons.push("auth_unavailable: ZYLOO_API_KEY / ZYLOO_API_KEY_2 not configured");
       }
     } else if (resolvedProvider === "kimi_local_web_api") {
       // Browser bridge auth is session-based, verified at execution time
@@ -146,6 +173,8 @@ export const ProviderVerification = {
     if (options?.requiresCapability) {
       if (isKimiProvider) {
         checks.capabilityMatch = isKimiFamilyModel(model);
+      } else if (isZylooProvider) {
+        checks.capabilityMatch = isZylooModel(model) || isZylooUpstreamModel(model);
       } else {
         checks.capabilityMatch = true;
       }

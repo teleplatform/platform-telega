@@ -21,7 +21,7 @@ export type ChatUsage = {
 };
 
 export type ChatMeta = {
-  provider?: "local" | "openai" | "persona" | "deepseek" | "qwen" | "creator" | "openai_web" | "qwen_web" | "deepseek_web" | "grok_web" | "kimi_web" | "chatgpt_web" | "perplexity_web" | "claude_web" | "gemini_web" | "poe_web" | "openai_api" | "qwen_api" | "deepseek_api" | "kimi_api" | "kimi_local_web_api" | "openrouter_kimi" | "multi_agent" | "strategy" | "longform" | "kimi_free_local";
+  provider?: "local" | "openai" | "persona" | "deepseek" | "qwen" | "creator" | "openai_web" | "qwen_web" | "deepseek_web" | "grok_web" | "kimi_web" | "chatgpt_web" | "perplexity_web" | "claude_web" | "gemini_web" | "poe_web" | "openai_api" | "qwen_api" | "deepseek_api" | "kimi_api" | "kimi_local_web_api" | "zyloo_api" | "openrouter_kimi" | "multi_agent" | "strategy" | "longform" | "kimi_free_local";
   model?: string;
   usage?: ChatUsage;
   fallback_used?: boolean;

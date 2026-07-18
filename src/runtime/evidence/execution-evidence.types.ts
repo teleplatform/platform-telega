@@ -921,6 +921,11 @@ export type EvidenceRecordType =
   | "provider.kimi_k3.legacy_fallback"
   | "provider.kimi_k3.unsupported_upstream"
   | "provider.kimi_k3.reasoning.completed"
+  | "provider.zyloo_k3.detected"
+  | "provider.zyloo_k3.selected"
+  | "provider.zyloo_k3.executed"
+  | "provider.zyloo_k3.credential_failover"
+  | "provider.zyloo_k3.unsupported_upstream"
   | "discovery.started"
   | "discovery.completed";
 

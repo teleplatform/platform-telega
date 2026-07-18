@@ -16,6 +16,7 @@ const CAPABILITY_REGISTRY: ProviderCapabilityEntry[] = [
   { providerId: "deepseek_api", displayName: "DeepSeek API", tier: "stable", capabilities: ["fast", "reasoning", "code", "long_context", "api"], free: false },
   { providerId: "deepseek_web", displayName: "DeepSeek Web", tier: "stable", capabilities: ["reasoning", "code", "long_context", "technical_debug", "web_bridge"], free: true },
   { providerId: "kimi_api", displayName: "Kimi API", tier: "experimental", capabilities: ["reasoning", "code", "long_context", "api"], free: false },
+  { providerId: "zyloo_api", displayName: "Zyloo API", tier: "experimental", capabilities: ["reasoning", "code", "long_context", "api"], free: false },
   { providerId: "kimi_web", displayName: "Kimi Web", tier: "stable", capabilities: ["reasoning", "long_context", "web_bridge"], free: true },
   { providerId: "gemini_web", displayName: "Gemini Web", tier: "stable", capabilities: ["reasoning", "creative", "long_context", "web_bridge"], free: true },
   { providerId: "claude_web", displayName: "Claude Web", tier: "stable", capabilities: ["reasoning", "code", "creative", "long_context", "web_bridge"], free: false },

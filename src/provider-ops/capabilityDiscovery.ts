@@ -35,6 +35,11 @@ const KIMI_K3_CANONICAL_MAP: Record<string, string> = {
   "kimi-k2.5": "kimi-k2.5",
 };
 
+const ZYLOO_CANONICAL_MAP: Record<string, string> = {
+  "zyloo/kimi-k3": "kimi-k3",
+  "kimi-k3": "kimi-k3",
+};
+
 const KIMI_K3_DEFAULT_RESULT: CapabilityDiscoveryResult = {
   providerId: "kimi",
   availableModels: [
@@ -110,7 +115,7 @@ async function discoverKimiWebModels(
 const discoveryCache = new Map<string, CapabilityDiscoveryResult>();
 
 export const CapabilityDiscovery = {
-  async discover(providerId: "kimi_api" | "kimi_local_web_api"): Promise<CapabilityDiscoveryResult> {
+  async discover(providerId: "kimi_api" | "kimi_local_web_api" | "zyloo_api"): Promise<CapabilityDiscoveryResult> {
     const cached = discoveryCache.get(providerId);
     if (cached && Date.now() - cached.discoveredAt < 30 * 60 * 1000) {
       return cached;
@@ -130,6 +135,26 @@ export const CapabilityDiscovery = {
         limits: KIMI_K3_DEFAULT_RESULT.limits,
         discoveredAt: Date.now(),
         upstreamModelIds: raw,
+      };
+    } else if (providerId === "zyloo_api") {
+      result = {
+        providerId,
+        availableModels: [
+          { upstreamId: "zyloo/kimi-k3", canonicalId: "kimi-k3", isLegacy: false },
+        ],
+        capabilities: {
+          vision: true,
+          toolCalling: true,
+          structuredOutput: true,
+          reasoning: true,
+          streaming: true,
+        },
+        limits: {
+          contextWindow: 1_000_000,
+          maxOutputTokens: 32_768,
+        },
+        discoveredAt: Date.now(),
+        upstreamModelIds: { "kimi-k3": "zyloo/kimi-k3" },
       };
     } else {
       result = {
