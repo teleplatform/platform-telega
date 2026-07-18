@@ -3,6 +3,7 @@ import { registerModelsRoute } from "./routes/models.js";
 import { registerChatCompletionsRoute } from "./routes/chat-completions.js";
 import { appendEvidenceRecord } from "../runtime/evidence/execution-evidence-store.js";
 import { getAllSnapshots } from "../core/provider-health-runtime.js";
+import { getRankingDiagnostics } from "../core/provider-scoring-engine.js";
 import { gatewayAuthMiddleware } from "./auth.js";
 
 const PORT = Number(process.env.TGPT_GATEWAY_PORT || "8765");
@@ -48,6 +49,11 @@ async function startGateway() {
     return reply.send({ providers: snapshots });
   });
 
+  app.get("/internal/provider-ranking", { preHandler: [gatewayAuthMiddleware] }, async (req, reply) => {
+    const ranking = getRankingDiagnostics();
+    return reply.send(ranking);
+  });
+
   registerModelsRoute(app);
   registerChatCompletionsRoute(app);
 
@@ -61,6 +67,7 @@ async function startGateway() {
     console.log("║  Models:     GET  /v1/models");
     console.log("║  Chat:       POST /v1/chat/completions");
     console.log("║  Health:     GET  /health");
+    console.log("║  Ranking:    GET  /internal/provider-ranking");
     console.log("╚══════════════════════════════════════════════╝\n");
 
     appendEvidenceRecord({

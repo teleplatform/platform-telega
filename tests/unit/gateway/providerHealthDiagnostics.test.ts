@@ -12,14 +12,20 @@ import Fastify from "fastify";
 import { registerModelsRoute } from "../../../src/gateway/routes/models.js";
 import { registerChatCompletionsRoute } from "../../../src/gateway/routes/chat-completions.js";
 import { getAllSnapshots, resetAll, recordSuccess, recordFailure } from "../../../src/core/provider-health-runtime.js";
+import { getRankingDiagnostics, resetScoringConfig, resetProviderPolicies } from "../../../src/core/provider-scoring-engine.js";
 import { createApiKey } from "../../../src/api-keys/store.js";
 
 let passed = 0;
 let failed = 0;
-const allTests: Promise<void>[] = [];
+const allTests: { name: string; fn: () => void | Promise<void> }[] = [];
 
 function test(name: string, fn: () => void | Promise<void>) {
-  const p = (async () => {
+  allTests.push({ name, fn });
+}
+
+// Run tests sequentially to avoid shared-state races on resetAll()/resetScoringConfig().
+async function runSequential() {
+  for (const { name, fn } of allTests) {
     try {
       await fn();
       passed++;
@@ -29,8 +35,7 @@ function test(name: string, fn: () => void | Promise<void>) {
       console.error(`  ✗ ${name}`);
       console.error(`    ${e.message}`);
     }
-  })();
-  allTests.push(p);
+  }
 }
 
 console.log("\nTGP-17A — Diagnostics Endpoint:\n");
@@ -109,7 +114,44 @@ test("Health snapshot has expected fields", async () => {
   assert.equal(typeof snap.updatedAt, "number");
 });
 
-Promise.all(allTests).then(() => {
+test("GET /internal/provider-ranking returns 200 with auth", async () => {
+  resetScoringConfig();
+  resetProviderPolicies();
+  resetAll();
+  recordSuccess("rank_a", 100, Date.now());
+  recordSuccess("rank_b", 120, Date.now());
+
+  const app = Fastify({ logger: false });
+  registerModelsRoute(app);
+  registerChatCompletionsRoute(app);
+
+  app.get("/internal/provider-ranking", { preHandler: [] }, async () => getRankingDiagnostics());
+
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const addr = app.server.address() as any;
+
+  const resp = await fetch(`http://127.0.0.1:${addr.port}/internal/provider-ranking`);
+  assert.equal(resp.status, 200);
+  const data = await resp.json() as any;
+  assert.ok(Array.isArray(data.ranked), "Should return ranked array");
+  console.log("    DEBUG ranked:", data.ranked.length, "eligible:", data.totalEligible, "excluded:", data.totalExcluded);
+  assert.ok(data.ranked.length >= 2, "Should rank providers");
+  assert.equal(typeof data.timestamp, "number");
+  assert.equal(data.ranked[0].rankingPosition, 1);
+  await app.close();
+});
+
+test("Ranking diagnostics response is sanitized", async () => {
+  resetAll();
+  recordSuccess("rank_san", 100, Date.now());
+  const ranking = getRankingDiagnostics();
+  const json = JSON.stringify(ranking);
+  assert.ok(!json.includes("sk-"), "Must not contain API keys");
+  assert.ok(!json.includes("Bearer"), "Must not contain auth headers");
+  assert.ok(!json.includes("API key"), "Must not contain raw error messages");
+});
+
+runSequential().then(() => {
   console.log(`\n${passed} passed, ${failed} failed\n`);
   process.exit(failed > 0 ? 1 : 0);
 });

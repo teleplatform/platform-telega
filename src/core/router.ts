@@ -514,6 +514,10 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
         });
         recordProviderFailure("zyloo_api", resolved_model, decision);
         healthRecordFailure("zyloo_api", decision, zylooLatencyMs, Date.now());
+        try {
+          const { recordScoringOutcome } = await import("./provider-scoring-engine.js");
+          recordScoringOutcome("zyloo_api", false, zylooLatencyMs, decision);
+        } catch { /* non-fatal */ }
         const err = new Error(decision.safeMessage);
         (err as any).code = decision.type === "quota_exhausted" ? "QUOTA_EXHAUSTED" : "PROVIDER_UNAVAILABLE";
         (err as any).statusCode = decision.type === "auth" ? 401 : decision.type === "rate_limit" ? 429 : decision.type === "quota_exhausted" ? 402 : 502;
@@ -525,6 +529,10 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       const choice = data?.choices?.[0];
       const text = choice?.message?.content || "";
       healthRecordSuccess("zyloo_api", zylooLatencyMs, Date.now());
+      try {
+        const { recordScoringOutcome } = await import("./provider-scoring-engine.js");
+        recordScoringOutcome("zyloo_api", true, zylooLatencyMs, null);
+      } catch { /* non-fatal */ }
       base = { id: `zyloo-${Date.now()}`, model: resolved_model, output: text, meta: { provider: "zyloo_api" as const, model: resolved_model } } as ChatResponse;
     } catch (e: any) {
       if (e.failureType) throw e;
