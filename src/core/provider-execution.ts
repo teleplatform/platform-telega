@@ -683,7 +683,7 @@ async function callProvider(
         return b;
       };
 
-      const tryZylooKey = async (apiKey: string, credentialSlot: string) => {
+      const tryZylooKey = async (apiKey: string, credentialSlot: string, remainingSlots: number) => {
         const resp = await fetch(`${zylooBaseURL}/chat/completions`, {
           method: "POST",
           headers: {
@@ -696,7 +696,7 @@ async function callProvider(
         const data = await resp.json().catch(() => ({})) as any;
         if (!resp.ok) {
           const errMsg = data?.error?.message || `HTTP ${resp.status}`;
-          const decision = classifyError(errMsg, resp.status);
+          const decision = classifyError(errMsg, resp.status, remainingSlots);
           return {
             ok: false as const,
             provider: "zyloo_api" as const,
@@ -720,12 +720,13 @@ async function callProvider(
       };
 
       const { key: primaryKey, slot: primarySlot } = keyWithSlot;
-      const primaryResult = await tryZylooKey(primaryKey, primarySlot);
+      const hasSecondary = !!(process.env[ZYLOO_API_KEY_ENV_SECONDARY] && primarySlot === "primary");
+      const primaryResult = await tryZylooKey(primaryKey, primarySlot, hasSecondary ? 1 : 0);
 
       if (!primaryResult.ok) {
         console.log(`[zyloo] ${primarySlot} key failed: ${primaryResult.error?.type} — ${primaryResult.error?.message}`);
 
-        const { circuit } = handleProviderFailure({
+        handleProviderFailure({
           provider: "zyloo_api",
           model,
           rawMessage: primaryResult.decision?.rawMessage || primaryResult.error?.message || "unknown",
@@ -733,6 +734,11 @@ async function callProvider(
           traceId: context?.traceId,
           credentialSlot: primarySlot,
         });
+
+        if (primaryResult.decision?.shouldFallback && !primaryResult.decision?.shouldCycleCredential) {
+          const { credentialSlot: _cs, decision: _d, ...cleanResult } = primaryResult;
+          return cleanResult;
+        }
       }
 
       if (primaryResult.ok || !primaryResult.decision?.shouldCycleCredential) {
@@ -743,7 +749,7 @@ async function callProvider(
       const secondaryKey = process.env[ZYLOO_API_KEY_ENV_SECONDARY];
       if (secondaryKey && primarySlot === "primary") {
         console.log(`[zyloo] ${primarySlot} failed (${primaryResult.error?.type}), trying secondary key`);
-        const secondaryResult = await tryZylooKey(secondaryKey, "secondary");
+        const secondaryResult = await tryZylooKey(secondaryKey, "secondary", 0);
         if (!secondaryResult.ok) {
           handleProviderFailure({
             provider: "zyloo_api",

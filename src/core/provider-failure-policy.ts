@@ -96,16 +96,21 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
 
 export function classifyError(
   rawMessage: string,
-  httpStatus?: number
+  httpStatus?: number,
+  remainingCredentialSlots?: number
 ): FailureDecision {
+  const slotsLeft = remainingCredentialSlots ?? 1;
+
   // Check HTTP status first for unambiguous cases
   if (httpStatus === 401) {
     return {
       type: "auth",
       shouldRetrySameKey: false,
-      shouldCycleCredential: true,
-      shouldFallback: false,
-      safeMessage: "Authentication failed. Trying alternative credentials.",
+      shouldCycleCredential: slotsLeft > 0,
+      shouldFallback: slotsLeft === 0,
+      safeMessage: slotsLeft > 0
+        ? "Authentication failed. Trying alternative credentials."
+        : "All credentials exhausted. Falling back to alternative provider.",
       rawMessage,
     };
   }
@@ -113,7 +118,7 @@ export function classifyError(
     return {
       type: "rate_limit",
       shouldRetrySameKey: false,
-      shouldCycleCredential: true,
+      shouldCycleCredential: slotsLeft > 0,
       shouldFallback: true,
       safeMessage: "Rate limit exceeded. Retrying with alternative credentials.",
       rawMessage,
@@ -123,14 +128,18 @@ export function classifyError(
   // Check message patterns (first match wins)
   for (const rule of CLASSIFICATION_RULES) {
     if (rule.pattern.test(rawMessage)) {
-      return {
+      const decision: FailureDecision = {
         type: rule.type,
         shouldRetrySameKey: rule.retrySameKey,
-        shouldCycleCredential: rule.cycleCredential,
-        shouldFallback: rule.fallback,
+        shouldCycleCredential: rule.cycleCredential && slotsLeft > 0,
+        shouldFallback: rule.fallback || (rule.type === "auth" && slotsLeft === 0),
         safeMessage: rule.safeMessage,
         rawMessage,
       };
+      if (rule.type === "auth" && slotsLeft === 0) {
+        decision.safeMessage = "All credentials exhausted. Falling back to alternative provider.";
+      }
+      return decision;
     }
   }
 
