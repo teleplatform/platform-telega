@@ -4,6 +4,25 @@ import type { ResolvedProviderConfig } from "./provider-resolution.js";
 import { recordMetric } from "./provider-telemetry.js";
 import { checkBudget, DEFAULT_BUDGET_POLICY, type BudgetPolicy } from "./provider-budget.js";
 import { addDecision, completeTrace } from "./provider-trace.js";
+import { CircuitBreaker } from "./circuitBreaker.js";
+import { appendEvidenceRecord } from "../runtime/evidence/execution-evidence-store.js";
+
+const providerCircuitBreaker = new CircuitBreaker({
+  failureThreshold: 3,
+  windowMs: 60_000,
+  cooldownMs: 300_000,
+});
+
+function emitZylooEvidence(type: string, payload: Record<string, unknown>): void {
+  appendEvidenceRecord({
+    evidence_id: `zyloo.${type}-${Date.now()}`,
+    trace_id: "zyloo_execution",
+    job_id: "zyloo_execution",
+    type: type as any,
+    timestamp: new Date().toISOString(),
+    payload,
+  }).catch(() => {});
+}
 
 export type SessionProviderId = BridgeProviderId;
 
@@ -37,7 +56,7 @@ export type ExecutionResult = {
   model: string;
   text?: string;
   error?: {
-    type: "auth" | "network" | "rate_limit" | "network_quota" | "invalid_request" | "unknown" | "budget";
+    type: "auth" | "network" | "rate_limit" | "network_quota" | "quota_exhausted" | "invalid_request" | "unknown" | "budget";
     message: string;
   };
   fallbackUsed: boolean;
@@ -45,7 +64,7 @@ export type ExecutionResult = {
 
 function isFallbackAllowed(errorType: string | undefined): boolean {
   if (!errorType) return false;
-  return ["network", "rate_limit", "network_quota", "unknown", "budget"].includes(errorType);
+  return ["network", "rate_limit", "network_quota", "quota_exhausted", "unknown", "budget"].includes(errorType);
 }
 
 function toFallbackProvider(target: ProviderId): ResolvedProviderConfig {
@@ -689,16 +708,24 @@ async function callProvider(
           const errMsg = data?.error?.message || `HTTP ${resp.status}`;
           const isAuth = /401|unauthorized|invalid.*key/i.test(errMsg);
           const isNetworkQuota = /one account per network|network.*quota|per.*network/i.test(errMsg);
-          const isBilling = /billing|insufficient|quota|payment/i.test(errMsg);
-          const errorType: "auth" | "network_quota" | "rate_limit" | "unknown" = isAuth ? "auth" : isNetworkQuota ? "network_quota" : isBilling ? "rate_limit" : "unknown";
+          const isQuotaExhausted = /insufficient.*credit|insufficient.*quota|insufficient.*balance|add funds|billing/i.test(errMsg);
+          const isRateLimit = /rate.*limit|429|too many/i.test(errMsg);
+          const errorType: "auth" | "network_quota" | "quota_exhausted" | "rate_limit" | "unknown" =
+            isAuth ? "auth" : isNetworkQuota ? "network_quota" : isQuotaExhausted ? "quota_exhausted" : isRateLimit ? "rate_limit" : "unknown";
+          const safeMessage = isQuotaExhausted
+            ? "Quota exhausted. Falling back to alternative provider."
+            : isNetworkQuota
+              ? "Network-level quota limit reached."
+              : errMsg;
           return {
             ok: false as const,
             provider: "zyloo_api" as const,
             model,
-            error: { type: errorType, message: errMsg },
+            error: { type: errorType, message: safeMessage },
             fallbackUsed: false as const,
             credentialSlot,
             isNetworkQuota,
+            isQuotaExhausted,
           };
         }
         const choice = data?.choices?.[0];
@@ -716,11 +743,24 @@ async function callProvider(
       const { key: primaryKey, slot: primarySlot } = keyWithSlot;
       const primaryResult = await tryZylooKey(primaryKey, primarySlot);
 
-      if (primaryResult.ok || primaryResult.isNetworkQuota || primaryResult.error?.type === "auth") {
-        if (!primaryResult.ok) {
-          console.log(`[zyloo] ${primarySlot} key failed: ${primaryResult.error?.type} — ${primaryResult.error?.message}`);
+      if (!primaryResult.ok) {
+        console.log(`[zyloo] ${primarySlot} key failed: ${primaryResult.error?.type} — ${primaryResult.error?.message}`);
+
+        providerCircuitBreaker.recordFailure("zyloo_api", model);
+
+        if (primaryResult.isQuotaExhausted || primaryResult.isNetworkQuota) {
+          emitZylooEvidence("provider.zyloo_k3.quota_exhausted", {
+            model,
+            credentialSlot: primarySlot,
+            errorType: primaryResult.error?.type,
+            reason: primaryResult.error?.message,
+            circuitState: providerCircuitBreaker.getState("zyloo_api", model),
+          });
         }
-        const { credentialSlot: _cs, isNetworkQuota: _nq, ...cleanResult } = primaryResult;
+      }
+
+      if (primaryResult.ok || primaryResult.isNetworkQuota || primaryResult.isQuotaExhausted || primaryResult.error?.type === "auth") {
+        const { credentialSlot: _cs, isNetworkQuota: _nq, isQuotaExhausted: _qe, ...cleanResult } = primaryResult;
         return cleanResult;
       }
 
@@ -728,11 +768,14 @@ async function callProvider(
       if (secondaryKey && primarySlot === "primary") {
         console.log(`[zyloo] ${primarySlot} failed (${primaryResult.error?.type}), trying secondary key`);
         const secondaryResult = await tryZylooKey(secondaryKey, "secondary");
-        const { credentialSlot: _cs2, isNetworkQuota: _nq2, ...cleanSecondary } = secondaryResult;
+        if (!secondaryResult.ok) {
+          providerCircuitBreaker.recordFailure("zyloo_api", model);
+        }
+        const { credentialSlot: _cs2, isNetworkQuota: _nq2, isQuotaExhausted: _qe2, ...cleanSecondary } = secondaryResult;
         return cleanSecondary;
       }
 
-      const { credentialSlot: _cs3, isNetworkQuota: _nq3, ...cleanFinal } = primaryResult;
+      const { credentialSlot: _cs3, isNetworkQuota: _nq3, isQuotaExhausted: _qe3, ...cleanFinal } = primaryResult;
       return cleanFinal;
     } else if (provider === "kimi_local_web_api") {
       const { isKimiFamilyModel } = await import("../providers/kimi_api/index.js");

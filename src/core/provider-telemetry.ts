@@ -10,7 +10,7 @@ export type ProviderExecutionMetric = {
   model: string;
 
   success: boolean;
-  error_type?: "auth" | "network" | "rate_limit" | "network_quota" | "invalid_request" | "unknown" | "budget";
+  error_type?: "auth" | "network" | "rate_limit" | "network_quota" | "quota_exhausted" | "invalid_request" | "unknown" | "budget";
 
   latency_ms: number;
 
