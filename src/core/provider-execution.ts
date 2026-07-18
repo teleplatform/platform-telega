@@ -37,7 +37,7 @@ export type ExecutionResult = {
   model: string;
   text?: string;
   error?: {
-    type: "auth" | "network" | "rate_limit" | "invalid_request" | "unknown" | "budget";
+    type: "auth" | "network" | "rate_limit" | "network_quota" | "invalid_request" | "unknown" | "budget";
     message: string;
   };
   fallbackUsed: boolean;
@@ -45,7 +45,7 @@ export type ExecutionResult = {
 
 function isFallbackAllowed(errorType: string | undefined): boolean {
   if (!errorType) return false;
-  return ["network", "rate_limit", "unknown", "budget"].includes(errorType);
+  return ["network", "rate_limit", "network_quota", "unknown", "budget"].includes(errorType);
 }
 
 function toFallbackProvider(target: ProviderId): ResolvedProviderConfig {
@@ -638,7 +638,7 @@ async function callProvider(
       const reasoning = choice?.message?.reasoning_content || "";
       result = { output: reasoning ? `${reasoning}\n\n${text}` : text };
     } else if (provider === "zyloo_api") {
-      const { resolveZylooApiKeyWithSlot, isZylooModel } = await import("../providers/zyloo_api/index.js");
+      const { resolveZylooApiKeyWithSlot, isZylooModel, ZYLOO_API_KEY_ENV_SECONDARY } = await import("../providers/zyloo_api/index.js");
       if (!isZylooModel(model)) {
         return {
           ok: false,
@@ -658,46 +658,82 @@ async function callProvider(
           fallbackUsed: false,
         };
       }
-      const { key: apiKey, slot: credentialSlot } = keyWithSlot;
-      const baseURL = "https://api.zyloo.io/v1";
-      const body: Record<string, unknown> = {
-        model,
-        messages: messages.map(m => ({ role: m.role, content: m.content })),
-      };
-      if (systemPrompt) {
-        body.messages = [
-          { role: "system", content: systemPrompt },
-          ...body.messages as Array<{ role: string; content: string }>,
-        ];
-      }
-      const resp = await fetch(`${baseURL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(120_000),
-      });
-      const data = await resp.json().catch(() => ({})) as any;
-      if (!resp.ok) {
-        const errMsg = data?.error?.message || `HTTP ${resp.status}`;
-        const isAuth = /401|unauthorized|invalid.*key/i.test(errMsg);
-        const isBilling = /billing|insufficient|quota|payment/i.test(errMsg);
-        return {
-          ok: false,
-          provider: "zyloo_api",
+
+      const zylooBaseURL = "https://api.zyloo.io/v1";
+      const buildBody = (): Record<string, unknown> => {
+        const b: Record<string, unknown> = {
           model,
-          error: {
-            type: isAuth ? "auth" : isBilling ? "rate_limit" : "unknown",
-            message: errMsg,
-          },
-          fallbackUsed: false,
+          messages: messages.map(m => ({ role: m.role, content: m.content })),
         };
+        if (systemPrompt) {
+          b.messages = [
+            { role: "system", content: systemPrompt },
+            ...b.messages as Array<{ role: string; content: string }>,
+          ];
+        }
+        return b;
+      };
+
+      const tryZylooKey = async (apiKey: string, credentialSlot: string) => {
+        const resp = await fetch(`${zylooBaseURL}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(buildBody()),
+          signal: AbortSignal.timeout(120_000),
+        });
+        const data = await resp.json().catch(() => ({})) as any;
+        if (!resp.ok) {
+          const errMsg = data?.error?.message || `HTTP ${resp.status}`;
+          const isAuth = /401|unauthorized|invalid.*key/i.test(errMsg);
+          const isNetworkQuota = /one account per network|network.*quota|per.*network/i.test(errMsg);
+          const isBilling = /billing|insufficient|quota|payment/i.test(errMsg);
+          const errorType: "auth" | "network_quota" | "rate_limit" | "unknown" = isAuth ? "auth" : isNetworkQuota ? "network_quota" : isBilling ? "rate_limit" : "unknown";
+          return {
+            ok: false as const,
+            provider: "zyloo_api" as const,
+            model,
+            error: { type: errorType, message: errMsg },
+            fallbackUsed: false as const,
+            credentialSlot,
+            isNetworkQuota,
+          };
+        }
+        const choice = data?.choices?.[0];
+        const text = choice?.message?.content || "";
+        return {
+          ok: true as const,
+          provider: "zyloo_api" as const,
+          model,
+          text,
+          fallbackUsed: false as const,
+          credentialSlot,
+        };
+      };
+
+      const { key: primaryKey, slot: primarySlot } = keyWithSlot;
+      const primaryResult = await tryZylooKey(primaryKey, primarySlot);
+
+      if (primaryResult.ok || primaryResult.isNetworkQuota || primaryResult.error?.type === "auth") {
+        if (!primaryResult.ok) {
+          console.log(`[zyloo] ${primarySlot} key failed: ${primaryResult.error?.type} — ${primaryResult.error?.message}`);
+        }
+        const { credentialSlot: _cs, isNetworkQuota: _nq, ...cleanResult } = primaryResult;
+        return cleanResult;
       }
-      const choice = data?.choices?.[0];
-      const text = choice?.message?.content || "";
-      result = { output: text };
+
+      const secondaryKey = process.env[ZYLOO_API_KEY_ENV_SECONDARY];
+      if (secondaryKey && primarySlot === "primary") {
+        console.log(`[zyloo] ${primarySlot} failed (${primaryResult.error?.type}), trying secondary key`);
+        const secondaryResult = await tryZylooKey(secondaryKey, "secondary");
+        const { credentialSlot: _cs2, isNetworkQuota: _nq2, ...cleanSecondary } = secondaryResult;
+        return cleanSecondary;
+      }
+
+      const { credentialSlot: _cs3, isNetworkQuota: _nq3, ...cleanFinal } = primaryResult;
+      return cleanFinal;
     } else if (provider === "kimi_local_web_api") {
       const { isKimiFamilyModel } = await import("../providers/kimi_api/index.js");
       if (!isKimiFamilyModel(model)) {

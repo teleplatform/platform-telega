@@ -15,6 +15,9 @@ export type ZylooApiModel = (typeof ZYLOO_API_MODELS)[number];
 
 export const ZYLOO_API_DEFAULT_MODEL: ZylooApiModel = "zyloo/kimi-k3";
 
+export const ZYLOO_API_KEY_ENV = "ZYLOO_API_KEY";
+export const ZYLOO_API_KEY_ENV_SECONDARY = "ZYLOO_API_KEY_2";
+
 export const ZYLOO_K3_SPECS = {
   contextWindow: 1_000_000,
   supportsVision: true,
