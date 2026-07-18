@@ -16,6 +16,14 @@ export type ProviderId =
   | "openai_api"
   | "qwen_api"
   | "deepseek_api"
+  | "glm_api"
+  | "glm_local_web_api"
+  | "kimi_api"
+  | "kimi_local_web_api"
+  | "mimo_api"
+  | "mimo_browser_discovery"
+  | "minimax"
+  | "kimi_free_local"
   | "local";
 
 export function isBridgeProvider(id: ProviderId): boolean {
@@ -159,13 +167,51 @@ const PROVIDER_REGISTRY: Record<string, ProviderRegistryEntry> = {
   kimi_web: {
     prefix: "kimi_web",
     provider: "kimi_web",
-    defaultModel: "kimi-k2.5",
+    defaultModel: "kimi-k3",
     role: "creator",
     resolve: (rawModel) => ({
       provider: "kimi_web",
-      model: rawModel || "kimi-k2.5",
+      model: rawModel || "kimi-k3",
       fallbackTo: [],
       role: "creator",
+    }),
+  },
+  kimi_free_local: {
+    prefix: "kimi_free_local",
+    provider: "kimi_free_local",
+    defaultModel: "kimi-k2",
+    role: "user",
+    resolve: (rawModel) => ({
+      provider: "kimi_free_local",
+      model: rawModel || "kimi-k2",
+      fallbackTo: ["kimi_local_web_api", "deepseek_web", "local"],
+      role: "user",
+    }),
+  },
+  kimi_api: {
+    prefix: "kimi",
+    provider: "kimi_api",
+    defaultModel: "kimi-k3",
+    role: "user",
+    resolve: (rawModel) => ({
+      provider: "kimi_api",
+      model: rawModel || "kimi-k3",
+      fallbackTo: ["kimi_local_web_api", "glm_api", "deepseek_api", "local"],
+      apiKeyEnv: "KIMI_API_KEY",
+      baseURL: process.env.KIMI_API_BASE_URL || "https://api.moonshot.ai/v1",
+      role: "user",
+    }),
+  },
+  kimi_local_web_api: {
+    prefix: "kimi_local_web_api",
+    provider: "kimi_local_web_api",
+    defaultModel: "kimi-k3",
+    role: "user",
+    resolve: (rawModel) => ({
+      provider: "kimi_local_web_api",
+      model: rawModel || "kimi-k3",
+      fallbackTo: ["kimi_api", "glm_local_web_api", "deepseek_web", "local"],
+      role: "user",
     }),
   },
 };
@@ -205,6 +251,7 @@ export function resolveModel(input?: string, role?: RuntimeRole): ResolvedProvid
     : prefix === "qwen" ? "qwen_api"
     : prefix === "deepseek" ? "deepseek_api"
     : prefix === "chatgpt" ? "chatgpt_web"
+    : prefix === "kimi" ? "kimi_api"
     : prefix;
 
   const entry = PROVIDER_REGISTRY[normalizedPrefix];

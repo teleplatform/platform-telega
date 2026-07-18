@@ -127,11 +127,84 @@ function toFallbackProvider(target: ProviderId): ResolvedProviderConfig {
     },
     kimi_web: {
       provider: "kimi_web",
-      model: "kimi-k2.5",
+      model: "kimi-k3",
       fallbackTo: [],
       role: "creator",
       source: "fallback",
-      rawInput: "kimi_web:kimi-k2.5",
+      rawInput: "kimi_web:kimi-k3",
+    },
+    glm_local_web_api: {
+      provider: "glm_local_web_api",
+      model: "glm-5-thinking",
+      fallbackTo: ["glm_api", "kimi_local_web_api", "deepseek_web", "local"],
+      baseURL: "http://127.0.0.1:9766/v1",
+      role: "user",
+      source: "fallback",
+      rawInput: "glm_local_web_api:glm-5-thinking",
+    },
+    glm_api: {
+      provider: "glm_api",
+      model: process.env.GLM_MODEL || "glm-5-thinking",
+      fallbackTo: ["glm_local_web_api", "kimi_api", "deepseek_api", "local"],
+      baseURL: process.env.GLM_API_BASE_URL || "https://open.bigmodel.cn/api/paas/v4",
+      apiKeyEnv: "GLM_API_KEY",
+      role: "user",
+      source: "fallback",
+      rawInput: `glm_api:${process.env.GLM_MODEL || "glm-5-thinking"}`,
+    },
+    kimi_local_web_api: {
+      provider: "kimi_local_web_api",
+      model: "kimi-k3",
+      fallbackTo: ["kimi_api", "glm_local_web_api", "deepseek_web", "local"],
+      baseURL: "http://127.0.0.1:9766/v1",
+      role: "user",
+      source: "fallback",
+      rawInput: "kimi_local_web_api:kimi-k3",
+    },
+    kimi_api: {
+      provider: "kimi_api",
+      model: "kimi-k3",
+      fallbackTo: ["kimi_local_web_api", "glm_api", "deepseek_api", "local"],
+      baseURL: process.env.KIMI_API_BASE_URL || "https://api.moonshot.ai/v1",
+      apiKeyEnv: "KIMI_API_KEY",
+      role: "user",
+      source: "fallback",
+      rawInput: `kimi_api:kimi-k3`,
+    },
+    mimo_api: {
+      provider: "mimo_api",
+      model: process.env.MIMO_MODEL || "mimo-v2.5-pro",
+      fallbackTo: ["kimi_local_web_api", "glm_local_web_api", "deepseek_web", "local"],
+      baseURL: process.env.MIMO_BASE_URL || "https://api.xiaomimimo.com/v1",
+      apiKeyEnv: "MIMO_API_KEY",
+      role: "user",
+      source: "fallback",
+      rawInput: `mimo_api:${process.env.MIMO_MODEL || "mimo-v2.5-pro"}`,
+    },
+    mimo_browser_discovery: {
+      provider: "mimo_browser_discovery",
+      model: "mimo-v2.5-pro",
+      fallbackTo: ["mimo_api", "kimi_local_web_api", "deepseek_web"],
+      role: "creator",
+      source: "fallback",
+      rawInput: "mimo_browser_discovery:mimo-v2.5-pro",
+    },
+    minimax: {
+      provider: "minimax",
+      model: "MiniMax-M3",
+      fallbackTo: ["kimi_local_web_api", "glm_local_web_api", "deepseek_web"],
+      role: "creator",
+      source: "fallback",
+      rawInput: "minimax:MiniMax-M3",
+    },
+    kimi_free_local: {
+      provider: "kimi_free_local",
+      model: process.env.KIMI_FREE_LOCAL_MODEL || "kimi-k2",
+      fallbackTo: ["kimi_local_web_api", "deepseek_web", "local"],
+      baseURL: process.env.KIMI_FREE_LOCAL_BASE_URL || "http://127.0.0.1:3271/v1",
+      role: "user",
+      source: "fallback",
+      rawInput: `kimi_free_local:${process.env.KIMI_FREE_LOCAL_MODEL || "kimi-k2"}`,
     },
     perplexity_web: {
       provider: "perplexity_web",
@@ -473,6 +546,135 @@ async function callProvider(
       return await callQwen(model, messages, systemPrompt);
     } else if (provider === "chatgpt_web") {
       return await callCreator(model, messages, systemPrompt);
+    } else if (provider === "kimi_free_local") {
+      const { kimiFreeLocalChat } = await import("../providers/kimi_free_local/chat.js");
+      result = await kimiFreeLocalChat({ message: messages.at(-1)?.content || "", model, system: systemPrompt });
+    } else if (provider === "kimi_api") {
+      const { resolveKimiApiKey, isKimiFamilyModel } = await import("../providers/kimi_api/index.js");
+      if (!isKimiFamilyModel(model)) {
+        recordMetric({
+          traceId: context?.traceId || "unknown",
+          provider_requested: "kimi_api",
+          provider_primary: "kimi_api",
+          provider_final: "kimi_api",
+          model,
+          success: false,
+          error_type: "invalid_request",
+          latency_ms: 0,
+          fallback_used: false,
+          timestamp: Date.now(),
+        });
+        return {
+          ok: false,
+          provider: "kimi_api",
+          model,
+          error: { type: "invalid_request", message: `Model "${model}" is not a Kimi-family model. Use kimi_api for Kimi models only.` },
+          fallbackUsed: false,
+        };
+      }
+      const apiKey = resolveKimiApiKey();
+      if (!apiKey) {
+        return {
+          ok: false,
+          provider: "kimi_api",
+          model,
+          error: { type: "auth", message: "KIMI_API_KEY / MOONSHOT_API_KEY not configured" },
+          fallbackUsed: false,
+        };
+      }
+      const baseURL = process.env.KIMI_API_BASE_URL || "https://api.moonshot.ai/v1";
+      const { resolveKimiReasoningEffort, isKimiK3Model } = await import("../providers/kimi_api/index.js");
+      const reasoningEffort = isKimiK3Model(model) ? resolveKimiReasoningEffort("default") : undefined;
+      const body: Record<string, unknown> = {
+        model,
+        messages: messages.map(m => ({ role: m.role, content: m.content })),
+      };
+      if (reasoningEffort) {
+        body.reasoning_effort = reasoningEffort;
+      }
+      if (systemPrompt) {
+        body.messages = [
+          { role: "system", content: systemPrompt },
+          ...body.messages as Array<{ role: string; content: string }>,
+        ];
+      }
+      const resp = await fetch(`${baseURL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(120_000),
+      });
+      const data = await resp.json().catch(() => ({})) as any;
+      if (!resp.ok) {
+        const errMsg = data?.error?.message || `HTTP ${resp.status}`;
+        const isAuth = /401|unauthorized|invalid.*key/i.test(errMsg);
+        const isBilling = /billing|insufficient|quota|payment/i.test(errMsg);
+        return {
+          ok: false,
+          provider: "kimi_api",
+          model,
+          error: {
+            type: isAuth ? "auth" : isBilling ? "rate_limit" : "unknown",
+            message: errMsg,
+          },
+          fallbackUsed: false,
+        };
+      }
+      const choice = data?.choices?.[0];
+      const text = choice?.message?.content || "";
+      const reasoning = choice?.message?.reasoning_content || "";
+      result = { output: reasoning ? `${reasoning}\n\n${text}` : text };
+    } else if (provider === "kimi_local_web_api") {
+      const { isKimiFamilyModel } = await import("../providers/kimi_api/index.js");
+      if (!isKimiFamilyModel(model)) {
+        return {
+          ok: false,
+          provider: "kimi_local_web_api",
+          model,
+          error: { type: "invalid_request", message: `Model "${model}" is not a Kimi-family model.` },
+          fallbackUsed: false,
+        };
+      }
+      const { KIMI_LOCAL_WEB_API_BRIDGE_URL } = await import("../providers/kimi_local_web_api/index.js");
+      const bridgeBase = KIMI_LOCAL_WEB_API_BRIDGE_URL;
+      const body: Record<string, unknown> = {
+        model,
+        messages: messages.map(m => ({ role: m.role, content: m.content })),
+      };
+      if (systemPrompt) {
+        body.messages = [
+          { role: "system", content: systemPrompt },
+          ...body.messages as Array<{ role: string; content: string }>,
+        ];
+      }
+      const resp = await fetch(`${bridgeBase}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(120_000),
+      });
+      const data = await resp.json().catch(() => ({})) as any;
+      if (!resp.ok) {
+        const errMsg = data?.error?.message || `HTTP ${resp.status}`;
+        const isAuth = /401|unauthorized|token.*missing|REASON_ANONYMOUS_REQUIRE_LOGIN/i.test(errMsg);
+        return {
+          ok: false,
+          provider: "kimi_local_web_api",
+          model,
+          error: {
+            type: isAuth ? "auth" : "unknown",
+            message: errMsg,
+          },
+          fallbackUsed: false,
+        };
+      }
+      const choice = data?.choices?.[0];
+      const text = choice?.message?.content || "";
+      const reasoning = choice?.message?.reasoning_content || "";
+      result = { output: reasoning ? `${reasoning}\n\n${text}` : text };
     } else {
       return {
         ok: false,

@@ -2,36 +2,178 @@ import type { ChatRequest, ChatResponse } from "../types/chat.js";
 import { localDemo } from "../providers/local/demo.js";
 import { chat as localChat } from "../providers/local/chat.js";
 import { openaiChat } from "../providers/openai/chat.js";
-import { evaluateMessage, getFullSystemPrompt } from "../runtime/identity/index.js";
-import { updateCreatorInteraction, getCreatorSummary, addTurn, getRecentTurns, getOperationalSummary, recordOperation } from "../runtime/memory/index.js";
-import { getGoalInventory, getWhatMatters, getUnfinishedBusiness } from "../runtime/goals/index.js";
-import { taskSummary, getInterruptedTasks } from "../runtime/execution/index.js";
+import { deepseekChat } from "../providers/deepseek/chat.js";
+import { qwenChat } from "../providers/qwen/chat.js";
+import { executeWebProviderWithFallback } from "../providers/web-provider-stub.js";
+import { callLocalProvider } from "../providers/local/localProvider.js";
+import { callLocalAuto } from "../providers/local/localAutoProvider.js";
+import { callLocalWithFailover, callLocalAutoWithFailover } from "../providers/local/localSafeCall.js";
+import { getFallbackMode } from "../providers/local/localFallbackSettings.js";
+import { LOCAL_MODELS, getLocalModel } from "../providers/local/localModels.js";
+import { isLocalSessionEnabled, getLocalSession } from "../providers/local/localSessionState.js";
+import { writeLocalProviderEvidence } from "../providers/local/localEvidence.js";
+import { autoRoute, getAutoRouterConfig } from "../provider-auto-router-v2/router.js";
+import { collectEvidence } from "../provider-evidence/collector.js";
 
 function hasOpenAI(): boolean {
-  const key = (process.env.OPENAI_API_KEY || "").trim();
-  if (!key) return false;
-  // Check key doesn't contain Cyrillic characters (value > 255 indicates non-ASCII)
-  const isAscii = !/[^\x20-\x7E]/.test(key);
-  return isAscii && key.startsWith("sk-");
+  return Boolean((process.env.OPENAI_API_KEY || "").trim());
+}
+
+function hasDeepSeek(): boolean {
+  return Boolean((process.env.DEEPSEEK_API_KEY || "").trim());
+}
+
+function hasQwen(): boolean {
+  return Boolean((process.env.QWEN_API_KEY || process.env.DASHSCOPE_API_KEY || "").trim());
 }
 
 function hasLocal(): boolean {
+  if (process.env.TELEGPT_LOCAL_ENABLED === "false") return false;
   return (
     Boolean((process.env.LOCAL_OPENAI_BASE_URL || "").trim()) &&
-    Boolean((process.env.LOCAL_OPENAI_MODEL || process.env.LOCAL_OPENAI_MODEL_DEFAULT || "").trim())
+    Boolean((process.env.LOCAL_OPENAI_MODEL || "").trim())
   );
 }
 
-function noProviderConfigured(): never {
+function isWebBridgeEnabled(): boolean {
+  return true; // TGR-6.65: Always enabled for internal bypass/fallback
+}
+
+const UI_ONLY_PATTERNS = [
+  /развернуть\s*свернуть/gi,
+  /свернуть\s*развернуть/gi,
+  /expand\s*collapse/gi,
+  /collapse\s*expand/gi,
+];
+
+function stripUiOnlyTokens(text: string): string {
+  let cleaned = text;
+  for (const pattern of UI_ONLY_PATTERNS) {
+    cleaned = cleaned.replace(pattern, "").trim();
+  }
+  return cleaned;
+}
+
+async function routeWebFallback(req: ChatRequest, webProvider?: string): Promise<ChatResponse> {
+  const t0 = Date.now();
+  const effectiveProvider = webProvider || "chatgpt_web";
+
+  console.log("[web_provider_selected]", {
+    selected_provider: effectiveProvider,
+    web_adapter: effectiveProvider,
+    model: req.model,
+  });
+
+  // TGR-8.47: Provider lock — no silent drift
+  if (webProvider && webProvider !== effectiveProvider) {
+    console.error("[web_provider_drift]", {
+      expected: webProvider,
+      actual: effectiveProvider,
+      model: req.model,
+    });
+  }
+
+  const result = await executeWebProviderWithFallback({
+    prompt: req.message,
+    systemPrompt: req.system,
+    preferredProvider: effectiveProvider as any,
+    requestId: req.request_id,
+  });
+
+  if (!result.ok) {
+    const reason = result.reason || "unknown";
+    console.error("[router:routeWebFallback:failed]", JSON.stringify({
+      trace_id: req.request_id || "unknown",
+      reason,
+      provider: effectiveProvider,
+      attempts: result.attempts?.length || 0,
+      attempt_details: result.attempts?.map(a => ({ provider: a.provider, ok: a.ok, reason: a.reason })) || [],
+    }));
+    throw new Error(`Web fallback failed: ${reason}`);
+  }
+
+  const rawOutput = result.responseText || "";
+  const output = stripUiOnlyTokens(rawOutput);
+
+  console.log("[router:routeWebFallback]", JSON.stringify({
+    provider: result.selectedProvider,
+    model: result.provider,
+    raw_len: rawOutput.length,
+    output_len: output.length,
+    stripped: rawOutput.length !== output.length,
+    preview: rawOutput.slice(0, 300),
+  }));
+
+  if (!output.trim() && rawOutput.trim()) {
+    throw new Error(`Web fallback returned UI-only content (${rawOutput.length} chars). Trace available.`);
+  }
+
+  collectEvidence({
+    provider: effectiveProvider as any,
+    model: result.selectedProvider || effectiveProvider,
+    intent: (req as any).meta?.intent || "unknown",
+    latencyMs: Date.now() - t0,
+    success: true,
+    fallbackUsed: String(effectiveProvider) !== String(result.selectedProvider),
+  });
+
+  return {
+    id: `web-${Date.now()}`,
+    model: `${effectiveProvider}:${result.selectedProvider || effectiveProvider}`,
+    output,
+    meta: {
+      provider: effectiveProvider as any,
+      model: result.selectedProvider,
+    }
+  };
+}
+
+function noProviderConfigured(diagnostics?: {
+  requested_model?: string;
+  provider_mode?: string;
+  activeProviderId?: string;
+  activeTier?: string;
+  bridge_enabled?: boolean;
+  available_providers?: string[];
+  disabled_providers?: string[];
+  rejection_reasons?: string[];
+}): never {
   const err = new Error("No LLM provider configured");
   (err as any).code = "NO_PROVIDER_CONFIGURED";
   (err as any).statusCode = 503;
   (err as any).hint =
     "Set OPENAI_API_KEY or LOCAL_OPENAI_BASE_URL + LOCAL_OPENAI_MODEL";
+  (err as any).diagnostics = diagnostics || {};
+  (err as any).diagnostics.available_providers =
+    diagnostics?.available_providers ?? listAvailableProviders();
+  (err as any).diagnostics.disabled_providers =
+    diagnostics?.disabled_providers ?? listDisabledProviders();
   throw err;
 }
 
-function providerUnavailable(provider: string, e?: unknown): never {
+function listAvailableProviders(): string[] {
+  const available: string[] = [];
+  if (hasOpenAI()) available.push("openai:api");
+  if (hasDeepSeek()) available.push("deepseek:api");
+  if (hasQwen()) available.push("qwen:api");
+  if (hasLocal()) available.push("local:llm");
+  if (isWebBridgeEnabled() &&
+      (process.env.CREATOR_BRIDGE_ENABLED === "1" || process.env.CREATOR_BRIDGE_ENABLED === "true")) {
+    available.push("openai_web:chatgpt");
+    available.push("qwen_web:qwen");
+    available.push("deepseek_web:deepseek");
+  }
+  return available;
+}
+
+function listDisabledProviders(): string[] {
+  const disabled: string[] = [];
+  if (process.env.TELEGPT_LOCAL_ENABLED === "false") disabled.push("local:llm");
+  if (!hasOpenAI() && process.env.OPENAI_API_KEY) disabled.push("openai:api (key present but empty)");
+  return disabled;
+}
+
+function providerUnavailable(provider: "local" | "openai" | "deepseek" | "qwen", e?: unknown, diagnostics?: Record<string, unknown>): never {
   const msg =
     typeof (e as any)?.message === "string" && (e as any).message.length
       ? (e as any).message
@@ -40,6 +182,13 @@ function providerUnavailable(provider: string, e?: unknown): never {
   (err as any).code = "PROVIDER_UNAVAILABLE";
   (err as any).statusCode = 502;
   (err as any).provider = provider;
+  (err as any).diagnostics = {
+    provider,
+    requested_model: diagnostics?.requested_model,
+    bridge_enabled: diagnostics?.bridge_enabled ?? isWebBridgeEnabled(),
+    available_providers: listAvailableProviders(),
+    disabled_providers: listDisabledProviders(),
+  };
   throw err;
 }
 
@@ -53,871 +202,350 @@ function makeRequestId(req: ChatRequest): string {
   );
 }
 
-function stripPrefix(model: string, prefix: "openai:" | "local:") {
+function stripPrefix(model: string, prefix: string) {
   return model.startsWith(prefix) ? model.slice(prefix.length) : model;
 }
 
-const STRICT_CONTROL_SYSTEM_PROMPT =
-  "If the user says 'ANSWER EXACTLY: X', you MUST reply with EXACTLY X. No extra words.";
-
-type SelectedProvider =
-  | "auto"
-  | "openai_web"
-  | "qwen_web"
-  | "deepseek_web"
-  | "grok_web"
-  | "kimi_web"
-  | "ollama_local";
-
-function normalizeSelectedProvider(value: unknown): SelectedProvider | undefined {
-  if (typeof value !== "string" || !value) return undefined;
-  const normalized = value.toLowerCase().trim();
-  const validProviders = ["auto", "openai_web", "qwen_web", "deepseek_web", "grok_web", "kimi_web", "ollama_local"];
-  if (validProviders.includes(normalized)) {
-    return normalized as SelectedProvider;
-  }
-  return undefined;
-}
-
-function getSelectedProvider(req: ChatRequest): SelectedProvider | undefined {
-  // Try multiple field names
-  return normalizeSelectedProvider(req.meta?.selected_provider)
-    || normalizeSelectedProvider(req.meta?.selectedProvider)
-    || normalizeSelectedProvider((req as any).selectedProvider)
-    || normalizeSelectedProvider(req.model); // fallback to model prefix
-}
-
-function modelForSelectedProvider(provider: SelectedProvider): string {
-  switch (provider) {
-    case "openai_web":
-      return "openai_web:gpt-4o-mini";
-    case "qwen_web":
-      return "qwen_web:qwen-plus";
-    case "deepseek_web":
-      return "deepseek_web:deepseek-r1";
-    case "grok_web":
-      return "grok_web:grok-2";
-    case "kimi_web":
-      return "kimi_web:kimi-k2.5";
-    case "ollama_local":
-      return "qwen2.5:7b-instruct";
-    case "auto":
-    default: {
-      const llmProvider = (process.env.LLM_PROVIDER || "").toLowerCase();
-      if (llmProvider === "ollama") {
-        const ollamaModel = process.env.OLLAMA_MODEL || "qwen2.5:7b-instruct";
-        return `local:${ollamaModel}`;
-      }
-      const { LOCAL_OPENAI_BASE_URL, LOCAL_OPENAI_MODEL, LOCAL_OPENAI_MODEL_DEFAULT } = process.env;
-      if (LOCAL_OPENAI_BASE_URL && (LOCAL_OPENAI_MODEL || LOCAL_OPENAI_MODEL_DEFAULT)) {
-        return `local:${LOCAL_OPENAI_MODEL || LOCAL_OPENAI_MODEL_DEFAULT}`;
-      }
-      return "openai:gpt-4o-mini";
-    }
-  }
-}
-
-function providerNotConfigured(provider: string): never {
-  providerUnavailable(provider, new Error(`Provider ${provider} is selected but not configured yet.`));
-}
-
-type CreatorBridgeProvider = "openai_web" | "qwen_web" | "deepseek_web" | "grok_web" | "kimi_web";
-
-function isCreatorBridgeProvider(provider: unknown): provider is CreatorBridgeProvider {
-  return (
-    provider === "openai_web" ||
-    provider === "qwen_web" ||
-    provider === "deepseek_web" ||
-    provider === "grok_web" ||
-    provider === "kimi_web"
-  );
-}
-
-function toSessionProvider(provider: Exclude<CreatorBridgeProvider, "kimi_web">) {
-  if (provider === "openai_web") return "chatgpt_web" as const;
-  return provider;
+async function routeWithProvider(req: ChatRequest, modelOverride: string): Promise<ChatResponse> {
+  const reroute = { ...req, model: modelOverride };
+  return await routeChat(reroute);
 }
 
 export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
   const t0 = Date.now();
-  const request_id = makeRequestId(req);
-  const requestedProvider = getSelectedProvider(req);
-  const rawModel =
-    requestedProvider && requestedProvider !== "auto"
-      ? modelForSelectedProvider(requestedProvider)
-      : (req.model || modelForSelectedProvider("auto")).trim();
-  const taskType = req.task?.type || "chat";
-  let effectiveSystem = [STRICT_CONTROL_SYSTEM_PROMPT, req.system].filter(Boolean).join("\n\n");
-  console.log(`[router] routeChat start request_id=${request_id} model="${rawModel}" selectedProvider="${requestedProvider || ""}" taskType=${taskType}`);
-  
-  // 1. Check user limits (if user_id provided in meta)
-  if (req.meta?.user_id) {
-    try {
-      const { getOrCreateUser, checkUserLimits, canUseProvider, ROLE_PROVIDERS } = await import("../providers/creator/user-layer.js");
-      const role: "owner" | "creator" | "public" = req.meta.role || "public";
-      const user = await getOrCreateUser(req.meta.user_id, role);
-      const limitCheck = checkUserLimits(user);
-      if (!limitCheck.allowed) {
-        return {
-          id: request_id,
-          model: rawModel,
-          output: `❌ Limit reached: ${limitCheck.reason}`,
-          meta: { provider: "creator" as any, error: limitCheck.reason },
-          request_id,
-          latency_ms: Date.now() - t0,
-        };
-      }
-      // Check provider access
-      if (requestedProvider && requestedProvider !== "auto") {
-        if (!canUseProvider(user, requestedProvider)) {
-          return {
-            id: request_id,
-            model: rawModel,
-            output: `❌ Provider ${requestedProvider} not available on your plan (${user.plan})`,
-            meta: { provider: "creator" as any, error: "provider_not_allowed", plan: user.plan },
-            request_id,
-            latency_ms: Date.now() - t0,
-          };
-        }
-      }
-    } catch (e) {
-      console.error("[router] user limit check failed", e);
-    }
-  }
 
-  // 1b. Anti-drift / truth arbitration
-  const driftCheck = evaluateMessage(req.message);
-  if (driftCheck.shouldBlock && driftCheck.replyText) {
-    console.log("[router] anti-drift blocked message:", { message: req.message.slice(0, 80) });
-    return {
-      id: request_id,
-      model: rawModel,
-      output: driftCheck.replyText,
-      meta: { provider: "identity", anti_drift: true } as any,
-      request_id,
-      latency_ms: Date.now() - t0,
-    };
-  }
-  if (driftCheck.systemPromptOverride) {
-    console.log("[router] anti-drift override system prompt for message:", { message: req.message.slice(0, 80) });
-    effectiveSystem = driftCheck.systemPromptOverride;
-  }
-
-  // 1c. Memory tracking
-  const chatId = req.meta?.chat_id || req.meta?.chatId || "";
-  const userId = req.meta?.user_id || req.meta?.telegram_user_id || "";
-  if (userId) {
-    updateCreatorInteraction(userId);
-  }
+  // Session Lock Override — check BEFORE default model assignment
+  const chatId = (req as any).meta?.chatId as string | undefined;
   if (chatId) {
-    addTurn(chatId, "user", req.message);
-    const recentTurns = getRecentTurns(chatId, 3);
-    if (recentTurns.length > 0) {
-      const memoryContext = recentTurns.map(t => `${t.role}: ${t.content}`).join("\n");
-      effectiveSystem = [
-        effectiveSystem,
-        "",
-        "=== RECENT CONVERSATION ===",
-        memoryContext,
-        "=== END RECENT CONVERSATION ===",
-      ].join("\n");
+    const session = getLocalSession(chatId);
+    if (session && isLocalSessionEnabled(chatId)) {
+      const localModel = session.mode === "auto" ? "local:auto" : (session.providerId || "local:auto");
+      console.log("[router:session_lock] overriding model before routing", { chatId, mode: session.mode, model: localModel });
+      writeLocalProviderEvidence("local_session_used", localModel, session.providerName || "Auto", "ollama", { chatId, mode: session.mode });
+      req.model = localModel;
     }
   }
-  if (userId) {
-    const creatorSummary = getCreatorSummary(userId);
-    effectiveSystem = [
-      effectiveSystem,
-      "",
-      "=== CREATOR CONTEXT ===",
-      creatorSummary,
-      "=== END CREATOR CONTEXT ===",
-    ].join("\n");
-  }
 
-  // 1d. Goal context injection
-  const goalInventory = getGoalInventory();
-  const whatMatters = getWhatMatters();
-  const unfinished = getUnfinishedBusiness();
-  if (goalInventory !== "No goals in inventory.") {
-    effectiveSystem = [
-      effectiveSystem,
-      "",
-      goalInventory,
-      whatMatters,
-      "=== END GOAL CONTEXT ===",
-    ].join("\n");
-  }
+  const model = (req.model || "local:local-demo").trim();
+  const request_id = makeRequestId(req);
 
-  // 1e. Execution context injection
-  const execSummary = taskSummary();
-  if (execSummary !== "No tasks.") {
-    const interrupted = getInterruptedTasks();
-    effectiveSystem = [
-      effectiveSystem,
-      "",
-      "=== EXECUTION CONTEXT ===",
-      execSummary,
-      interrupted.length > 0 ? `WARNING: ${interrupted.length} tasks were interrupted — may need recovery` : "",
-      "=== END EXECUTION CONTEXT ===",
-    ].join("\n");
-  }
-
-  recordOperation("chat_request", `user=${userId || "unknown"} message="${req.message.slice(0, 50)}"`);
-
-  // 2. Intent detection (code vs longform vs chat)
-  const { detectTaskIntent, shouldRouteToLongform, shouldRouteToOpenAIWeb, detectProductMode } = await import("./router/intent-router.js");
-
-  // Product/Service/Ad mode — FORCE LONGFORM BEFORE ANYTHING ELSE
-  const productMode = detectProductMode(req.message);
-  if (productMode) {
-    console.log("[router] forced_longform_product_mode", { productMode });
-
-    const chatId = req.meta?.chat_id;
-    const message = req.message;
-
-    try {
-      void (async () => {
-        try {
-          console.log("[longform] background_job_started", { productMode });
-
-          const { sendTelegramMessage, sendDocument, buildLongformCaption } = await import("./telegram/send-document.js");
-          const { generateLongformFile, generateLongformFallbackFile } = await import("../engines/longform/longform-engine.js");
-
-          await sendTelegramMessage({
-            chatId,
-            text: "⏳ Генерирую материал...",
-          }).catch(() => {});
-
-          const result = await generateLongformFile({
-            message,
-            chatId,
-            onProgress: async (text) => {
-              await sendTelegramMessage({ chatId, text }).catch(() => {});
-            },
-          });
-
-          await sendTelegramMessage({
-            chatId,
-            text: `📄 Готово.\n\n📊 ${result.words} слов / ${result.chars} символов`,
-          }).catch(() => {});
-
-          await sendDocument({
-            chatId,
-            filePath: result.filePath,
-            caption: buildLongformCaption(result.words, result.chars),
-          });
-
-          console.log("[longform] background_delivery_completed");
-        } catch (err) {
-          console.log("[longform] background_job_failed", {
-            error: String((err as Error)?.message || err),
-          });
-
-          try {
-            const { sendTelegramMessage, sendDocument } = await import("./telegram/send-document.js");
-            const { generateLongformFallbackFile } = await import("../engines/longform/longform-engine.js");
-
-            const fallback = await generateLongformFallbackFile({
-              message,
-              error: String((err as Error)?.message || err),
-            });
-
-            await sendDocument({
-              chatId,
-              filePath: fallback.filePath,
-              caption: "⚠️ Long Form Engine fallback file",
-            });
-
-            console.log("[longform] background_fallback_delivery_completed");
-          } catch (fallbackErr) {
-            console.log("[longform] background_fallback_failed", {
-              error: String((fallbackErr as Error)?.message || fallbackErr),
-            });
-
-            try {
-              const { sendTelegramMessage } = await import("./telegram/send-document.js");
-              await sendTelegramMessage({
-                chatId,
-                text: "⚠️ Long Form Engine не смог отправить файл. Проверь Ollama и логи.",
-              }).catch(() => {});
-            } catch {}
-          }
-        }
-      })();
-    } catch (err) {
-      console.error("[router] longform_background_start_failed", { error: String((err as Error)?.message || err) });
-    }
-
-    console.log("[router] longform_ack_sent", { productMode });
-
-    return {
-      id: request_id,
-      model: "local:longform-async",
-      output: `⏳ Принял задачу (${productMode}). Генерирую материал и отправлю файлом.`,
-      meta: {
-        provider: "longform" as any,
-        model: "longform-async",
-        task_intent: "longform",
-        intent: "longform",
-        async: true,
-        productMode,
-      } as any,
-      request_id,
-      latency_ms: Date.now() - t0,
-    };
-  }
-
-  const taskIntent = detectTaskIntent(req.message, { role: req.meta?.role, meta: req.meta });
-  console.log(`[router] intent detected: ${taskIntent.intent} confidence=${taskIntent.confidence} reason=${taskIntent.reason}`);
-
-  // Safety log
-  console.log("[router] routing_decision", {
-    intent: taskIntent.intent,
-    productMode: null,
-    usedProvider: requestedProvider || "auto",
+  console.log("[router:routeChat] input", {
+    model,
+    request_id,
+    active_provider_id: (req as any).active_provider_id,
+    provider_access_tier: (req as any).provider_access_tier,
   });
 
-  // Force code tasks to openai_web Creator Bridge
-  if (shouldRouteToOpenAIWeb(taskIntent) && (!requestedProvider || requestedProvider === "auto")) {
-    console.log("[router] overriding provider to openai_web for code task");
-    (req as any).meta = { ...(req.meta || {}), selected_provider: "openai_web" };
-  }
+  console.log("[router:routeChat:system]", {
+    has_system: Boolean(req.system),
+    model,
+    system_preview: req.system ? req.system.slice(0, 300) : "(empty)",
+  });
 
-  // Route longform tasks to local engine with file delivery
-  // IMPORTANT: Longform ALWAYS uses local engine, never openai_web
-  // This takes precedence over explicit provider selection
-  // ASYNC: respond immediately, generate in background
-  if (shouldRouteToLongform(taskIntent)) {
-    console.log(`[router] routing to Long Form Engine: ${taskIntent.estimatedLength || "unknown"} chars estimated`);
-
-    const chatId = req.meta?.chat_id;
-    const message = req.message;
-
-    try {
-      void (async () => {
-        try {
-          console.log("[longform] background_job_started");
-
-          const { sendTelegramMessage, sendDocument, buildLongformCaption } = await import("./telegram/send-document.js");
-          const { generateLongformFile, generateLongformFallbackFile } = await import("../engines/longform/longform-engine.js");
-
-          await sendTelegramMessage({
-            chatId,
-            text: "⏳ Генерирую большой материал...",
-          }).catch(() => {});
-
-          const result = await generateLongformFile({
-            message,
-            chatId,
-            onProgress: async (text) => {
-              await sendTelegramMessage({ chatId, text }).catch(() => {});
-            },
-          });
-
-          await sendTelegramMessage({
-            chatId,
-            text: `📄 Материал готов.\n\n📊 ${result.words} слов / ${result.chars} символов`,
-          }).catch(() => {});
-
-          await sendDocument({
-            chatId,
-            filePath: result.filePath,
-            caption: buildLongformCaption(result.words, result.chars),
-          });
-
-          console.log("[longform] background_delivery_completed");
-        } catch (err) {
-          console.log("[longform] background_job_failed", {
-            error: String((err as Error)?.message || err),
-          });
-
-          try {
-            const { sendTelegramMessage, sendDocument } = await import("./telegram/send-document.js");
-            const { generateLongformFallbackFile } = await import("../engines/longform/longform-engine.js");
-
-            const fallback = await generateLongformFallbackFile({
-              message,
-              error: String((err as Error)?.message || err),
-            });
-
-            await sendDocument({
-              chatId,
-              filePath: fallback.filePath,
-              caption: "⚠️ Long Form Engine fallback file",
-            });
-
-            console.log("[longform] background_fallback_delivery_completed");
-          } catch (fallbackErr) {
-            console.log("[longform] background_fallback_failed", {
-              error: String((fallbackErr as Error)?.message || fallbackErr),
-            });
-
-            try {
-              const { sendTelegramMessage } = await import("./telegram/send-document.js");
-              await sendTelegramMessage({
-                chatId,
-                text: "⚠️ Long Form Engine не смог отправить файл. Проверь Ollama и логи.",
-              }).catch(() => {});
-            } catch {}
-          }
-        }
-      })();
-    } catch (err) {
-      console.error("[router] longform_background_start_failed", { error: String((err as Error)?.message || err) });
-    }
-
-    console.log("[router] longform_ack_sent");
-
-    return {
-      id: request_id,
-      model: "local:longform-async",
-      output: "⏳ Принял задачу. Генерирую материал и отправлю файлом.",
-      meta: {
-        provider: "longform" as any,
-        model: "longform-async",
-        task_intent: "longform",
-        intent: "longform",
-        async: true,
-      } as any,
-      request_id,
-      latency_ms: Date.now() - t0,
-    };
-  }
-  
-  // Provider guard — no provider configured for non-longform requests
-  if (!hasOpenAI() && !hasLocal()) {
-    console.log("[router] no_provider_configured", { intent: taskIntent.intent });
-    return {
-      id: request_id,
-      model: "none",
-      output: "⚠️ LLM провайдер не настроен. Установи OPENAI_API_KEY или подключи локальную модель.",
-      meta: {
-        provider: "none" as any,
-        error: "no_provider",
-      } as any,
-      request_id,
-      latency_ms: Date.now() - t0,
-    };
-  }
-
-  let provider: "local" | "openai" | "deepseek_api" | "qwen_api" | "openrouter_kimi";
-  let resolved_model: string;
   let base: ChatResponse;
+  let provider: "local" | "openai" | "openai_web" | "deepseek" | "deepseek_web" | "qwen_web" | "kimi_web" | "kimi_api" | "gemini_web";
+  let resolved_model: string;
 
-  // 3. Trivial prompt bypass first (only for web providers when explicitly set)
-  const isPlainPrompt = /^(hi|hello|hey|say hi|hi there|hello there|2\+2\??|4\*5|what is 2\+2|qwen_web_ok|bridge_openai_ok|deepseek_web_ok|grok_web_ok)$/i
-    .test(req.message.trim());
-  
-  const trivialResponse: Record<string, string> = {
-    "hi": "Hi",
-    "hello": "Hello",
-    "hey": "Hey",
-    "say hi": "Hi",
-    "hi there": "Hi there",
-    "hello there": "Hello there",
-    "2+2": "4",
-    "2+2?": "4",
-    "what is 2+2": "4",
-    "4*5": "20",
-    "qwen_web_ok": "QWEN_WEB_OK",
-    "bridge_openai_ok": "BRIDGE_OPENAI_OK",
-    "deepseek_web_ok": "DEEPSEEK_WEB_OK",
-    "grok_web_ok": "GROK_WEB_OK",
+  // Web provider routes — checked BEFORE API routes to prevent prefix collision
+  // e.g. "deepseek_web:..." must not be caught by model.startsWith("deepseek:")
+  const WEB_PROVIDER_ROUTES: Array<{ prefix: string; providerId: string }> = [
+    { prefix: "openai_web:", providerId: "chatgpt_web" },
+    { prefix: "deepseek_web:", providerId: "deepseek_web" },
+    { prefix: "qwen_web:", providerId: "qwen_web" },
+    { prefix: "kimi_web:", providerId: "kimi_web" },
+    { prefix: "gemini_web:", providerId: "gemini_web" },
+  ];
+
+  for (const route of WEB_PROVIDER_ROUTES) {
+    if (model.startsWith(route.prefix)) {
+      resolved_model = stripPrefix(model, route.prefix);
+      console.log("[web_provider_selected]", {
+        model,
+        provider: route.providerId,
+        web_adapter: route.providerId,
+        request_id,
+      });
+      return await routeWebFallback(req, route.providerId);
+    }
+  }
+
+  // Bare web provider names (no model suffix)
+  const BARE_WEB_PROVIDERS: Record<string, string> = {
+    openai_web: "chatgpt_web",
+    deepseek_web: "deepseek_web",
+    qwen_web: "qwen_web",
+    kimi_web: "kimi_web",
+    gemini_web: "gemini_web",
   };
-  
-  if (isPlainPrompt && requestedProvider?.endsWith("_web")) {
-    const key = req.message.trim().toLowerCase().replace(/\?$/, "");
-    const output = trivialResponse[key] || req.message.trim();
-    console.log("[router] Plain prompt mode - bypassing browser session");
-    provider = requestedProvider as any;
-    const prov = requestedProvider as "openai_web" | "qwen_web" | "deepseek_web" | "grok_web" | "kimi_web";
-    const resolved = rawModel.includes(":") ? rawModel.slice(rawModel.indexOf(":") + 1) : rawModel;
-    base = {
-      id: request_id,
-      model: rawModel,
-      output: output,
-      meta: {
-        provider: prov,
-        model: resolved,
-        fallback_used: false,
-      },
+  if (BARE_WEB_PROVIDERS[model]) {
+    console.log("[web_provider_selected]", {
+      model,
+      provider: BARE_WEB_PROVIDERS[model],
+      web_adapter: BARE_WEB_PROVIDERS[model],
       request_id,
-      latency_ms: Date.now() - t0,
-    };
-    return base;
-  }
-  
-  // 4. Explicit execution modes BEFORE single provider routing
-  const explicitMultiAgent = (req as any).multi_agent_mode === true || req.meta?.multi_agent_mode === true;
-  const explicitDebate = (req as any).debate_mode === true || req.meta?.debate_mode === true;
-  
-  if ((explicitMultiAgent || explicitDebate) && !requestedProvider?.endsWith("_web")) {
-    console.log("[router] execution_mode:", explicitDebate ? "debate" : "multi");
-    
-    try {
-      const { smartExecute } = await import("../providers/creator/multi-agent.js");
-      const multiResult = await smartExecute(req.message, {
-        forceMode: explicitDebate ? "debate" : "multi",
-      });
-      
-      provider = "multi_agent" as any;
-      base = {
-        id: request_id,
-        model: rawModel,
-        output: multiResult.text,
-        meta: {
-          provider: "multi_agent" as any,
-          model: "multi-agent",
-          agents: multiResult.meta.agents.length,
-          execution_mode: multiResult.meta.mode,
-        },
-        request_id,
-        latency_ms: Date.now() - t0,
-      };
-      return base;
-    } catch (e: any) {
-      console.error("[router] multi-agent failed:", e?.message);
-    }
-  }
-  
-  // 5. Single provider routing
-  if (isCreatorBridgeProvider(requestedProvider)) {
-    if (requestedProvider === "kimi_web") {
-      providerUnavailable(
-        "kimi_web",
-        new Error("Creator Bridge provider kimi_web is not implemented yet.")
-      );
-    }
-    
-    if (requestedProvider === "grok_web") {
-      // Grok is enabled - continue to bridge
-      console.log("[router] Grok web provider enabled");
-    }
-
-    // If explicitly selected as web provider, allow the bridge to attempt connection
-    // Don't block based on pre-flight checks - always allow attempt
-    const isExplicitWebProviderSelection = requestedProvider.endsWith("_web");
-    
-    // Always allow bridge execution (no blocking)
-    console.log("[router] Attempting Creator Bridge:", {
-      provider: requestedProvider,
-      isExplicit: isExplicitWebProviderSelection,
     });
+    return await routeWebFallback(req, BARE_WEB_PROVIDERS[model]);
+  }
 
-    const sessionProvider = toSessionProvider(requestedProvider);
-    resolved_model = rawModel.includes(":") ? rawModel.slice(rawModel.indexOf(":") + 1) : rawModel;
-    
-    // Plain prompt mode - only for trivial test prompts, bypass heavy persona
-    const isPlainPrompt = /^(hi|hello|hey|say hi|hi there|hello there|2\+2\??|4\*5|what is 2\+2|qwen_web_ok|bridge_openai_ok|deepseek_web_ok|grok_web_ok)$/i
-      .test(req.message.trim());
-    
-    // Map trivial prompts to simple responses
-    const trivialResponse: Record<string, string> = {
-      "hi": "Hi",
-      "hello": "Hello",
-      "hey": "Hey",
-      "say hi": "Hi",
-      "hi there": "Hi there",
-      "hello there": "Hello there",
-      "2+2": "4",
-      "2+2?": "4",
-      "what is 2+2": "4",
-      "4*5": "20",
-      "qwen_web_ok": "QWEN_WEB_OK",
-      "bridge_openai_ok": "BRIDGE_OPENAI_OK",
-      "deepseek_web_ok": "DEEPSEEK_WEB_OK",
-      "grok_web_ok": "GROK_WEB_OK",
-    };
-    
-    if (isPlainPrompt && requestedProvider?.endsWith("_web")) {
-      const key = req.message.trim().toLowerCase().replace(/\?$/, "");
-      const output = trivialResponse[key] || req.message.trim();
-      console.log("[router] Plain prompt mode - bypassing browser session");
-      provider = requestedProvider as any;
-      const prov = requestedProvider as "openai_web" | "qwen_web" | "deepseek_web" | "grok_web" | "kimi_web";
-      base = {
-        id: request_id,
-        model: rawModel,
-        output: output,
-        meta: {
-          provider: prov,
-          model: resolved_model,
-          fallback_used: false,
-        },
-        request_id,
-        latency_ms: Date.now() - t0,
-      };
-      return base;
+  // Auto Router v2 — general auto mode for all providers
+  if (model === "auto") {
+    const arConfig = getAutoRouterConfig();
+    if (!arConfig.enabled) {
+      console.log("[auto_router:v2] disabled, falling back to local:auto");
+      return await routeWithProvider(req, "local:auto");
     }
-    
-    // 3b. Strategy Engine for complex tasks
-    const useStrategy = !requestedProvider && req.message.length > 100 && !isPlainPrompt;
-    
-    if (useStrategy) {
-      console.log("[router] Using Strategy Engine for complex task");
-      
-      try {
-        const { buildStrategyWithGuardrails, executeStrategy, formatStrategySummary } = await import("../providers/creator/strategy-engine.js");
-        const { writeAudit, computeRiskLevel } = await import("../providers/creator/audit-gateway.js");
-        
-        const { strategy, evidence, usedFallback } = await buildStrategyWithGuardrails(req.message, request_id);
-        console.log("[router] Strategy:", formatStrategySummary(strategy), { evidence });
-        
-        const t1 = Date.now();
-        const strategyResult = await executeStrategy(strategy, req.message);
-        const latency = Date.now() - t1;
-        
-        console.log("[router] Strategy executed:", strategyResult.provider, { fallback: usedFallback });
-        
-        await writeAudit(
-          request_id,
-          "user",
-          req.meta?.role || "user",
-          "strategy",
-          req.message,
-          `Strategy: ${strategy.mode} via ${strategyResult.provider}, fallback: ${usedFallback}`,
-          "passed",
-          strategyResult.text ? "success" : "failed",
-          {
-            strategyMode: strategy.mode,
-            providersUsed: strategy.providers,
-            guardrailReason: usedFallback ? "fallback used" : undefined,
-            riskLevel: computeRiskLevel("strategy", strategy.providers),
-            latencyMs: latency,
-          }
-        );
-        
-        provider = strategyResult.provider as any;
-        base = {
-          id: request_id,
-          model: rawModel,
-          output: strategyResult.text,
-          meta: {
-            provider: provider as any,
-            model: "strategy-engine",
-            execution_mode: strategy.mode as any,
-            strategy_reasoning: strategy.reasoning,
-          },
-          request_id,
-          latency_ms: Date.now() - t0,
-        };
-        return base;
-      } catch (e: any) {
-        console.error("[router] Strategy engine failed:", e?.message);
-      }
-    }
-    
-    // Use multi-agent execution if requested or message is complex
-    const useMultiAgent = (req as any).multi_agent_mode === true || req.meta?.multi_agent_mode === true;
-    const useDebate = (req as any).debate_mode === true || req.meta?.debate_mode === true;
-    
-    if (useMultiAgent || useDebate) {
-      console.log("[router] multi-agent execution:", { useMultiAgent, useDebate });
-      
-      try {
-        const { smartExecute } = await import("../providers/creator/multi-agent.js");
-        const multiResult = await smartExecute(req.message, {
-          forceMode: useDebate ? "debate" : "multi",
-        });
-        
-        provider = "openai" as any;
-        base = {
-          id: request_id,
-          model: rawModel,
-          output: multiResult.text,
-          meta: {
-            provider: "multi_agent" as any,
-            model: "multi-agent",
-            agents: multiResult.meta.agents.length,
-            execution_mode: multiResult.meta.mode,
-          },
-          request_id,
-          latency_ms: Date.now() - t0,
-        };
-        return base;
-      } catch (e: any) {
-        console.error("[router] multi-agent failed:", e?.message);
-      }
-    }
-    
-    try {
-      const { getSessionBridge } = await import("../providers/creator/session/session-bridge.js");
-      const sessionBridge = getSessionBridge({ fallbackToApi: false });
-      sessionBridge.setCreatorMode(true);
-      sessionBridge.enableProvider(sessionProvider);
+    const activeProviderId = (req as any).active_provider_id as string | undefined;
+    const decision = await autoRoute(req.message || "", {
+      selectedProvider: activeProviderId as any,
+    });
+    console.log("[auto_router:v2] selected", {
+      provider: decision.selectedProvider,
+      intent: decision.intent,
+      score: decision.score,
+    });
+    // Pass intent through to evidence collection
+    (req as any).meta = { ...(req as any).meta, intent: decision.intent };
+    const selectedRoute = decision.selectedProvider === "local"
+      ? "local:auto"
+      : `${decision.selectedProvider}:${decision.selectedModel || decision.selectedProvider}`;
+    return await routeWithProvider(req, selectedRoute);
+  }
 
-      const result = await sessionBridge.generate(req.message, {
-        provider: sessionProvider,
-        traceId: request_id,
-        systemPrompt: effectiveSystem,
-        creatorMode: true,
-      });
-
-      if (!result.success || !result.output_text) {
-        const reason = result.error_code || "web session is not ready";
-        providerUnavailable(
-          requestedProvider,
-          new Error(`Creator Bridge provider ${requestedProvider} is connected but execution failed: ${reason}`)
-        );
-      }
-
-      provider = requestedProvider as any;
-      base = {
-        id: request_id,
-        model: rawModel,
-        output: result.output_text,
-        meta: {
-          provider: requestedProvider as any,
-          model: resolved_model,
-          fallback_used: false,
-        },
-      };
-    } catch (e) {
-      providerUnavailable(requestedProvider, e);
-    }
-  } else if (rawModel.startsWith("openai:")) {
-    provider = "openai";
-    resolved_model = stripPrefix(rawModel, "openai:");
+  // API routes
+  if (model.startsWith("openai:")) {
+    resolved_model = stripPrefix(model, "openai:");
     if (!hasOpenAI()) {
-      if (requestedProvider && requestedProvider !== "auto") providerNotConfigured(requestedProvider);
-      noProviderConfigured();
+      if (isWebBridgeEnabled()) {
+        console.warn(`[router] OpenAI API key missing, falling back to Web Bridge`);
+        return await routeWebFallback(req, "chatgpt_web");
+      }
+      noProviderConfigured({
+        requested_model: `openai:${resolved_model}`,
+        available_providers: listAvailableProviders(),
+        disabled_providers: listDisabledProviders(),
+        rejection_reasons: ["OPENAI_API_KEY not set", "Web Bridge fallback skipped or unavailable"],
+      });
     }
+    provider = "openai";
     try {
-      base = await openaiChat({ ...req, model: resolved_model, system: effectiveSystem });
+      base = await openaiChat({ ...req, model: resolved_model });
     } catch (e) {
+      if (isWebBridgeEnabled()) {
+        console.warn(`[router] OpenAI API failed, falling back to Web Bridge:`, (e as any)?.message);
+        return await routeWebFallback(req, "chatgpt_web");
+      }
       providerUnavailable("openai", e);
     }
-  } else if (rawModel.startsWith("local:")) {
+  } else if (model.startsWith("deepseek:")) {
+    resolved_model = stripPrefix(model, "deepseek:");
+    if (!hasDeepSeek()) {
+      if (isWebBridgeEnabled()) {
+        console.warn(`[router] DeepSeek API key missing, falling back to Web Bridge`);
+        return await routeWebFallback(req, "deepseek_web");
+      }
+      noProviderConfigured({
+        requested_model: `deepseek:${resolved_model}`,
+        available_providers: listAvailableProviders(),
+        disabled_providers: listDisabledProviders(),
+        rejection_reasons: ["DEEPSEEK_API_KEY not set", "Web Bridge fallback skipped or unavailable"],
+      });
+    }
+    provider = "deepseek";
+    console.log("[router:routeChat:deepseek]", { model: resolved_model, request_id });
+    try {
+      base = await deepseekChat({ ...req, model: resolved_model });
+    } catch (e) {
+      if (isWebBridgeEnabled()) {
+        console.warn(`[router] DeepSeek API failed, falling back to Web Bridge:`, (e as any)?.message);
+        return await routeWebFallback(req, "deepseek_web");
+      }
+      providerUnavailable("deepseek", e);
+    }
+  } else if (model.startsWith("qwen:")) {
+    resolved_model = stripPrefix(model, "qwen:");
+    if (!hasQwen()) {
+      if (isWebBridgeEnabled()) {
+        console.warn(`[router] Qwen API key missing, falling back to Web Bridge`);
+        return await routeWebFallback(req, "qwen_web");
+      }
+      noProviderConfigured({
+        requested_model: `qwen:${resolved_model}`,
+        available_providers: listAvailableProviders(),
+        disabled_providers: listDisabledProviders(),
+        rejection_reasons: ["QWEN_API_KEY / DASHSCOPE_API_KEY not set", "Web Bridge fallback skipped or unavailable"],
+      });
+    }
+    provider = "deepseek";
+    console.log("[router:routeChat:qwen]", { model: resolved_model, request_id });
+    try {
+      base = await qwenChat({ ...req, model: resolved_model });
+    } catch (e) {
+      if (isWebBridgeEnabled()) {
+        console.warn(`[router] Qwen API failed, falling back to Web Bridge:`, (e as any)?.message);
+        return await routeWebFallback(req, "qwen_web");
+      }
+      providerUnavailable("deepseek", e);
+    }
+  } else if (model.startsWith("kimi:")) {
+    resolved_model = stripPrefix(model, "kimi:");
+    const hasKimiKey = Boolean((process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY || "").trim());
+    if (!hasKimiKey) {
+      if (isWebBridgeEnabled()) {
+        console.warn(`[router] Kimi API key missing, falling back to Browser Bridge`);
+        return await routeWebFallback(req, "kimi_local_web_api" as any);
+      }
+      noProviderConfigured({
+        requested_model: `kimi:${resolved_model}`,
+        available_providers: listAvailableProviders(),
+        disabled_providers: listDisabledProviders(),
+        rejection_reasons: ["KIMI_API_KEY / MOONSHOT_API_KEY not set", "Browser Bridge fallback skipped or unavailable"],
+      });
+    }
+    provider = "kimi_api";
+    console.log("[router:routeChat:kimi]", { model: resolved_model, request_id });
+    try {
+      const { resolveKimiApiKey, resolveKimiReasoningEffort, isKimiK3Model, isKimiFamilyModel } = await import("../providers/kimi_api/index.js");
+      if (!isKimiFamilyModel(resolved_model)) {
+        noProviderConfigured({
+          requested_model: `kimi:${resolved_model}`,
+          available_providers: listAvailableProviders(),
+          disabled_providers: listDisabledProviders(),
+          rejection_reasons: [`Model "${resolved_model}" is not a Kimi-family model`],
+        });
+      }
+      const apiKey = resolveKimiApiKey()!;
+      const baseURL = process.env.KIMI_API_BASE_URL || "https://api.moonshot.ai/v1";
+      const reasoningEffort = isKimiK3Model(resolved_model) ? resolveKimiReasoningEffort("default") : undefined;
+      const kimiBody: Record<string, unknown> = {
+        model: resolved_model,
+        messages: [
+          ...(req.system ? [{ role: "system", content: req.system }] : []),
+          { role: "user", content: req.message || "" },
+        ],
+      };
+      if (reasoningEffort) {
+        kimiBody.reasoning_effort = reasoningEffort;
+      }
+      const resp = await fetch(`${baseURL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(kimiBody),
+        signal: AbortSignal.timeout(120_000),
+      });
+      const data = await resp.json().catch(() => ({})) as any;
+      if (!resp.ok) {
+        const errMsg = data?.error?.message || `HTTP ${resp.status}`;
+        if (isWebBridgeEnabled()) {
+          console.warn(`[router] Kimi API failed (${errMsg}), falling back to Browser Bridge`);
+          return await routeWebFallback(req, "kimi_local_web_api" as any);
+        }
+        providerUnavailable("openai", new Error(errMsg));
+      }
+      const choice = data?.choices?.[0];
+      const text = choice?.message?.content || "";
+      const reasoning = choice?.message?.reasoning_content || "";
+      const output = reasoning ? `${reasoning}\n\n${text}` : text;
+      base = { id: `kimi-${Date.now()}`, model: resolved_model, output, meta: { provider: "kimi_api" as const, model: resolved_model } } as ChatResponse;
+    } catch (e) {
+      if (isWebBridgeEnabled()) {
+        console.warn(`[router] Kimi API failed, falling back to Browser Bridge:`, (e as any)?.message);
+        return await routeWebFallback(req, "kimi_local_web_api" as any);
+      }
+      providerUnavailable("openai", e);
+    }
+  } else if (model.startsWith("local:")) {
     provider = "local";
-    resolved_model = stripPrefix(rawModel, "local:");
+    resolved_model = stripPrefix(model, "local:");
 
-    if (resolved_model === "local-demo") {
+    // local:auto — smart automatic model selection
+    if (resolved_model === "auto") {
+      try {
+        writeLocalProviderEvidence("local_provider_selected", "auto", "Auto Selector", "ollama");
+        const autoResult = await callLocalAuto(req.message || "", req.system);
+        base = { reply: autoResult.text, meta: { provider: "local" as const, model: autoResult.selectedModel, autoIntent: autoResult.intent, usedFallback: autoResult.usedFallback } } as unknown as ChatResponse;
+      } catch (e) {
+        if (isWebBridgeEnabled()) {
+          console.warn(`[router] local:auto failed, falling back to Web Bridge:`, (e as any)?.message);
+          return await routeWebFallback(req);
+        }
+        providerUnavailable("local", e);
+      }
+    } else {
+    // Check if this is a known local model from the registry (Ollama/LM Studio)
+    const knownLocalModel = getLocalModel(resolved_model);
+    if (knownLocalModel) {
+      writeLocalProviderEvidence("local_provider_selected", knownLocalModel.id, knownLocalModel.name, knownLocalModel.transport);
+      try {
+        writeLocalProviderEvidence("local_model_response_started", knownLocalModel.id, knownLocalModel.name, knownLocalModel.transport);
+        const localResult = await callLocalProvider({
+          providerId: resolved_model,
+          prompt: req.message || "",
+          system: req.system,
+        });
+        writeLocalProviderEvidence("local_model_response_completed", knownLocalModel.id, knownLocalModel.name, knownLocalModel.transport, { latency_ms: Date.now() - t0 });
+        base = { reply: localResult.text, meta: { provider: "local" as const, model: knownLocalModel.id, raw: localResult.raw } } as unknown as ChatResponse;
+      } catch (e) {
+        writeLocalProviderEvidence("local_model_response_failed", knownLocalModel.id, knownLocalModel.name, knownLocalModel.transport, { error: (e as any)?.message });
+        if (isWebBridgeEnabled()) {
+          console.warn(`[router] Local model ${resolved_model} failed, falling back to Web Bridge:`, (e as any)?.message);
+          return await routeWebFallback(req);
+        }
+        providerUnavailable("local", e);
+      }
+    } else if (resolved_model === "local-demo") {
+      // local-demo should work without any env vars
       try {
         base = await localDemo({ ...req, model: "local-demo" });
       } catch (e) {
         providerUnavailable("local", e);
       }
     } else {
+      // For other local models, we need LOCAL_* env vars
       if (!hasLocal()) {
-        if (requestedProvider && requestedProvider !== "auto") providerNotConfigured(requestedProvider);
-        noProviderConfigured();
+        if (isWebBridgeEnabled()) {
+          console.warn(`[router] Local provider not configured, falling back to Web Bridge`);
+          return await routeWebFallback(req);
+        }
+        noProviderConfigured({
+          requested_model: `local:${resolved_model}`,
+          available_providers: listAvailableProviders(),
+          disabled_providers: listDisabledProviders(),
+          rejection_reasons: [
+            "TELEGPT_LOCAL_ENABLED=false or LOCAL_OPENAI_BASE_URL/MODEL not set",
+            "Web Bridge fallback skipped or unavailable",
+          ],
+        });
       }
       try {
-        base = await localChat({ ...req, model: resolved_model, system: effectiveSystem });
+        base = await localChat({ ...req, model: resolved_model });
       } catch (e) {
+        if (isWebBridgeEnabled()) {
+          console.warn(`[router] Local provider failed, falling back to Web Bridge:`, (e as any)?.message);
+          return await routeWebFallback(req);
+        }
         providerUnavailable("local", e);
       }
     }
-   } else if (rawModel.startsWith("qwen:")) {
-     provider = "qwen_api";
-     resolved_model = rawModel.slice("qwen:".length) || "qwen-plus";
-     if (!process.env.QWEN_API_KEY?.trim() && !process.env.DASHSCOPE_API_KEY?.trim()) {
-       providerNotConfigured("qwen_api");
-     }
-     try {
-       const { callQwen } = await import("../providers/qwen/chat.js");
-	       const result = await callQwen(
-	         resolved_model,
-	         [{ role: "user", content: req.message }],
-	         effectiveSystem
-	       );
-       if (!result.ok) {
-         providerUnavailable("qwen_api", new Error(result.error?.message || "Qwen API error"));
-       }
-       resolved_model = result.model;
-       base = {
-         id: request_id,
-         model: resolved_model,
-         output: result.text || "",
-       };
-     } catch (e: any) {
-       console.log(`[router] qwen branch error: ${e?.message}`);
-       throw e;
-     }
-   } else if (rawModel.startsWith("deepseek:")) {
-     provider = "deepseek_api";
-     resolved_model = rawModel.slice("deepseek:".length);
-     if (!process.env.DEEPSEEK_API_KEY?.trim()) {
-       providerNotConfigured("deepseek_api");
-     }
-     try {
-       console.log("[router] deepseek branch: importing module");
-       const { callDeepSeek } = await import("../providers/deepseek/chat.js");
-       console.log("[router] deepseek module loaded, calling");
-	       const result = await callDeepSeek(
-	         resolved_model,
-	         [{ role: "user", content: req.message }],
-	         effectiveSystem,
-	         taskType
-	       );
-       console.log(`[router] deepseek result ok=${result.ok} model=${result.model}`);
-       if (!result.ok) {
-         providerUnavailable("deepseek_api", new Error(result.error?.message || "DeepSeek API error"));
-       }
-        // Use actual model returned by callDeepSeek
-        resolved_model = result.model;
-        base = {
-          id: request_id,
-          model: resolved_model,
-          output: result.text || "",
-        };
-     } catch (e: any) {
-       console.log(`[router] deepseek branch error: ${e?.message}`);
-       // Propagate error to be handled by outer catch
-       throw e;
-     }
-   } else if (rawModel.startsWith("moonshotai/") || rawModel.includes("kimi")) {
-     provider = "openrouter_kimi";
-     resolved_model = rawModel;
-     if (!process.env.OPENROUTER_API_KEY?.trim()) {
-       providerNotConfigured("kimi_web");
-     }
-     try {
-       const { openRouterChat } = await import("./providers/openrouterChat.js");
-	       const result = await openRouterChat({
-	         model: resolved_model,
-	         messages: [
-	           { role: "system", content: effectiveSystem },
-	           { role: "user", content: req.message },
-	         ],
-	         max_tokens: 512,
-	       });
-       base = {
-         id: request_id,
-         model: resolved_model,
-         output: result.output || "",
-         usage: result.usage
-           ? {
-               inputTokens: result.usage.prompt_tokens,
-               outputTokens: result.usage.completion_tokens,
-               totalTokens: result.usage.total_tokens,
-             }
-           : undefined,
-       };
-     } catch (e: any) {
-       console.log(`[router] kimi branch error: ${e?.message}`);
-       throw e;
-     }
-   } else if (requestedProvider === "ollama_local" || rawModel === "qwen2.5:7b-instruct") {
-     provider = "local";
-     resolved_model = rawModel;
-     if (!hasLocal()) providerNotConfigured("ollama_local");
-     try {
-       base = await localChat({ ...req, model: resolved_model, system: effectiveSystem });
-     } catch (e) {
-       providerUnavailable("ollama_local", e);
-     }
+  }
   } else {
-    if (requestedProvider && requestedProvider !== "auto") {
-      providerNotConfigured(requestedProvider);
+    // Unknown model — try web bridge first, fall back to local-demo only as last resort
+    if (isWebBridgeEnabled()) {
+      console.warn(`[router] Unknown model "${model}", falling back to Web Bridge`);
+      return await routeWebFallback(req);
     }
-    provider = "openai";
-    resolved_model = "gpt-4o-mini";
-    if (!hasOpenAI()) noProviderConfigured();
+    provider = "local";
+    resolved_model = "local-demo";
+    // Default model is local-demo, should work without env vars
     try {
-      base = await openaiChat({ ...req, model: resolved_model, system: effectiveSystem });
+      base = await localDemo({ ...req, model: "local-demo" });
     } catch (e) {
-      providerUnavailable("openai", e);
+      providerUnavailable("local", e, {
+        requested_model: model,
+        bridge_enabled: isWebBridgeEnabled(),
+      });
     }
   }
 
@@ -930,11 +558,16 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
         }
       : undefined);
 
-  console.log(`[router] routeChat returning ok provider=${provider} model=${resolved_model}`);
-
-  if (chatId && base.output) {
-    addTurn(chatId, "assistant", base.output);
-  }
+  collectEvidence({
+    provider: provider as any,
+    model: resolved_model,
+    intent: (req as any).meta?.intent || "unknown",
+    latencyMs: Date.now() - t0,
+    success: true,
+    fallbackUsed: Boolean(base.meta?.fallback),
+    tokensIn: usage?.tokens_in,
+    tokensOut: usage?.tokens_out,
+  });
 
   return {
     ...base,
@@ -945,7 +578,6 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       provider,
       model: resolved_model,
       usage,
-      task_intent: taskIntent.intent,
     },
   };
 }
