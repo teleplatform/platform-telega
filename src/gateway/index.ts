@@ -2,6 +2,8 @@ import Fastify from "fastify";
 import { registerModelsRoute } from "./routes/models.js";
 import { registerChatCompletionsRoute } from "./routes/chat-completions.js";
 import { appendEvidenceRecord } from "../runtime/evidence/execution-evidence-store.js";
+import { getAllSnapshots } from "../core/provider-health-runtime.js";
+import { gatewayAuthMiddleware } from "./auth.js";
 
 const PORT = Number(process.env.TGPT_GATEWAY_PORT || "8765");
 const HOST = "127.0.0.1";
@@ -40,6 +42,11 @@ async function startGateway() {
     version: "0.1.0",
     ts: new Date().toISOString(),
   }));
+
+  app.get("/internal/provider-health", { preHandler: [gatewayAuthMiddleware] }, async (req, reply) => {
+    const snapshots = getAllSnapshots();
+    return reply.send({ providers: snapshots });
+  });
 
   registerModelsRoute(app);
   registerChatCompletionsRoute(app);

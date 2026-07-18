@@ -926,6 +926,8 @@ export type EvidenceRecordType =
   | "provider.zyloo_k3.executed"
   | "provider.zyloo_k3.credential_failover"
   | "provider.zyloo_k3.unsupported_upstream"
+  | "provider.health.updated"
+  | "provider.health.transitioned"
   | "discovery.started"
   | "discovery.completed";
 

@@ -8,6 +8,7 @@ import { executeWebProviderWithFallback } from "../providers/web-provider-stub.j
 import { callLocalProvider } from "../providers/local/localProvider.js";
 import { callLocalAuto } from "../providers/local/localAutoProvider.js";
 import { callLocalWithFailover, callLocalAutoWithFailover } from "../providers/local/localSafeCall.js";
+import { recordSuccess as healthRecordSuccess, recordFailure as healthRecordFailure } from "./provider-health-runtime.js";
 import { getFallbackMode } from "../providers/local/localFallbackSettings.js";
 import { LOCAL_MODELS, getLocalModel } from "../providers/local/localModels.js";
 import { isLocalSessionEnabled, getLocalSession } from "../providers/local/localSessionState.js";
@@ -488,6 +489,7 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
           { role: "user", content: req.message || "" },
         ],
       };
+      const zylooT0 = Date.now();
       const resp = await fetch(`${baseURL}/chat/completions`, {
         method: "POST",
         headers: {
@@ -497,6 +499,7 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
         body: JSON.stringify(zylooBody),
         signal: AbortSignal.timeout(120_000),
       });
+      const zylooLatencyMs = Date.now() - zylooT0;
       const data = await resp.json().catch(() => ({})) as any;
       if (!resp.ok) {
         const errMsg = data?.error?.message || `HTTP ${resp.status}`;
@@ -510,6 +513,7 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
           shouldFallback: decision.shouldFallback,
         });
         recordProviderFailure("zyloo_api", resolved_model, decision);
+        healthRecordFailure("zyloo_api", decision, zylooLatencyMs, Date.now());
         const err = new Error(decision.safeMessage);
         (err as any).code = decision.type === "quota_exhausted" ? "QUOTA_EXHAUSTED" : "PROVIDER_UNAVAILABLE";
         (err as any).statusCode = decision.type === "auth" ? 401 : decision.type === "rate_limit" ? 429 : decision.type === "quota_exhausted" ? 402 : 502;
@@ -520,6 +524,7 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       }
       const choice = data?.choices?.[0];
       const text = choice?.message?.content || "";
+      healthRecordSuccess("zyloo_api", zylooLatencyMs, Date.now());
       base = { id: `zyloo-${Date.now()}`, model: resolved_model, output: text, meta: { provider: "zyloo_api" as const, model: resolved_model } } as ChatResponse;
     } catch (e: any) {
       if (e.failureType) throw e;
