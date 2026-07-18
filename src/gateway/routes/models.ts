@@ -4,6 +4,7 @@ import { isIdeReady, listIdeModels } from "../ide-compatibility.js";
 import { toOpenAiModelList } from "../adapters/openai-response.js";
 import { KIMI_API_MODELS } from "../../providers/kimi_api/index.js";
 import { appendEvidenceRecord } from "../../runtime/evidence/execution-evidence-store.js";
+import { gatewayAuthMiddleware } from "../auth.js";
 
 const GATEWAY_MODELS = [
   { id: "kimi-k3", owned_by: "telegpt", source: "kimi_api" },
@@ -12,7 +13,7 @@ const GATEWAY_MODELS = [
 ];
 
 export function registerModelsRoute(app: FastifyInstance): void {
-  app.get("/v1/models", async (req, reply) => {
+  app.get("/v1/models", { preHandler: [gatewayAuthMiddleware] }, async (req, reply) => {
     const apiKey = (req as any).__apiKey as TeleGptApiKey;
 
     appendEvidenceRecord({

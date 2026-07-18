@@ -1,7 +1,6 @@
 import Fastify from "fastify";
 import { registerModelsRoute } from "./routes/models.js";
 import { registerChatCompletionsRoute } from "./routes/chat-completions.js";
-import { gatewayAuthMiddleware } from "./auth.js";
 import { appendEvidenceRecord } from "../runtime/evidence/execution-evidence-store.js";
 
 const PORT = Number(process.env.TGPT_GATEWAY_PORT || "8765");
@@ -42,10 +41,7 @@ async function startGateway() {
     ts: new Date().toISOString(),
   }));
 
-  app.get("/v1/models", { preHandler: [gatewayAuthMiddleware] }, async () => {});
   registerModelsRoute(app);
-
-  app.post("/v1/chat/completions", { preHandler: [gatewayAuthMiddleware] }, async () => {});
   registerChatCompletionsRoute(app);
 
   try {

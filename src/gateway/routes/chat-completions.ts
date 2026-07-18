@@ -7,9 +7,10 @@ import { toOpenAiResponse, toOpenAiError } from "../adapters/openai-response.js"
 import { routeChat } from "../../core/router.js";
 import { ProviderVerification } from "../../core/provider-verification.js";
 import { appendEvidenceRecord } from "../../runtime/evidence/execution-evidence-store.js";
+import { gatewayAuthMiddleware } from "../auth.js";
 
 export function registerChatCompletionsRoute(app: FastifyInstance): void {
-  app.post("/v1/chat/completions", async (req, reply) => {
+  app.post("/v1/chat/completions", { preHandler: [gatewayAuthMiddleware] }, async (req, reply) => {
     const requestId = `req_${randomUUID().slice(0, 12)}`;
     const t0 = Date.now();
     const apiKey = (req as any).__apiKey as TeleGptApiKey;
