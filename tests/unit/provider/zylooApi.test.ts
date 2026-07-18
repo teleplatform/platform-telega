@@ -79,8 +79,8 @@ test("isZylooModel returns true for zyloo/kimi-k3", () => {
   assert.ok(isZylooModel("zyloo/kimi-k3"));
 });
 
-test("isZylooModel returns false for kimi-k3 (no prefix)", () => {
-  assert.equal(isZylooModel("kimi-k3"), false);
+test("isZylooModel returns true for kimi-k3 (canonical form)", () => {
+  assert.equal(isZylooModel("kimi-k3"), true);
 });
 
 test("isZylooModel returns false for gpt-4", () => {
@@ -211,12 +211,12 @@ test("Verification detects zyloo_api auth unavailable", () => {
   if (saved2) process.env.ZYLOO_API_KEY_2 = saved2;
 });
 
-test("Verification rejects kimi-k3 (non-upstream) on zyloo_api", () => {
+test("Verification accepts kimi-k3 (canonical form) on zyloo_api", () => {
   const saved = process.env.ZYLOO_API_KEY;
   process.env.ZYLOO_API_KEY = "test-key";
   const result = ProviderVerification.verify("zyloo_api", "zyloo_api", "kimi-k3");
-  assert.equal(result.verified, false);
-  assert.equal(result.checks.modelFamilyMatch, false);
+  assert.equal(result.verified, true);
+  assert.equal(result.checks.modelFamilyMatch, true);
   if (saved) process.env.ZYLOO_API_KEY = saved; else delete process.env.ZYLOO_API_KEY;
 });
 

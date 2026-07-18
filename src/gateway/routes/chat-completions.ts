@@ -107,6 +107,13 @@ export function registerChatCompletionsRoute(app: FastifyInstance): void {
         latencyMs,
       });
 
+      const statusCode = err.statusCode || 500;
+      const failureType = err.failureType;
+      const errorType = failureType === "quota_exhausted" ? "insufficient_credits"
+        : failureType === "auth" ? "authentication_error"
+        : failureType === "rate_limit" ? "rate_limit_exceeded"
+        : "internal_server_error";
+
       appendEvidenceRecord({
         evidence_id: `ide.gateway.execution.failed-${requestId}`,
         trace_id: "ide_gateway",
@@ -116,11 +123,12 @@ export function registerChatCompletionsRoute(app: FastifyInstance): void {
         payload: {
           requestedModel: body.model,
           error: err.message,
+          failureType,
           latencyMs,
         },
       }).catch(() => {});
 
-      return reply.code(500).send(toOpenAiError(500, "Internal gateway error"));
+      return reply.code(statusCode).send(toOpenAiError(statusCode, err.message, errorType));
     }
   });
 }

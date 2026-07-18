@@ -173,7 +173,7 @@ function listDisabledProviders(): string[] {
   return disabled;
 }
 
-function providerUnavailable(provider: "local" | "openai" | "deepseek" | "qwen", e?: unknown, diagnostics?: Record<string, unknown>): never {
+function providerUnavailable(provider: "local" | "openai" | "deepseek" | "qwen" | "zyloo_api", e?: unknown, diagnostics?: Record<string, unknown>): never {
   const msg =
     typeof (e as any)?.message === "string" && (e as any).message.length
       ? (e as any).message
@@ -243,7 +243,7 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
   });
 
   let base: ChatResponse;
-  let provider: "local" | "openai" | "openai_web" | "deepseek" | "deepseek_web" | "qwen_web" | "kimi_web" | "kimi_api" | "gemini_web";
+  let provider: "local" | "openai" | "openai_web" | "deepseek" | "deepseek_web" | "qwen_web" | "kimi_web" | "kimi_api" | "gemini_web" | "zyloo_api";
   let resolved_model: string;
 
   // Web provider routes — checked BEFORE API routes to prevent prefix collision
@@ -456,8 +456,8 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       }
       providerUnavailable("openai", e);
     }
-  } else if (model.startsWith("zyloo:")) {
-    resolved_model = stripPrefix(model, "zyloo:");
+  } else if (model.startsWith("zyloo:") || model.startsWith("zyloo/")) {
+    resolved_model = model.startsWith("zyloo:") ? stripPrefix(model, "zyloo:") : model.replace(/^zyloo\//, "");
     const hasZylooKey = Boolean((process.env.ZYLOO_API_KEY || process.env.ZYLOO_API_KEY_2 || "").trim());
     if (!hasZylooKey) {
       noProviderConfigured({
@@ -500,12 +500,29 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       const data = await resp.json().catch(() => ({})) as any;
       if (!resp.ok) {
         const errMsg = data?.error?.message || `HTTP ${resp.status}`;
-        providerUnavailable("zyloo_api", new Error(errMsg));
+        const { classifyError, recordProviderFailure } = await import("./provider-failure-policy.js");
+        const decision = classifyError(errMsg, resp.status, keyWithSlot.slot === "primary" ? 1 : 0);
+        console.log("[router:routeChat:zyloo:error]", {
+          model: resolved_model,
+          httpStatus: resp.status,
+          failureType: decision.type,
+          safeMessage: decision.safeMessage,
+          shouldFallback: decision.shouldFallback,
+        });
+        recordProviderFailure("zyloo_api", resolved_model, decision);
+        const err = new Error(decision.safeMessage);
+        (err as any).code = decision.type === "quota_exhausted" ? "QUOTA_EXHAUSTED" : "PROVIDER_UNAVAILABLE";
+        (err as any).statusCode = decision.type === "auth" ? 401 : decision.type === "rate_limit" ? 429 : decision.type === "quota_exhausted" ? 402 : 502;
+        (err as any).provider = "zyloo_api";
+        (err as any).failureType = decision.type;
+        (err as any).shouldFallback = decision.shouldFallback;
+        throw err;
       }
       const choice = data?.choices?.[0];
       const text = choice?.message?.content || "";
       base = { id: `zyloo-${Date.now()}`, model: resolved_model, output: text, meta: { provider: "zyloo_api" as const, model: resolved_model } } as ChatResponse;
-    } catch (e) {
+    } catch (e: any) {
+      if (e.failureType) throw e;
       providerUnavailable("zyloo_api", e);
     }
   } else if (model.startsWith("local:")) {

@@ -9,6 +9,7 @@ export interface ZylooApiProviderConfig {
 
 export const ZYLOO_API_MODELS = [
   "zyloo/kimi-k3",
+  "kimi-k3",
 ] as const;
 
 export type ZylooApiModel = (typeof ZYLOO_API_MODELS)[number];

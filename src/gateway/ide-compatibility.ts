@@ -34,6 +34,17 @@ const IDE_REGISTRY: IdeCompatibility[] = [
     ideVerified: false,
     notes: "Phase A: needs IDE smoke verification",
   },
+  {
+    modelId: "zyloo/kimi-k3",
+    chatCapable: true,
+    streamingCapable: true,
+    toolCallingCapable: true,
+    multiTurnToolCapable: true,
+    codingCapable: true,
+    agentCapable: false,
+    ideVerified: false,
+    notes: "Zyloo upstream Kimi K3 — needs IDE smoke verification",
+  },
 ];
 
 const BY_MODEL = new Map<string, IdeCompatibility>(
