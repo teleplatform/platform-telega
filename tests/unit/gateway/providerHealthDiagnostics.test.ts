@@ -1,10 +1,10 @@
 /**
- * TGP-17A — Diagnostics Endpoint Integration Tests
+ * TGP-17A / TGP-17B / TGP-17C — Diagnostics Endpoint Integration Tests
  *
- * Tests for GET /internal/provider-health:
- * - Authenticated request returns sanitized snapshots
- * - Unauthenticated request rejected (401)
- * - Response format validation
+ * Tests for:
+ * - GET /internal/provider-health
+ * - GET /internal/provider-ranking (TGP-17B)
+ * - GET /internal/provider-capabilities (TGP-17C)
  */
 
 import assert from "node:assert/strict";
@@ -13,6 +13,7 @@ import { registerModelsRoute } from "../../../src/gateway/routes/models.js";
 import { registerChatCompletionsRoute } from "../../../src/gateway/routes/chat-completions.js";
 import { getAllSnapshots, resetAll, recordSuccess, recordFailure } from "../../../src/core/provider-health-runtime.js";
 import { getRankingDiagnostics, resetScoringConfig, resetProviderPolicies } from "../../../src/core/provider-scoring-engine.js";
+import { capabilityRegistry, ALL_CAPABILITIES } from "../../../src/core/provider-capability-registry.js";
 import { createApiKey } from "../../../src/api-keys/store.js";
 
 let passed = 0;
@@ -134,7 +135,6 @@ test("GET /internal/provider-ranking returns 200 with auth", async () => {
   assert.equal(resp.status, 200);
   const data = await resp.json() as any;
   assert.ok(Array.isArray(data.ranked), "Should return ranked array");
-  console.log("    DEBUG ranked:", data.ranked.length, "eligible:", data.totalEligible, "excluded:", data.totalExcluded);
   assert.ok(data.ranked.length >= 2, "Should rank providers");
   assert.equal(typeof data.timestamp, "number");
   assert.equal(data.ranked[0].rankingPosition, 1);
@@ -149,6 +149,46 @@ test("Ranking diagnostics response is sanitized", async () => {
   assert.ok(!json.includes("sk-"), "Must not contain API keys");
   assert.ok(!json.includes("Bearer"), "Must not contain auth headers");
   assert.ok(!json.includes("API key"), "Must not contain raw error messages");
+});
+
+test("GET /internal/provider-capabilities returns 200 with auth", async () => {
+  const app = Fastify({ logger: false });
+  registerModelsRoute(app);
+  registerChatCompletionsRoute(app);
+
+  app.get("/internal/provider-capabilities", { preHandler: [] }, async () => ({
+    capabilities: ALL_CAPABILITIES,
+    providers: capabilityRegistry.listProviders().map((id) => ({
+      providerId: id,
+      capabilities: capabilityRegistry.getProfile(id)?.capabilities ?? {},
+    })),
+  }));
+
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const addr = app.server.address() as any;
+
+  const resp = await fetch(`http://127.0.0.1:${addr.port}/internal/provider-capabilities`);
+  assert.equal(resp.status, 200);
+  const data = await resp.json() as any;
+  assert.ok(Array.isArray(data.capabilities), "Should list capability kinds");
+  assert.ok(data.capabilities.includes("vision"), "Should include vision capability");
+  assert.ok(Array.isArray(data.providers), "Should list provider profiles");
+  const kimi = data.providers.find((p: any) => p.providerId === "kimi_api");
+  assert.ok(kimi, "kimi_api should be present");
+  assert.equal(kimi.capabilities.long_context, "advanced");
+  await app.close();
+});
+
+test("Capability diagnostics response is sanitized", async () => {
+  const json = JSON.stringify({
+    capabilities: ALL_CAPABILITIES,
+    providers: capabilityRegistry.listProviders().map((id) => ({
+      providerId: id,
+      capabilities: capabilityRegistry.getProfile(id)?.capabilities ?? {},
+    })),
+  });
+  assert.ok(!json.includes("sk-"), "Must not contain API keys");
+  assert.ok(!json.includes("Bearer"), "Must not contain auth headers");
 });
 
 runSequential().then(() => {

@@ -9,6 +9,7 @@ import { callLocalProvider } from "../providers/local/localProvider.js";
 import { callLocalAuto } from "../providers/local/localAutoProvider.js";
 import { callLocalWithFailover, callLocalAutoWithFailover } from "../providers/local/localSafeCall.js";
 import { recordSuccess as healthRecordSuccess, recordFailure as healthRecordFailure } from "./provider-health-runtime.js";
+import { planProviderSelection, capabilityRegistry, type Capability } from "./provider-capability-registry.js";
 import { getFallbackMode } from "../providers/local/localFallbackSettings.js";
 import { LOCAL_MODELS, getLocalModel } from "../providers/local/localModels.js";
 import { isLocalSessionEnabled, getLocalSession } from "../providers/local/localSessionState.js";
@@ -207,6 +208,39 @@ function stripPrefix(model: string, prefix: string) {
   return model.startsWith(prefix) ? model.slice(prefix.length) : model;
 }
 
+/**
+ * TGP-17C — derive required capabilities from a request.
+ * Declarative: the request states WHAT it needs; the Capability Registry
+ * decides WHO can do it. Fail-open: empty list means "no constraint".
+ */
+function deriveRequiredCapabilities(req: ChatRequest): Capability[] {
+  const required = new Set<Capability>();
+  if (Array.isArray(req.tools) && req.tools.length > 0) {
+    required.add("tools");
+    required.add("function_calling");
+  }
+  if (req.task?.type === "reasoning" || req.task?.type === "deep_reasoning") {
+    required.add("reasoning");
+  }
+  if (req.task?.type === "code" || req.task?.type === "coding") {
+    required.add("code");
+  }
+  if (req.task?.type === "vision" || req.task?.type === "image") {
+    required.add("vision");
+  }
+  if (typeof req.meta?.long_context === "boolean" && req.meta.long_context) {
+    required.add("long_context");
+  }
+  if (Array.isArray((req as any).meta?.capabilities)) {
+    for (const c of (req as any).meta.capabilities as string[]) {
+      if (ALL_CAPABILITIES.includes(c as Capability)) {
+        required.add(c as Capability);
+      }
+    }
+  }
+  return [...required];
+}
+
 async function routeWithProvider(req: ChatRequest, modelOverride: string): Promise<ChatResponse> {
   const reroute = { ...req, model: modelOverride };
   return await routeChat(reroute);
@@ -296,16 +330,40 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       return await routeWithProvider(req, "local:auto");
     }
     const activeProviderId = (req as any).active_provider_id as string | undefined;
+
+    // TGP-17C — capability pre-filter: narrow candidate set to providers that
+    // can actually fulfill the declared request capabilities. This runs BEFORE
+    // health/scoring/intent selection and never blocks routing (fail-open).
+    const requiredCaps = deriveRequiredCapabilities(req);
+    const candidatePool = capabilityRegistry.listProviders();
+    const plan = planProviderSelection(candidatePool, requiredCaps);
+    const capableCandidates = plan.capabilityEligible;
+    if (plan.capabilityExcluded.length > 0) {
+      console.log("[tgp17c:capability_filter]", {
+        required: requiredCaps,
+        excluded: plan.capabilityExcluded.map((e) => ({ provider: e.providerId, missing: e.missing })),
+        capable_count: capableCandidates.length,
+      });
+    }
+
     const decision = await autoRoute(req.message || "", {
-      selectedProvider: activeProviderId as any,
+      selectedProvider: (activeProviderId as any) || (plan.selected as any),
+      candidateProviders: capableCandidates as any,
     });
     console.log("[auto_router:v2] selected", {
       provider: decision.selectedProvider,
       intent: decision.intent,
       score: decision.score,
+      capability_filtered: requiredCaps.length > 0,
     });
-    // Pass intent through to evidence collection
-    (req as any).meta = { ...(req as any).meta, intent: decision.intent };
+    // Pass intent + capability plan through to evidence collection
+    (req as any).meta = {
+      ...(req as any).meta,
+      intent: decision.intent,
+      capability_required: requiredCaps,
+      capability_excluded: plan.capabilityExcluded.map((e) => e.providerId),
+      capability_eligible: plan.capabilityEligible,
+    };
     const selectedRoute = decision.selectedProvider === "local"
       ? "local:auto"
       : `${decision.selectedProvider}:${decision.selectedModel || decision.selectedProvider}`;

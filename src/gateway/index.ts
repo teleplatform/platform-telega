@@ -4,6 +4,7 @@ import { registerChatCompletionsRoute } from "./routes/chat-completions.js";
 import { appendEvidenceRecord } from "../runtime/evidence/execution-evidence-store.js";
 import { getAllSnapshots } from "../core/provider-health-runtime.js";
 import { getRankingDiagnostics } from "../core/provider-scoring-engine.js";
+import { capabilityRegistry, ALL_CAPABILITIES } from "../core/provider-capability-registry.js";
 import { gatewayAuthMiddleware } from "./auth.js";
 
 const PORT = Number(process.env.TGPT_GATEWAY_PORT || "8765");
@@ -54,6 +55,18 @@ async function startGateway() {
     return reply.send(ranking);
   });
 
+  app.get("/internal/provider-capabilities", { preHandler: [gatewayAuthMiddleware] }, async (req, reply) => {
+    const providers = capabilityRegistry.listProviders();
+    const matrix = providers.map((id) => {
+      const profile = capabilityRegistry.getProfile(id);
+      return {
+        providerId: id,
+        capabilities: profile ? profile.capabilities : {},
+      };
+    });
+    return reply.send({ capabilities: ALL_CAPABILITIES, providers: matrix });
+  });
+
   registerModelsRoute(app);
   registerChatCompletionsRoute(app);
 
@@ -68,6 +81,7 @@ async function startGateway() {
     console.log("║  Chat:       POST /v1/chat/completions");
     console.log("║  Health:     GET  /health");
     console.log("║  Ranking:    GET  /internal/provider-ranking");
+    console.log("║  Capabilities: GET /internal/provider-capabilities");
     console.log("╚══════════════════════════════════════════════╝\n");
 
     appendEvidenceRecord({
