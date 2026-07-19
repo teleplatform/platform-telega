@@ -8,8 +8,9 @@ import { executeWebProviderWithFallback } from "../providers/web-provider-stub.j
 import { callLocalProvider } from "../providers/local/localProvider.js";
 import { callLocalAuto } from "../providers/local/localAutoProvider.js";
 import { callLocalWithFailover, callLocalAutoWithFailover } from "../providers/local/localSafeCall.js";
-import { recordSuccess as healthRecordSuccess, recordFailure as healthRecordFailure } from "./provider-health-runtime.js";
+import { recordSuccess as healthRecordSuccess, recordFailure as healthRecordFailure, isProviderEligible, getSnapshot } from "./provider-health-runtime.js";
 import { planProviderSelection, capabilityRegistry, type Capability } from "./provider-capability-registry.js";
+import { selectProvider, buildProviderCandidates, type ProviderRouteIntent, type ProviderSelectionPlan, type SelectionRejectionReason } from "./provider-selection-orchestrator.js";
 import { getFallbackMode } from "../providers/local/localFallbackSettings.js";
 import { LOCAL_MODELS, getLocalModel } from "../providers/local/localModels.js";
 import { isLocalSessionEnabled, getLocalSession } from "../providers/local/localSessionState.js";
@@ -246,6 +247,259 @@ async function routeWithProvider(req: ChatRequest, modelOverride: string): Promi
   return await routeChat(reroute);
 }
 
+/**
+ * TGP-17D — Unified execution with orchestrator fallback plan.
+ * 1. Parse model string → ProviderRouteIntent
+ * 2. Build selection plan (capability → health → scoring)
+ * 3. Execute selected provider
+ * 4. On failure, iterate through fallbackOrder
+ * 5. All failures classified via ProviderFailurePolicy
+ */
+async function executeWithOrchestrator(
+  req: ChatRequest,
+  model: string,
+  request_id: string,
+  t0: number,
+): Promise<ChatResponse> {
+  const requiredCaps = deriveRequiredCapabilities(req);
+  const options = { requiredCapabilities: requiredCaps, requestId: request_id };
+  let plan: any;
+
+  try {
+    plan = selectProvider(model, options);
+  } catch (e: any) {
+    if (e instanceof ProviderSelectionError) {
+      const err = new Error(e.message);
+      (err as any).code = e.code;
+      (err as any).statusCode = e.statusCode;
+      (err as any).details = e.details;
+      throw err;
+    }
+    throw e;
+  }
+
+  const { selectedProviderId, selectedModel, fallbackOrder } = plan;
+  if (!selectedProviderId) {
+    const err = new Error("No provider selected");
+    (err as any).code = "NO_ELIGIBLE_PROVIDER";
+    (err as any).statusCode = 503;
+    throw err;
+  }
+
+  // Resolve model name: use requested model if specified, else default
+  const resolvedModel = selectedModel || plan.intent.requestedModel || "";
+
+  // Execute with fallback chain
+  let lastError: any;
+  const attemptOrder = [selectedProviderId, ...fallbackOrder];
+
+  for (const providerId of attemptOrder) {
+    try {
+      const base = await executeProvider(providerId, resolvedModel, req, request_id, t0);
+      // Success — record evidence with selection plan metadata
+      collectEvidence({
+        provider: providerId as any,
+        model: resolvedModel || providerId,
+        intent: (req as any).meta?.intent || "unknown",
+        latencyMs: Date.now() - t0,
+        success: true,
+        fallbackUsed: providerId !== selectedProviderId,
+        selectionPlan: {
+          mode: plan.intent.mode,
+          requestedProviderId: plan.intent.requestedProviderId,
+          requiredCapabilities: plan.requiredCapabilities,
+          consideredProviderIds: plan.consideredProviders,
+          selectedProviderId: plan.selectedProviderId,
+          fallbackOrder: plan.fallbackOrder,
+          rejectionReasonCodes: [...plan.capabilityRejected.map((r: any) => r.reason), ...plan.healthRejected.map((r: any) => r.reason)],
+        },
+      });
+      return {
+        ...base,
+        request_id,
+        latency_ms: Date.now() - t0,
+        meta: {
+          ...(base.meta || {}),
+          provider: providerId,
+          model: resolvedModel || providerId,
+        },
+      };
+    } catch (e: any) {
+      lastError = e;
+      // If the error has a failureType from ProviderFailurePolicy, classify and decide fallback
+      if (e.failureType && e.shouldFallback === false) {
+        throw e; // Terminal error per failure policy
+      }
+      console.warn(`[orchestrator] Provider ${providerId} failed, trying next fallback`, {
+        error: e.message,
+        failureType: e.failureType,
+        remaining: fallbackOrder.filter((p: string) => p !== providerId),
+      });
+      // Continue to next fallback
+    }
+  }
+
+  // All attempts exhausted
+  const err = new Error(lastError?.message || "All provider attempts exhausted");
+  (err as any).code = "SELECTION_PLAN_EXHAUSTED";
+  (err as any).statusCode = 503;
+  (err as any).details = {
+    mode: plan.intent.mode,
+    requestedProviderId: plan.intent.requestedProviderId,
+    requiredCapabilities: plan.requiredCapabilities,
+    consideredProviderIds: plan.consideredProviders,
+    rejectionReasonCodes: [...plan.capabilityRejected.map((r: any) => r.reason), ...plan.healthRejected.map((r: any) => r.reason)],
+    lastError: lastError?.message,
+  };
+  throw err;
+}
+
+/**
+ * Execute a single provider by providerId and model.
+ * Returns the base ChatResponse from the provider.
+ */
+async function executeProvider(
+  providerId: string,
+  model: string,
+  req: ChatRequest,
+  request_id: string,
+  t0: number,
+): Promise<ChatResponse> {
+  switch (providerId) {
+    case "openai_api":
+      return await openaiChat({ ...req, model });
+    case "deepseek_api":
+      return await deepseekChat({ ...req, model });
+    case "qwen_api":
+      return await qwenChat({ ...req, model });
+    case "kimi_api": {
+      const { resolveKimiApiKey, resolveKimiReasoningEffort, isKimiK3Model, isKimiFamilyModel } = await import("../providers/kimi_api/index.js");
+      if (!isKimiFamilyModel(model)) {
+        throw new Error(`Model "${model}" is not a Kimi-family model`);
+      }
+      const apiKey = resolveKimiApiKey()!;
+      const baseURL = process.env.KIMI_API_BASE_URL || "https://api.moonshot.ai/v1";
+      const reasoningEffort = isKimiK3Model(model) ? resolveKimiReasoningEffort("default") : undefined;
+      const kimiBody: Record<string, unknown> = {
+        model,
+        messages: [
+          ...(req.system ? [{ role: "system", content: req.system }] : []),
+          { role: "user", content: req.message || "" },
+        ],
+      };
+      if (reasoningEffort) kimiBody.reasoning_effort = reasoningEffort;
+      const resp = await fetch(`${baseURL}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+        body: JSON.stringify(kimiBody),
+        signal: AbortSignal.timeout(120_000),
+      });
+      const data = await resp.json().catch(() => ({})) as any;
+      if (!resp.ok) {
+        const errMsg = data?.error?.message || `HTTP ${resp.status}`;
+        const { classifyError, recordProviderFailure } = await import("./provider-failure-policy.js");
+        const decision = classifyError(errMsg, resp.status, 1); // assume primary slot for non-zyloo
+        recordProviderFailure("kimi_api", model, decision);
+        healthRecordFailure("kimi_api", decision, Date.now() - t0, Date.now());
+        const err = new Error(decision.safeMessage);
+        (err as any).code = decision.type === "quota_exhausted" ? "QUOTA_EXHAUSTED" : "PROVIDER_UNAVAILABLE";
+        (err as any).statusCode = decision.type === "auth" ? 401 : decision.type === "rate_limit" ? 429 : decision.type === "quota_exhausted" ? 402 : 502;
+        (err as any).provider = "kimi_api";
+        (err as any).failureType = decision.type;
+        (err as any).shouldFallback = decision.shouldFallback;
+        throw err;
+      }
+      const choice = data?.choices?.[0];
+      const text = choice?.message?.content || "";
+      const reasoning = choice?.message?.reasoning_content || "";
+      const output = reasoning ? `${reasoning}\n\n${text}` : text;
+      healthRecordSuccess("kimi_api", Date.now() - t0, Date.now());
+      return { id: `kimi-${Date.now()}`, model, output, meta: { provider: "kimi_api" as const, model } } as ChatResponse;
+    }
+    case "zyloo_api": {
+      const { resolveZylooApiKeyWithSlot, isZylooModel } = await import("../providers/zyloo_api/index.js");
+      if (!isZylooModel(model)) {
+        throw new Error(`Model "${model}" is not a Zyloo model`);
+      }
+      const keyWithSlot = resolveZylooApiKeyWithSlot()!;
+      const baseURL = "https://api.zyloo.io/v1";
+      const zylooBody: Record<string, unknown> = {
+        model,
+        messages: [
+          ...(req.system ? [{ role: "system", content: req.system }] : []),
+          { role: "user", content: req.message || "" },
+        ],
+      };
+      const zylooT0 = Date.now();
+      const resp = await fetch(`${baseURL}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${keyWithSlot.key}` },
+        body: JSON.stringify(zylooBody),
+        signal: AbortSignal.timeout(120_000),
+      });
+      const zylooLatencyMs = Date.now() - zylooT0;
+      const data = await resp.json().catch(() => ({})) as any;
+      if (!resp.ok) {
+        const errMsg = data?.error?.message || `HTTP ${resp.status}`;
+        const { classifyError, recordProviderFailure } = await import("./provider-failure-policy.js");
+        const decision = classifyError(errMsg, resp.status, keyWithSlot.slot === "primary" ? 1 : 0);
+        console.log("[router:routeChat:zyloo:error]", {
+          model, httpStatus: resp.status, failureType: decision.type,
+          safeMessage: decision.safeMessage, shouldFallback: decision.shouldFallback,
+        });
+        recordProviderFailure("zyloo_api", model, decision);
+        healthRecordFailure("zyloo_api", decision, zylooLatencyMs, Date.now());
+        try {
+          const { recordScoringOutcome } = await import("./provider-scoring-engine.js");
+          recordScoringOutcome("zyloo_api", false, zylooLatencyMs, decision);
+        } catch { /* non-fatal */ }
+        const err = new Error(decision.safeMessage);
+        (err as any).code = decision.type === "quota_exhausted" ? "QUOTA_EXHAUSTED" : "PROVIDER_UNAVAILABLE";
+        (err as any).statusCode = decision.type === "auth" ? 401 : decision.type === "rate_limit" ? 429 : decision.type === "quota_exhausted" ? 402 : 502;
+        (err as any).provider = "zyloo_api";
+        (err as any).failureType = decision.type;
+        (err as any).shouldFallback = decision.shouldFallback;
+        throw err;
+      }
+      const choice = data?.choices?.[0];
+      const text = choice?.message?.content || "";
+      healthRecordSuccess("zyloo_api", zylooLatencyMs, Date.now());
+      try {
+        const { recordScoringOutcome } = await import("./provider-scoring-engine.js");
+        recordScoringOutcome("zyloo_api", true, zylooLatencyMs, null);
+      } catch { /* non-fatal */ }
+      return { id: `zyloo-${Date.now()}`, model, output: text, meta: { provider: "zyloo_api" as const, model } } as ChatResponse;
+    }
+    case "local": {
+      // local:auto handled via routeWithProvider
+      if (model === "auto") {
+        return await routeWithProvider(req, "local:auto");
+      }
+      const knownLocalModel = getLocalModel(model);
+      if (knownLocalModel) {
+        writeLocalProviderEvidence("local_provider_selected", knownLocalModel.id, knownLocalModel.name, knownLocalModel.transport);
+        try {
+          writeLocalProviderEvidence("local_model_response_started", knownLocalModel.id, knownLocalModel.name, knownLocalModel.transport);
+          const localResult = await callLocalProvider({ providerId: model, prompt: req.message || "", system: req.system });
+          writeLocalProviderEvidence("local_model_response_completed", knownLocalModel.id, knownLocalModel.name, knownLocalModel.transport, { latency_ms: Date.now() - t0 });
+          return { reply: localResult.text, meta: { provider: "local" as const, model: knownLocalModel.id, raw: localResult.raw } } as unknown as ChatResponse;
+        } catch (e) {
+          writeLocalProviderEvidence("local_model_response_failed", knownLocalModel.id, knownLocalModel.name, knownLocalModel.transport, { error: (e as any)?.message });
+          throw e;
+        }
+      }
+      if (model === "local-demo") {
+        return await localDemo({ ...req, model: "local-demo" });
+      }
+      // Fallback to localChat for other models
+      return await localChat({ ...req, model });
+    }
+    default:
+      // Unknown provider — should not happen if capability filter works
+      throw new Error(`Unknown provider: ${providerId}`);
+  }
+}
+
 export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
   const t0 = Date.now();
 
@@ -321,8 +575,7 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
     });
     return await routeWebFallback(req, BARE_WEB_PROVIDERS[model]);
   }
-
-  // Auto Router v2 — general auto mode for all providers
+// Auto Router v2 — general auto mode for all providers
   if (model === "auto") {
     const arConfig = getAutoRouterConfig();
     if (!arConfig.enabled) {
@@ -356,6 +609,7 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
       score: decision.score,
       capability_filtered: requiredCaps.length > 0,
     });
+
     // Pass intent + capability plan through to evidence collection
     (req as any).meta = {
       ...(req as any).meta,
@@ -370,323 +624,32 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
     return await routeWithProvider(req, selectedRoute);
   }
 
-  // API routes
-  if (model.startsWith("openai:")) {
-    resolved_model = stripPrefix(model, "openai:");
-    if (!hasOpenAI()) {
-      if (isWebBridgeEnabled()) {
-        console.warn(`[router] OpenAI API key missing, falling back to Web Bridge`);
-        return await routeWebFallback(req, "chatgpt_web");
-      }
-      noProviderConfigured({
-        requested_model: `openai:${resolved_model}`,
-        available_providers: listAvailableProviders(),
-        disabled_providers: listDisabledProviders(),
-        rejection_reasons: ["OPENAI_API_KEY not set", "Web Bridge fallback skipped or unavailable"],
-      });
-    }
-    provider = "openai";
-    try {
-      base = await openaiChat({ ...req, model: resolved_model });
-    } catch (e) {
-      if (isWebBridgeEnabled()) {
-        console.warn(`[router] OpenAI API failed, falling back to Web Bridge:`, (e as any)?.message);
-        return await routeWebFallback(req, "chatgpt_web");
-      }
-      providerUnavailable("openai", e);
-    }
-  } else if (model.startsWith("deepseek:")) {
-    resolved_model = stripPrefix(model, "deepseek:");
-    if (!hasDeepSeek()) {
-      if (isWebBridgeEnabled()) {
-        console.warn(`[router] DeepSeek API key missing, falling back to Web Bridge`);
-        return await routeWebFallback(req, "deepseek_web");
-      }
-      noProviderConfigured({
-        requested_model: `deepseek:${resolved_model}`,
-        available_providers: listAvailableProviders(),
-        disabled_providers: listDisabledProviders(),
-        rejection_reasons: ["DEEPSEEK_API_KEY not set", "Web Bridge fallback skipped or unavailable"],
-      });
-    }
-    provider = "deepseek";
-    console.log("[router:routeChat:deepseek]", { model: resolved_model, request_id });
-    try {
-      base = await deepseekChat({ ...req, model: resolved_model });
-    } catch (e) {
-      if (isWebBridgeEnabled()) {
-        console.warn(`[router] DeepSeek API failed, falling back to Web Bridge:`, (e as any)?.message);
-        return await routeWebFallback(req, "deepseek_web");
-      }
-      providerUnavailable("deepseek", e);
-    }
-  } else if (model.startsWith("qwen:")) {
-    resolved_model = stripPrefix(model, "qwen:");
-    if (!hasQwen()) {
-      if (isWebBridgeEnabled()) {
-        console.warn(`[router] Qwen API key missing, falling back to Web Bridge`);
-        return await routeWebFallback(req, "qwen_web");
-      }
-      noProviderConfigured({
-        requested_model: `qwen:${resolved_model}`,
-        available_providers: listAvailableProviders(),
-        disabled_providers: listDisabledProviders(),
-        rejection_reasons: ["QWEN_API_KEY / DASHSCOPE_API_KEY not set", "Web Bridge fallback skipped or unavailable"],
-      });
-    }
-    provider = "deepseek";
-    console.log("[router:routeChat:qwen]", { model: resolved_model, request_id });
-    try {
-      base = await qwenChat({ ...req, model: resolved_model });
-    } catch (e) {
-      if (isWebBridgeEnabled()) {
-        console.warn(`[router] Qwen API failed, falling back to Web Bridge:`, (e as any)?.message);
-        return await routeWebFallback(req, "qwen_web");
-      }
-      providerUnavailable("deepseek", e);
-    }
-  } else if (model.startsWith("kimi:")) {
-    resolved_model = stripPrefix(model, "kimi:");
-    const hasKimiKey = Boolean((process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY || "").trim());
-    if (!hasKimiKey) {
-      if (isWebBridgeEnabled()) {
-        console.warn(`[router] Kimi API key missing, falling back to Browser Bridge`);
-        return await routeWebFallback(req, "kimi_local_web_api" as any);
-      }
-      noProviderConfigured({
-        requested_model: `kimi:${resolved_model}`,
-        available_providers: listAvailableProviders(),
-        disabled_providers: listDisabledProviders(),
-        rejection_reasons: ["KIMI_API_KEY / MOONSHOT_API_KEY not set", "Browser Bridge fallback skipped or unavailable"],
-      });
-    }
-    provider = "kimi_api";
-    console.log("[router:routeChat:kimi]", { model: resolved_model, request_id });
-    try {
-      const { resolveKimiApiKey, resolveKimiReasoningEffort, isKimiK3Model, isKimiFamilyModel } = await import("../providers/kimi_api/index.js");
-      if (!isKimiFamilyModel(resolved_model)) {
-        noProviderConfigured({
-          requested_model: `kimi:${resolved_model}`,
-          available_providers: listAvailableProviders(),
-          disabled_providers: listDisabledProviders(),
-          rejection_reasons: [`Model "${resolved_model}" is not a Kimi-family model`],
-        });
-      }
-      const apiKey = resolveKimiApiKey()!;
-      const baseURL = process.env.KIMI_API_BASE_URL || "https://api.moonshot.ai/v1";
-      const reasoningEffort = isKimiK3Model(resolved_model) ? resolveKimiReasoningEffort("default") : undefined;
-      const kimiBody: Record<string, unknown> = {
-        model: resolved_model,
-        messages: [
-          ...(req.system ? [{ role: "system", content: req.system }] : []),
-          { role: "user", content: req.message || "" },
-        ],
-      };
-      if (reasoningEffort) {
-        kimiBody.reasoning_effort = reasoningEffort;
-      }
-      const resp = await fetch(`${baseURL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(kimiBody),
-        signal: AbortSignal.timeout(120_000),
-      });
-      const data = await resp.json().catch(() => ({})) as any;
-      if (!resp.ok) {
-        const errMsg = data?.error?.message || `HTTP ${resp.status}`;
-        if (isWebBridgeEnabled()) {
-          console.warn(`[router] Kimi API failed (${errMsg}), falling back to Browser Bridge`);
-          return await routeWebFallback(req, "kimi_local_web_api" as any);
-        }
-        providerUnavailable("openai", new Error(errMsg));
-      }
-      const choice = data?.choices?.[0];
-      const text = choice?.message?.content || "";
-      const reasoning = choice?.message?.reasoning_content || "";
-      const output = reasoning ? `${reasoning}\n\n${text}` : text;
-      base = { id: `kimi-${Date.now()}`, model: resolved_model, output, meta: { provider: "kimi_api" as const, model: resolved_model } } as ChatResponse;
-    } catch (e) {
-      if (isWebBridgeEnabled()) {
-        console.warn(`[router] Kimi API failed, falling back to Browser Bridge:`, (e as any)?.message);
-        return await routeWebFallback(req, "kimi_local_web_api" as any);
-      }
-      providerUnavailable("openai", e);
-    }
-  } else if (model.startsWith("zyloo:") || model.startsWith("zyloo/")) {
-    resolved_model = model.startsWith("zyloo:") ? stripPrefix(model, "zyloo:") : model.replace(/^zyloo\//, "");
-    const hasZylooKey = Boolean((process.env.ZYLOO_API_KEY || process.env.ZYLOO_API_KEY_2 || "").trim());
-    if (!hasZylooKey) {
-      noProviderConfigured({
-        requested_model: `zyloo:${resolved_model}`,
-        available_providers: listAvailableProviders(),
-        disabled_providers: listDisabledProviders(),
-        rejection_reasons: ["ZYLOO_API_KEY / ZYLOO_API_KEY_2 not set"],
-      });
-    }
-    provider = "zyloo_api";
-    console.log("[router:routeChat:zyloo]", { model: resolved_model, request_id });
-    try {
-      const { resolveZylooApiKeyWithSlot, isZylooModel } = await import("../providers/zyloo_api/index.js");
-      if (!isZylooModel(resolved_model)) {
-        noProviderConfigured({
-          requested_model: `zyloo:${resolved_model}`,
-          available_providers: listAvailableProviders(),
-          disabled_providers: listDisabledProviders(),
-          rejection_reasons: [`Model "${resolved_model}" is not a Zyloo model`],
-        });
-      }
-      const keyWithSlot = resolveZylooApiKeyWithSlot()!;
-      const baseURL = "https://api.zyloo.io/v1";
-      const zylooBody: Record<string, unknown> = {
-        model: resolved_model,
-        messages: [
-          ...(req.system ? [{ role: "system", content: req.system }] : []),
-          { role: "user", content: req.message || "" },
-        ],
-      };
-      const zylooT0 = Date.now();
-      const resp = await fetch(`${baseURL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${keyWithSlot.key}`,
-        },
-        body: JSON.stringify(zylooBody),
-        signal: AbortSignal.timeout(120_000),
-      });
-      const zylooLatencyMs = Date.now() - zylooT0;
-      const data = await resp.json().catch(() => ({})) as any;
-      if (!resp.ok) {
-        const errMsg = data?.error?.message || `HTTP ${resp.status}`;
-        const { classifyError, recordProviderFailure } = await import("./provider-failure-policy.js");
-        const decision = classifyError(errMsg, resp.status, keyWithSlot.slot === "primary" ? 1 : 0);
-        console.log("[router:routeChat:zyloo:error]", {
-          model: resolved_model,
-          httpStatus: resp.status,
-          failureType: decision.type,
-          safeMessage: decision.safeMessage,
-          shouldFallback: decision.shouldFallback,
-        });
-        recordProviderFailure("zyloo_api", resolved_model, decision);
-        healthRecordFailure("zyloo_api", decision, zylooLatencyMs, Date.now());
-        try {
-          const { recordScoringOutcome } = await import("./provider-scoring-engine.js");
-          recordScoringOutcome("zyloo_api", false, zylooLatencyMs, decision);
-        } catch { /* non-fatal */ }
-        const err = new Error(decision.safeMessage);
-        (err as any).code = decision.type === "quota_exhausted" ? "QUOTA_EXHAUSTED" : "PROVIDER_UNAVAILABLE";
-        (err as any).statusCode = decision.type === "auth" ? 401 : decision.type === "rate_limit" ? 429 : decision.type === "quota_exhausted" ? 402 : 502;
-        (err as any).provider = "zyloo_api";
-        (err as any).failureType = decision.type;
-        (err as any).shouldFallback = decision.shouldFallback;
-        throw err;
-      }
-      const choice = data?.choices?.[0];
-      const text = choice?.message?.content || "";
-      healthRecordSuccess("zyloo_api", zylooLatencyMs, Date.now());
-      try {
-        const { recordScoringOutcome } = await import("./provider-scoring-engine.js");
-        recordScoringOutcome("zyloo_api", true, zylooLatencyMs, null);
-      } catch { /* non-fatal */ }
-      base = { id: `zyloo-${Date.now()}`, model: resolved_model, output: text, meta: { provider: "zyloo_api" as const, model: resolved_model } } as ChatResponse;
-    } catch (e: any) {
-      if (e.failureType) throw e;
-      providerUnavailable("zyloo_api", e);
-    }
-  } else if (model.startsWith("local:")) {
-    provider = "local";
-    resolved_model = stripPrefix(model, "local:");
-
-    // local:auto — smart automatic model selection
-    if (resolved_model === "auto") {
-      try {
-        writeLocalProviderEvidence("local_provider_selected", "auto", "Auto Selector", "ollama");
-        const autoResult = await callLocalAuto(req.message || "", req.system);
-        base = { reply: autoResult.text, meta: { provider: "local" as const, model: autoResult.selectedModel, autoIntent: autoResult.intent, usedFallback: autoResult.usedFallback } } as unknown as ChatResponse;
-      } catch (e) {
-        if (isWebBridgeEnabled()) {
-          console.warn(`[router] local:auto failed, falling back to Web Bridge:`, (e as any)?.message);
-          return await routeWebFallback(req);
-        }
-        providerUnavailable("local", e);
-      }
-    } else {
-    // Check if this is a known local model from the registry (Ollama/LM Studio)
-    const knownLocalModel = getLocalModel(resolved_model);
-    if (knownLocalModel) {
-      writeLocalProviderEvidence("local_provider_selected", knownLocalModel.id, knownLocalModel.name, knownLocalModel.transport);
-      try {
-        writeLocalProviderEvidence("local_model_response_started", knownLocalModel.id, knownLocalModel.name, knownLocalModel.transport);
-        const localResult = await callLocalProvider({
-          providerId: resolved_model,
-          prompt: req.message || "",
-          system: req.system,
-        });
-        writeLocalProviderEvidence("local_model_response_completed", knownLocalModel.id, knownLocalModel.name, knownLocalModel.transport, { latency_ms: Date.now() - t0 });
-        base = { reply: localResult.text, meta: { provider: "local" as const, model: knownLocalModel.id, raw: localResult.raw } } as unknown as ChatResponse;
-      } catch (e) {
-        writeLocalProviderEvidence("local_model_response_failed", knownLocalModel.id, knownLocalModel.name, knownLocalModel.transport, { error: (e as any)?.message });
-        if (isWebBridgeEnabled()) {
-          console.warn(`[router] Local model ${resolved_model} failed, falling back to Web Bridge:`, (e as any)?.message);
-          return await routeWebFallback(req);
-        }
-        providerUnavailable("local", e);
-      }
-    } else if (resolved_model === "local-demo") {
-      // local-demo should work without any env vars
-      try {
-        base = await localDemo({ ...req, model: "local-demo" });
-      } catch (e) {
-        providerUnavailable("local", e);
-      }
-    } else {
-      // For other local models, we need LOCAL_* env vars
-      if (!hasLocal()) {
-        if (isWebBridgeEnabled()) {
-          console.warn(`[router] Local provider not configured, falling back to Web Bridge`);
-          return await routeWebFallback(req);
-        }
-        noProviderConfigured({
-          requested_model: `local:${resolved_model}`,
-          available_providers: listAvailableProviders(),
-          disabled_providers: listDisabledProviders(),
-          rejection_reasons: [
-            "TELEGPT_LOCAL_ENABLED=false or LOCAL_OPENAI_BASE_URL/MODEL not set",
-            "Web Bridge fallback skipped or unavailable",
-          ],
-        });
-      }
-      try {
-        base = await localChat({ ...req, model: resolved_model });
-      } catch (e) {
-        if (isWebBridgeEnabled()) {
-          console.warn(`[router] Local provider failed, falling back to Web Bridge:`, (e as any)?.message);
-          return await routeWebFallback(req);
-        }
-        providerUnavailable("local", e);
-      }
-    }
+  // TGP-17D — Unified provider selection via orchestrator
+  // All explicit provider routes (kimi:, zyloo:, openai:, deepseek:, qwen:, local:)
+  // go through the capability → health → scoring pipeline with fallback plan.
+  if (!model.startsWith("openai_web:") && !model.startsWith("deepseek_web:") &&
+      !model.startsWith("qwen_web:") && !model.startsWith("kimi_web:") &&
+      !model.startsWith("gemini_web:") && !model.startsWith("chatgpt") &&
+      !model.startsWith("openai_web") && !model.startsWith("deepseek_web") &&
+      !model.startsWith("qwen_web") && !model.startsWith("kimi_web") &&
+      !model.startsWith("gemini_web")) {
+    return await executeWithOrchestrator(req, model, request_id, t0);
   }
-  } else {
-    // Unknown model — try web bridge first, fall back to local-demo only as last resort
-    if (isWebBridgeEnabled()) {
-      console.warn(`[router] Unknown model "${model}", falling back to Web Bridge`);
-      return await routeWebFallback(req);
-    }
-    provider = "local";
-    resolved_model = "local-demo";
-    // Default model is local-demo, should work without env vars
-    try {
-      base = await localDemo({ ...req, model: "local-demo" });
-    } catch (e) {
-      providerUnavailable("local", e, {
-        requested_model: model,
-        bridge_enabled: isWebBridgeEnabled(),
-      });
-    }
+
+  // Unknown model — try web bridge first, fall back to local-demo only as last resort
+  if (isWebBridgeEnabled()) {
+    console.warn(`[router] Unknown model "${model}", falling back to Web Bridge`);
+    return await routeWebFallback(req);
+  }
+  provider = "local";
+  resolved_model = "local-demo";
+  try {
+    base = await localDemo({ ...req, model: "local-demo" });
+  } catch (e) {
+    providerUnavailable("local", e, {
+      requested_model: model,
+      bridge_enabled: isWebBridgeEnabled(),
+    });
   }
 
   const usage =

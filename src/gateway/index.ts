@@ -5,6 +5,7 @@ import { appendEvidenceRecord } from "../runtime/evidence/execution-evidence-sto
 import { getAllSnapshots } from "../core/provider-health-runtime.js";
 import { getRankingDiagnostics } from "../core/provider-scoring-engine.js";
 import { capabilityRegistry, ALL_CAPABILITIES } from "../core/provider-capability-registry.js";
+import { selectProvider, parseRouteIntent, type ProviderRouteIntent } from "../core/provider-selection-orchestrator.js";
 import { gatewayAuthMiddleware } from "./auth.js";
 
 const PORT = Number(process.env.TGPT_GATEWAY_PORT || "8765");
@@ -67,6 +68,18 @@ async function startGateway() {
     return reply.send({ capabilities: ALL_CAPABILITIES, providers: matrix });
   });
 
+  app.get("/internal/provider-selection", { preHandler: [gatewayAuthMiddleware] }, async (req, reply) => {
+    const model = (req.query as any).model as string | undefined;
+    const strict = (req.query as any).strict === "true";
+    const noFallback = (req.query as any).noFallback === "true";
+    const caps = (req.query as any).capabilities;
+    const requiredCapabilities = Array.isArray(caps) ? caps.filter((c: string) => ALL_CAPABILITIES.includes(c)) : [];
+    const options = { strict, noFallback, requiredCapabilities } as any;
+    const intent = parseRouteIntent(model, options);
+    const plan = selectProvider(model, options);
+    return reply.send(plan);
+  });
+
   registerModelsRoute(app);
   registerChatCompletionsRoute(app);
 
@@ -82,6 +95,7 @@ async function startGateway() {
     console.log("║  Health:     GET  /health");
     console.log("║  Ranking:    GET  /internal/provider-ranking");
     console.log("║  Capabilities: GET /internal/provider-capabilities");
+    console.log("║  Selection:  GET  /internal/provider-selection?model=kimi:kimi-k3");
     console.log("╚══════════════════════════════════════════════╝\n");
 
     appendEvidenceRecord({

@@ -14,6 +14,7 @@ import { registerChatCompletionsRoute } from "../../../src/gateway/routes/chat-c
 import { getAllSnapshots, resetAll, recordSuccess, recordFailure } from "../../../src/core/provider-health-runtime.js";
 import { getRankingDiagnostics, resetScoringConfig, resetProviderPolicies } from "../../../src/core/provider-scoring-engine.js";
 import { capabilityRegistry, ALL_CAPABILITIES } from "../../../src/core/provider-capability-registry.js";
+import { selectProvider, parseRouteIntent } from "../../../src/core/provider-selection-orchestrator.js";
 import { createApiKey } from "../../../src/api-keys/store.js";
 
 let passed = 0;
@@ -187,6 +188,60 @@ test("Capability diagnostics response is sanitized", async () => {
       capabilities: capabilityRegistry.getProfile(id)?.capabilities ?? {},
     })),
   });
+  assert.ok(!json.includes("sk-"), "Must not contain API keys");
+  assert.ok(!json.includes("Bearer"), "Must not contain auth headers");
+});
+
+test("GET /internal/provider-selection returns plan for auto", async () => {
+  const app = Fastify({ logger: false });
+  registerModelsRoute(app);
+  registerChatCompletionsRoute(app);
+
+  app.get("/internal/provider-selection", { preHandler: [] }, async (req, reply) => {
+    const model = (req.query as any).model as string | undefined;
+    const intent = parseRouteIntent(model, { requiredCapabilities: [], strict: false, noFallback: false });
+    const plan = selectProvider(model, { requiredCapabilities: [], strict: false, noFallback: false });
+    return reply.send(plan);
+  });
+
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const addr = app.server.address() as any;
+
+  const resp = await fetch(`http://127.0.0.1:${addr.port}/internal/provider-selection`);
+  assert.equal(resp.status, 200);
+  const data = await resp.json() as any;
+  assert.ok(data.intent, "Should include intent");
+  assert.ok(data.intent.mode === "auto", "Auto mode should be auto");
+  assert.ok(Array.isArray(data.fallbackOrder), "Should have fallbackOrder");
+  await app.close();
+});
+
+test("GET /internal/provider-selection returns plan for preferred prefix", async () => {
+  const app = Fastify({ logger: false });
+  registerModelsRoute(app);
+  registerChatCompletionsRoute(app);
+
+  app.get("/internal/provider-selection", { preHandler: [] }, async (req, reply) => {
+    const model = (req.query as any).model as string | undefined;
+    const plan = selectProvider(model, { requiredCapabilities: [], strict: false, noFallback: false });
+    return reply.send(plan);
+  });
+
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const addr = app.server.address() as any;
+
+  const resp = await fetch(`http://127.0.0.1:${addr.port}/internal/provider-selection?model=kimi:kimi-k3`);
+  assert.equal(resp.status, 200);
+  const data = await resp.json() as any;
+  assert.equal(data.intent.mode, "preferred_provider");
+  assert.equal(data.intent.requestedProviderId, "kimi_api");
+  assert.equal(data.selectedProviderId, "kimi_api");
+  await app.close();
+});
+
+test("Selection diagnostics response is sanitized", async () => {
+  const plan = selectProvider("kimi:kimi-k3", { requiredCapabilities: [], strict: false, noFallback: false });
+  const json = JSON.stringify(plan);
   assert.ok(!json.includes("sk-"), "Must not contain API keys");
   assert.ok(!json.includes("Bearer"), "Must not contain auth headers");
 });
