@@ -1,10 +1,12 @@
 /**
- * TGP-17A / TGP-17B / TGP-17C — Diagnostics Endpoint Integration Tests
+ * TGP-17A / TGP-17B / TGP-17C / TGP-18A — Diagnostics Endpoint Integration Tests
  *
  * Tests for:
  * - GET /internal/provider-health
  * - GET /internal/provider-ranking (TGP-17B)
  * - GET /internal/provider-capabilities (TGP-17C)
+ * - GET /internal/provider-selection (TGP-17D)
+ * - GET /internal/provider-quality (TGP-18A)
  */
 
 import assert from "node:assert/strict";
@@ -242,6 +244,91 @@ test("GET /internal/provider-selection returns plan for preferred prefix", async
 test("Selection diagnostics response is sanitized", async () => {
   const plan = selectProvider("kimi:kimi-k3", { requiredCapabilities: [], strict: false, noFallback: false });
   const json = JSON.stringify(plan);
+  assert.ok(!json.includes("sk-"), "Must not contain API keys");
+  assert.ok(!json.includes("Bearer"), "Must not contain auth headers");
+});
+
+// ─── TGP-18A — Quality Diagnostics ────────────────────────────────────────────
+
+test("GET /internal/provider-quality returns 200 with all snapshots", async () => {
+  const { recordQualitySignal, resetQualityRegistry } = await import("../../../src/core/provider-quality-runtime.js");
+  resetQualityRegistry();
+  recordQualitySignal({
+    signalType: "execution_success",
+    providerId: "kimi_api",
+    taskType: "chat",
+    requestId: "diag-1",
+    value: 1.0,
+    weight: 1.0,
+    timestamp: Date.now(),
+  });
+
+  const app = Fastify({ logger: false });
+  registerModelsRoute(app);
+  registerChatCompletionsRoute(app);
+
+  const { listQualitySnapshots, getQualityConfig } = await import("../../../src/core/provider-quality-runtime.js");
+  app.get("/internal/provider-quality", { preHandler: [] }, async (req, reply) => {
+    const snaps = listQualitySnapshots();
+    const config = getQualityConfig();
+    return reply.send({ snapshots: snaps, config });
+  });
+
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const addr = app.server.address() as any;
+
+  const resp = await fetch(`http://127.0.0.1:${addr.port}/internal/provider-quality`);
+  assert.equal(resp.status, 200);
+  const data = await resp.json() as any;
+  assert.ok(Array.isArray(data.snapshots), "Should return snapshots array");
+  assert.ok(data.config, "Should return config");
+  assert.equal(typeof data.config.maxSamplesPerBucket, "number");
+  assert.ok(data.config.maxSamplesPerBucket > 0);
+  await app.close();
+});
+
+test("GET /internal/provider-quality returns single snapshot by provider+taskType", async () => {
+  const { recordQualitySignal, resetQualityRegistry } = await import("../../../src/core/provider-quality-runtime.js");
+  resetQualityRegistry();
+  recordQualitySignal({
+    signalType: "task_completed",
+    providerId: "zyloo_api",
+    taskType: "code",
+    requestId: "diag-2",
+    value: 1.0,
+    weight: 1.0,
+    timestamp: Date.now(),
+  });
+
+  const app = Fastify({ logger: false });
+  const { getQualitySnapshot } = await import("../../../src/core/provider-quality-runtime.js");
+  app.get("/internal/provider-quality", { preHandler: [] }, async (req, reply) => {
+    const providerId = (req.query as any).providerId;
+    const taskType = (req.query as any).taskType;
+    const modelId = (req.query as any).modelId;
+    if (providerId && taskType) {
+      const snap = getQualitySnapshot(providerId, taskType, modelId);
+      return reply.send(snap);
+    }
+    return reply.send({ error: "missing params" });
+  });
+
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const addr = app.server.address() as any;
+
+  const resp = await fetch(`http://127.0.0.1:${addr.port}/internal/provider-quality?providerId=zyloo_api&taskType=code`);
+  assert.equal(resp.status, 200);
+  const data = await resp.json() as any;
+  assert.equal(data.providerId, "zyloo_api");
+  assert.equal(data.taskType, "code");
+  assert.equal(data.totalSamples, 1);
+  await app.close();
+});
+
+test("Quality diagnostics response is sanitized", async () => {
+  const { listQualitySnapshots } = await import("../../../src/core/provider-quality-runtime.js");
+  const snaps = listQualitySnapshots();
+  const json = JSON.stringify(snaps);
   assert.ok(!json.includes("sk-"), "Must not contain API keys");
   assert.ok(!json.includes("Bearer"), "Must not contain auth headers");
 });

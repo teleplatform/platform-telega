@@ -11,6 +11,7 @@ import { callLocalWithFailover, callLocalAutoWithFailover } from "../providers/l
 import { recordSuccess as healthRecordSuccess, recordFailure as healthRecordFailure, isProviderEligible, getSnapshot } from "./provider-health-runtime.js";
 import { planProviderSelection, capabilityRegistry, type Capability } from "./provider-capability-registry.js";
 import { selectProvider, buildProviderCandidates, type ProviderRouteIntent, type ProviderSelectionPlan, type SelectionRejectionReason } from "./provider-selection-orchestrator.js";
+import { evaluateProviderQuality, normalizeTaskType, type ProviderQualityEvaluationInput, type TaskType } from "./provider-quality-runtime.js";
 import { getFallbackMode } from "../providers/local/localFallbackSettings.js";
 import { LOCAL_MODELS, getLocalModel } from "../providers/local/localModels.js";
 import { isLocalSessionEnabled, getLocalSession } from "../providers/local/localSessionState.js";
@@ -314,6 +315,27 @@ async function executeWithOrchestrator(
           rejectionReasonCodes: [...plan.capabilityRejected.map((r: any) => r.reason), ...plan.healthRejected.map((r: any) => r.reason)],
         },
       });
+      
+      // TGP-18A — Quality evaluation (non-fatal side channel)
+      try {
+        const taskType = normalizeTaskType((req as any).meta?.task?.type || "chat");
+        await evaluateProviderQuality({
+          providerId,
+          modelId: resolvedModel || providerId,
+          taskType,
+          requestId: request_id,
+          executionOk: true,
+          retryCount: 0, // TODO: track retries from selection plan
+          fallbackUsed: providerId !== selectedProviderId,
+          taskCompleted: true,
+          completionQuality: "full",
+          latencyMs: Date.now() - t0,
+          timestamp: Date.now(),
+        });
+      } catch {
+        // Non-fatal: quality evaluation must never break the response
+      }
+
       return {
         ...base,
         request_id,
@@ -326,6 +348,26 @@ async function executeWithOrchestrator(
       };
     } catch (e: any) {
       lastError = e;
+      // TGP-18A — Quality evaluation for failed execution (non-fatal)
+      try {
+        const taskType = normalizeTaskType((req as any).meta?.task?.type || "chat");
+        await evaluateProviderQuality({
+          providerId,
+          modelId: resolvedModel || providerId,
+          taskType,
+          requestId: request_id,
+          executionOk: false,
+          failureType: e.failureType,
+          retryCount: 0,
+          fallbackUsed: providerId !== selectedProviderId,
+          taskCompleted: false,
+          completionQuality: "none",
+          latencyMs: Date.now() - t0,
+          timestamp: Date.now(),
+        });
+      } catch {
+        // Non-fatal
+      }
       // If the error has a failureType from ProviderFailurePolicy, classify and decide fallback
       if (e.failureType && e.shouldFallback === false) {
         throw e; // Terminal error per failure policy

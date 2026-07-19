@@ -7,6 +7,7 @@ import { getRankingDiagnostics } from "../core/provider-scoring-engine.js";
 import { capabilityRegistry, ALL_CAPABILITIES } from "../core/provider-capability-registry.js";
 import { selectProvider, parseRouteIntent, type ProviderRouteIntent } from "../core/provider-selection-orchestrator.js";
 import { gatewayAuthMiddleware } from "./auth.js";
+import { listQualitySnapshots, getQualitySnapshot, getQualityConfig, type TaskType } from "../core/provider-quality-runtime.js";
 
 const PORT = Number(process.env.TGPT_GATEWAY_PORT || "8765");
 const HOST = "127.0.0.1";
@@ -80,6 +81,21 @@ async function startGateway() {
     return reply.send(plan);
   });
 
+  app.get("/internal/provider-quality", { preHandler: [gatewayAuthMiddleware] }, async (req, reply) => {
+    const providerId = (req.query as any).providerId as string | undefined;
+    const taskType = (req.query as any).taskType as TaskType | undefined;
+    const modelId = (req.query as any).modelId as string | undefined;
+
+    if (providerId && taskType) {
+      const snap = getQualitySnapshot(providerId, taskType, modelId);
+      return reply.send(snap);
+    }
+
+    const snaps = listQualitySnapshots();
+    const config = getQualityConfig();
+    return reply.send({ snapshots: snaps, config });
+  });
+
   registerModelsRoute(app);
   registerChatCompletionsRoute(app);
 
@@ -96,6 +112,7 @@ async function startGateway() {
     console.log("║  Ranking:    GET  /internal/provider-ranking");
     console.log("║  Capabilities: GET /internal/provider-capabilities");
     console.log("║  Selection:  GET  /internal/provider-selection?model=kimi:kimi-k3");
+    console.log("║  Quality:    GET  /internal/provider-quality?providerId=kimi_api&taskType=chat");
     console.log("╚══════════════════════════════════════════════╝\n");
 
     appendEvidenceRecord({
