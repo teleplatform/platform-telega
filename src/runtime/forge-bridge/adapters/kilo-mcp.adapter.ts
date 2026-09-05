@@ -39,19 +39,30 @@ export class KiloMcpAdapter implements ForgeAdapter {
     const toolName = mapTaskKindToKiloTool(task.kind);
 
     try {
-      const response = await this.callKiloTool(toolName, {
+      // TGR-6.47 — KiloCode Execution Bridge
+      // Mapping BuildTask to KiloCode tool call
+      const response = (await this.callKiloTool(toolName, {
         task_id: task.taskId,
         path: task.path,
         kind: task.kind,
         ...task.input,
-      });
+      })) as any;
+
+      // Extract artifacts if present in Kilo response
+      const kiloArtifacts = response?.artifacts || (response?.output?.artifacts) || [];
+      const artifacts = kiloArtifacts.map((art: any) => ({
+        ...art,
+        source_executor: "kilo_mcp",
+        created_at: art.created_at || new Date().toISOString(),
+      }));
 
       return createForgeResult({
         taskId: task.taskId,
         target: "kilo_mcp",
-        status: "done",
-        summary: `Kilo MCP: ${task.kind} completed`,
-        output: response as Record<string, unknown>,
+        status: response?.status || "done",
+        summary: response?.summary || `Kilo MCP: ${task.kind} completed`,
+        output: response?.output || response,
+        artifacts: artifacts.length > 0 ? artifacts : undefined,
       });
     } catch (e: any) {
       return createForgeResult({

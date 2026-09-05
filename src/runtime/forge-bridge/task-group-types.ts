@@ -1,4 +1,4 @@
-export type TaskGroupStatus = "queued" | "running" | "partial" | "done" | "failed" | "cancelled" | "needs_creator";
+export type TaskGroupStatus = "queued" | "running" | "partial" | "done" | "failed" | "cancelled" | "needs_creator" | "paused";
 
 export type TaskGroupStrategy = "parallel" | "sequential" | "race";
 
@@ -123,6 +123,11 @@ export type GroupEventType =
   | "dag_created"
   | "dag_status_changed"
   | "dag_wave_started"
-  | "dag_wave_completed";
+  | "dag_wave_completed"
+  | "scheduler_run_started"
+  | "scheduler_wave_completed"
+  | "scheduler_run_completed"
+  | "scheduler_run_failed"
+  | "scheduler_run_cancelled";
 
 export type GroupEventPayload = Record<string, unknown>;

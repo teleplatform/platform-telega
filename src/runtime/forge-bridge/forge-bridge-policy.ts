@@ -53,19 +53,21 @@ export function getAllowedForgeTargets(userId: string | number | null): string[]
   if (!role.startsWith("owner_") && !hasCapability(userId, "forge_access")) {
     return [];
   }
-  if (!role.startsWith("owner_") && !hasCapability(userId, "forge_remote_access" as any)) {
-    return ["kilo_mcp"];
+  const targets = ["sigma_forge"]; // Sigma Forge is always allowed if bridge is allowed
+  if (role.startsWith("owner_") || hasCapability(userId, "forge_remote_access" as any)) {
+    targets.push("forge_remote");
   }
-  return ["forge_remote", "kilo_mcp"];
+  targets.push("kilo_mcp");
+  return targets;
 }
 
-export function resolveDefaultForgeTarget(userId: string | number | null): "forge_remote" | "kilo_mcp" {
+export function resolveDefaultForgeTarget(userId: string | number | null): "forge_remote" | "kilo_mcp" | "sigma_forge" {
   const targets = getAllowedForgeTargets(userId);
+  if (targets.includes("sigma_forge")) {
+    return "sigma_forge";
+  }
   if (targets.includes("forge_remote")) {
     return "forge_remote";
-  }
-  if (targets.includes("kilo_mcp")) {
-    return "kilo_mcp";
   }
   return "kilo_mcp";
 }

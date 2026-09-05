@@ -50,7 +50,8 @@ export type ForgeTaskKind =
   | "open_project"
   | "generic"
   | "analyze_repo"
-  | "generate_patch";
+  | "generate_patch"
+  | "execute_kilocode_task";
 
 export interface ForgeTask {
   taskId: string;
@@ -157,6 +158,7 @@ export function mapTaskKindToKiloTool(kind: ForgeTaskKind): string {
     generic: "generic_task",
     analyze_repo: "analyze_repo",
     generate_patch: "generate_patch",
+    execute_kilocode_task: "execute_kilocode_task",
   };
   return mapping[kind] || "generic_task";
 }

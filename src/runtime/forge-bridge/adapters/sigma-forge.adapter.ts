@@ -48,6 +48,7 @@ const SANDBOX_ALLOWED_KINDS: Set<string> = new Set([
   "read_file",
   "generate_patch",
   "verify_runtime",
+  "execute_kilocode_task",
 ]);
 
 function computeChecksum(content: string): string {
@@ -128,10 +129,7 @@ function listFilesRecursive(dir: string, maxDepth: number, currentDepth: number,
 export class SigmaForgeAdapter implements ForgeAdapter {
   private manifest: SigmaForgeCapabilityManifest | null = null;
 
-  async handshake(): Promise<SigmaForgeCapabilityManifest> {
-    if (this.manifest && Date.now() - sigmaForgeRegistry.last_handshake_at < 30000) {
-      return this.manifest;
-    }
+  handshake(): Promise<SigmaForgeCapabilityManifest> {
     const policy = getExecutionPolicy();
     const manifest: SigmaForgeCapabilityManifest = {
       runtime_id: "sigma_forge_local",
@@ -139,14 +137,14 @@ export class SigmaForgeAdapter implements ForgeAdapter {
       version: "0.1.0-sandbox",
       protocol_version: "telecore-build-v1",
       health: "healthy",
-      capabilities: ["analyze_repo", "list_files", "read_file", "generate_patch", "verify_runtime"],
+      capabilities: Array.from(SANDBOX_ALLOWED_KINDS),
       supported_targets: ["local"],
       checked_at: new Date().toISOString(),
       execution_policy: policy,
     };
     this.manifest = manifest;
     sigmaForgeRegistry.setManifest(manifest);
-    return manifest;
+    return Promise.resolve(manifest);
   }
 
   private async executeAnalyzeRepo(task: ForgeTask): Promise<ForgeResult> {
@@ -295,6 +293,32 @@ async execute(task: ForgeTask): Promise<ForgeResult> {
         const patchResult = await this.executeGeneratePatch(task);
         emitStreamEvent(task.taskId, "artifact_generated", { artifact_type: "patch", artifact_count: 1 });
         return patchResult;
+      case "execute_kilocode_task":
+        emitStreamEvent(task.taskId, "execution_progress", { phase: "routing_to_kilocode" });
+        // TGR-6.47 — Routing to KiloCode Bridge
+        const { getKiloMcpAdapter } = await import("./kilo-mcp.adapter.js");
+        const kiloAdapter = getKiloMcpAdapter();
+        const kiloResult = await kiloAdapter.execute(task);
+
+        // Wrap output in a report artifact if not already present
+        if (kiloResult.status === "done") {
+          const artifacts = kiloResult.artifacts || [];
+          const hasReport = artifacts.some(a => a.artifact_type === "report");
+
+          if (!hasReport) {
+            const reportContent = `## KiloCode Bridge Report\n\nTask: ${task.kind}\nStatus: Success\n\n### Output\n\`\`\`json\n${JSON.stringify(kiloResult.output, null, 2)}\n\`\`\``;
+            artifacts.push(createArtifact({
+              kind: "kilocode_report",
+              artifact_type: "report",
+              name: "kilocode_report.md",
+              content: reportContent
+            }));
+            kiloResult.artifacts = artifacts;
+          }
+        }
+
+        emitStreamEvent(task.taskId, "execution_completed", { status: kiloResult.status });
+        return kiloResult;
       case "verify_runtime":
         emitStreamEvent(task.taskId, "execution_progress", { phase: "verifying" });
         const verifyResult = createForgeResult({
