@@ -221,5 +221,9 @@
     "auth:refresh:glm": "PROVIDERS=glm tsx scripts/auth-refresh-all.ts",
     "auth:refresh:kimi": "PROVIDERS=kimi tsx scripts/auth-refresh-all.ts"
   },
-  "type": "module"
+  "type": "module",
+  "imports": {
+    "#i18n/messages": "./src/i18n/messages.ts",
+    "#i18n/keypath-runtime": "./src/i18n/messages.keypath.runtime.ts"
+  }
 }
