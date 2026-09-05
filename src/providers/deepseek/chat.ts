@@ -1,5 +1,6 @@
 import type { ExecutionResult } from "../../core/provider-execution.js";
 import type { ChatMessage } from "../../core/provider-execution.js";
+import type { ChatRequest, ChatResponse } from "../../types/chat.js";
 
 const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL?.replace(/\/$/, "") || "https://api.deepseek.com";
 
@@ -74,8 +75,7 @@ export async function callDeepSeek(
 
     clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      const errorText = await response.text();
+if (!response.ok) {
       const isAuthError = response.status === 401 || response.status === 403;
       const isRateLimit = response.status === 429;
 
@@ -85,7 +85,7 @@ export async function callDeepSeek(
         model: effectiveModel,
         error: {
           type: isAuthError ? "auth" : isRateLimit ? "rate_limit" : "invalid_request",
-          message: `DeepSeek API error ${response.status}: ${errorText}`,
+          message: `DeepSeek API error ${response.status}`,
         },
         fallbackUsed: false,
       };
@@ -122,4 +122,42 @@ export async function callDeepSeek(
       fallbackUsed: false,
     };
   }
+}
+
+export async function deepseekChat(req: ChatRequest): Promise<ChatResponse> {
+  const modelParam = req.model || "deepseek-chat";
+  const messages: ChatMessage[] = [];
+  if (req.system) {
+    messages.push({ role: "system", content: req.system });
+  }
+  messages.push({ role: "user", content: req.message });
+
+  console.log("[provider:deepseek:messages]", {
+    messages_count: messages.length,
+    first_role: messages[0]?.role ?? "(none)",
+    first_content_preview: messages[0]?.content ? messages[0].content.slice(0, 300) : "(none)",
+    last_user_content_preview: messages.find(m => m.role === "user")?.content.slice(0, 200) ?? "(none)",
+  });
+
+  const result = await callDeepSeek(
+    modelParam,
+    messages,
+    req.system,
+    (req as any).task?.type,
+  );
+
+  if (!result.ok) {
+    throw new Error(result.error?.message || "DeepSeek API call failed");
+  }
+
+  console.log("[router:routeChat:deepseek:result]", {
+    model: modelParam,
+    text_len: result.text?.length ?? 0,
+  });
+
+  return {
+    id: req.request_id || `deepseek_${Date.now()}`,
+    model: modelParam,
+    output: result.text ?? "",
+  };
 }

@@ -2,6 +2,16 @@ export type RuntimeRole = "creator" | "user";
 export type ExecutionPath = "bridge" | "api";
 export type UserIntentPreference = "fast" | "quality" | "cheap" | "local_only" | "no_fallback";
 
+/**
+ * Built-in provider identifiers.
+ *
+ * MIGRATION NOTE: This union is legacy. New provider adapters must NOT add
+ * entries here. Instead, use the branded string type and register via
+ * CapabilityRegistry.setProfile() at runtime.
+ *
+ * Target: type ProviderId = string & { readonly __brand: "ProviderId" };
+ * See: FREENIM_GATEWAY_ADAPTER_CANON_V1.md §9
+ */
 export type ProviderId =
   | "openai_web"
   | "chatgpt_web"
@@ -26,6 +36,21 @@ export type ProviderId =
   | "minimax"
   | "kimi_free_local"
   | "local";
+
+/**
+ * Create a branded provider ID for external adapters.
+ * External adapters use this instead of modifying the hardcoded union.
+ */
+export type ExternalProviderId = string & { readonly __brand: "ExternalProviderId" };
+
+export function externalProviderId(id: string): ExternalProviderId {
+  return id as ExternalProviderId;
+}
+
+/** Well-known external provider ID constants. */
+export const EXTERNAL_PROVIDER = {
+  NVIDIA_NIM: "nvidia_nim" as ExternalProviderId,
+} as const;
 
 export function isBridgeProvider(id: ProviderId): boolean {
   return id.endsWith("_web");

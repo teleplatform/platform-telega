@@ -6,6 +6,7 @@ export interface WebExecuteInput {
   prompt: string;
   timeoutMs?: number;
   systemPrompt?: string;
+  requestId?: string;
 }
 
 export interface WebExecuteResult {
@@ -59,7 +60,7 @@ export async function executeWebProvider(
     
     const result = await bridge.generate(input.prompt, {
       provider: input.provider as any,
-      traceId: `web-${Date.now()}`,
+      traceId: input.requestId || `web-${Date.now()}`,
       creatorMode: true,
     });
     
@@ -92,7 +93,7 @@ export async function executeWebProviderWithFallback(
   input: Omit<WebExecuteInput, 'provider'> & {
     preferredProvider?: WebProvider;
     providerChain?: WebProvider[];
-  }
+  } & { requestId?: string }
 ): Promise<WebFallbackResult> {
   const chain = input.providerChain?.length
     ? input.providerChain
@@ -108,6 +109,8 @@ export async function executeWebProviderWithFallback(
         provider,
         prompt: input.prompt,
         timeoutMs: input.timeoutMs,
+        systemPrompt: input.systemPrompt,
+        requestId: input.requestId,
       });
 
       if (result.ok) {

@@ -42,17 +42,29 @@ export async function openaiChat(req: ChatRequest): Promise<ChatResponse> {
     { role: "user", content: String(userContent) },
   ];
 
-  console.log("[OPENAI_CHAT] request:", { model, systemLen: systemContent.length, userLen: userContent.length });
+  console.log("[provider:openai:messages]", {
+    messages_count: messages.length,
+    first_role: messages[0]?.role ?? "(none)",
+    first_content_preview: messages[0]?.content ? messages[0].content.slice(0, 300) : "(none)",
+    last_user_content_preview: messages.find(m => m.role === "user")?.content.slice(0, 200) ?? "(none)",
+  });
 
   try {
     console.log("[openai-chat] process.env.OPENAI_API_KEY first 20 chars:", (process.env.OPENAI_API_KEY || "").slice(0, 20));
-    console.log("[openai-chat] Calling API with:", { model, messageLen: userContent.length, apiKeyLen: apiKey.length });
-    const r = await getClient().chat.completions.create({
-      model,
-      messages,
-    });
+    console.log("[openai-chat] Calling API with:", { model, messageLen: userContent.length, apiKeyLen: apiKey.length, hasTools: !!req.tools, toolChoice: req.tool_choice });
 
-    const out = r.choices?.[0]?.message?.content ?? "";
+    const apiParams: Record<string, unknown> = { model, messages };
+    if (req.tools && Array.isArray(req.tools) && req.tools.length > 0) {
+      apiParams.tools = req.tools;
+      apiParams.tool_choice = req.tool_choice ?? "auto";
+    }
+
+    const r = await getClient().chat.completions.create(apiParams as any);
+
+    const message = r.choices?.[0]?.message;
+    const out = message?.content ?? "";
+    const toolCalls = message?.tool_calls;
+
     const usage = r.usage
       ? {
           tokens_in: r.usage.prompt_tokens,
@@ -60,7 +72,7 @@ export async function openaiChat(req: ChatRequest): Promise<ChatResponse> {
         }
       : undefined;
 
-    return {
+    const response: ChatResponse = {
       id: r.id ?? "openai",
       model: `openai:${model}`,
       output: out,
@@ -73,6 +85,12 @@ export async function openaiChat(req: ChatRequest): Promise<ChatResponse> {
           }
         : undefined,
     };
+
+    if (toolCalls && toolCalls.length > 0) {
+      (response as any).tool_calls = toolCalls;
+    }
+
+    return response;
   } catch (e: any) {
     console.error("[OPENAI_CHAT] error:", e?.message);
     throw e;

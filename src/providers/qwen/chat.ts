@@ -1,5 +1,6 @@
 import type { ExecutionResult } from "../../core/provider-execution.js";
 import type { ChatMessage } from "../../core/provider-execution.js";
+import type { ChatRequest, ChatResponse } from "../../types/chat.js";
 
 const QWEN_API_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 
@@ -47,7 +48,6 @@ export async function callQwen(
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
       const isAuthError = response.status === 401 || response.status === 403;
       const isRateLimit = response.status === 429;
       
@@ -57,7 +57,7 @@ export async function callQwen(
         model,
         error: {
           type: isAuthError ? "auth" : isRateLimit ? "rate_limit" : "invalid_request",
-          message: `Qwen API error ${response.status}: ${errorText}`,
+          message: `Qwen API error ${response.status}`,
         },
         fallbackUsed: false,
       };
@@ -90,4 +90,36 @@ export async function callQwen(
       fallbackUsed: false,
     };
   }
+}
+
+export async function qwenChat(req: ChatRequest): Promise<ChatResponse> {
+  const modelParam = req.model || "qwen-max";
+  const messages: ChatMessage[] = [];
+  if (req.system) {
+    messages.push({ role: "system", content: req.system });
+  }
+  messages.push({ role: "user", content: req.message });
+
+  console.log("[provider:qwen:messages]", {
+    messages_count: messages.length,
+    first_role: messages[0]?.role ?? "(none)",
+    last_user_content_preview: messages.find(m => m.role === "user")?.content.slice(0, 200) ?? "(none)",
+  });
+
+  const result = await callQwen(modelParam, messages, req.system);
+
+  if (!result.ok) {
+    const errType = result.error?.type || "unknown";
+    const errMsg = result.error?.message || "Qwen API call failed";
+    console.error("[provider:qwen:failed]", { model: modelParam, error_type: errType, error: errMsg });
+    throw new Error(`qwen_${errType === "auth" ? "auth_failed" : errType === "rate_limit" ? "rate_limited" : "model_unavailable"}: ${errMsg}`);
+  }
+
+  console.log("[provider:qwen:success]", { model: modelParam, text_len: result.text?.length ?? 0 });
+
+  return {
+    id: req.request_id || `qwen_${Date.now()}`,
+    model: modelParam,
+    output: result.text ?? "",
+  };
 }

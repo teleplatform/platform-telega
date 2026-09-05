@@ -182,6 +182,72 @@ export const DEFAULT_CAPABILITY_MATRIX: Record<ProviderId, ProviderCapabilityPro
     capabilities: { reasoning: "basic", json: "basic", code: "basic" },
     note: "Local Ollama/LM Studio surface",
   },
+  glm_api: {
+    providerId: "glm_api",
+    capabilities: {
+      reasoning: "standard",
+      code: "standard",
+      json: "standard",
+      function_calling: "standard",
+      streaming: "standard",
+    },
+    note: "GLM API provider",
+  },
+  chatgpt_web: {
+    providerId: "chatgpt_web",
+    capabilities: { reasoning: "advanced", json: "basic", streaming: "basic" },
+    note: "Browser bridge fallback — limited surface",
+  },
+  grok_web: {
+    providerId: "grok_web",
+    capabilities: { reasoning: "standard", json: "basic" },
+    note: "Browser bridge fallback",
+  },
+  kimi_web: {
+    providerId: "kimi_web",
+    capabilities: { reasoning: "standard", long_context: "basic" },
+    note: "Browser bridge fallback",
+  },
+  perplexity_web: {
+    providerId: "perplexity_web",
+    capabilities: { reasoning: "standard", json: "basic" },
+    note: "Browser bridge fallback",
+  },
+  claude_web: {
+    providerId: "claude_web",
+    capabilities: { reasoning: "advanced", json: "basic", vision: "standard" },
+    note: "Browser bridge fallback",
+  },
+  gemini_web: {
+    providerId: "gemini_web",
+    capabilities: { reasoning: "advanced", vision: "standard", json: "basic" },
+    note: "Browser bridge fallback",
+  },
+  poe_web: {
+    providerId: "poe_web",
+    capabilities: { reasoning: "standard", json: "basic" },
+    note: "Browser bridge fallback",
+  },
+  mimo_api: {
+    providerId: "mimo_api",
+    capabilities: {
+      reasoning: "standard",
+      vision: "standard",
+      json: "standard",
+      function_calling: "standard",
+    },
+    note: "Mimo API provider",
+  },
+  mimo_browser_discovery: {
+    providerId: "mimo_browser_discovery",
+    capabilities: { reasoning: "basic", json: "basic" },
+    note: "Mimo browser discovery surface",
+  },
+  minimax: {
+    providerId: "minimax",
+    capabilities: { reasoning: "standard", audio: "standard", json: "basic" },
+    note: "MiniMax provider",
+  },
 };
 
 /**
