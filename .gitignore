@@ -16,6 +16,11 @@
 *.lock
 .telegpt/
 .telegpt_ledger/
+.tgpt/
+.chrome-*/
+.chrome-for-testing-*/
+nohup.out
+*.backup
 
 # Logs
 *.log
@@ -65,3 +70,13 @@ evidence/
 
 # Misc
 tele-gpt@*.log
+
+# Local secrets / auth (never commit)
+auth.json
+
+# Local runtime/log artifacts (data/ now carries some tracked files, so ignore
+# only the state subtypes, not the whole directory)
+data/telegram/kilo-execution.jsonl
+data/telegram/kilo-patch-approvals.jsonl
+data/telegram/response-collapse-store.jsonl
+data/vector-store/
