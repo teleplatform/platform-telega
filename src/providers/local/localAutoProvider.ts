@@ -78,11 +78,11 @@ export async function callLocalAuto(
     );
   }
 
-  const originalModel = selectedModel;
+  const initialSelected = selectedModel as string; // guarded non-null above
   let success = false;
 
   for (let attempt = 0; attempt < fallbackChain.length; attempt++) {
-    const candidate = attempt === 0 ? selectedModel : fallbackChain[attempt];
+    const candidate: string = attempt === 0 ? initialSelected : fallbackChain[attempt];
 
     if (attempt > 0) {
       usedFallback = true;
@@ -118,7 +118,7 @@ export async function callLocalAuto(
         text: result.text,
         raw: result.raw,
         intent,
-        selectedModel,
+        selectedModel: candidate,
         selectedModelName,
         usedFallback,
         fallbackChain,

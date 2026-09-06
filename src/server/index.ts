@@ -17,7 +17,8 @@ import { registerForgeRoute } from "./routes/forge.route.js";
 import { registerPatchRoute } from "./routes/patch.route.js";
 import { registerForgeActionRoute } from "./routes/forge-action.route.js";
 import { registerMissionControlRoute } from "./routes/mission-control.route.js";
-import { startTelegramBotIfEnabled } from "../telegram/bot.js";
+// Telegram bot lifecycle is started from its own dedicated recovery runner
+// (telegram wave); the canonical HTTP Runtime below is telegram-free.
 import { initializeFacts } from "../runtime/identity/index.js";
 import { initializeIdentityMemory, recordRuntimeEvent } from "../runtime/memory/index.js";
 import { loadGoals, recoverGoals, getAbandonedAlert } from "../runtime/goals/index.js";
@@ -101,10 +102,6 @@ if (taskRecovery.recovered > 0 || taskRecovery.failed > 0) {
 } else {
   app.log.info("[execution] no tasks to recover");
 }
-
-void startTelegramBotIfEnabled().catch((err) => {
-  app.log.error({ err }, "[telegram] bot start failed");
-});
 
 await registerTranslateRoute(app);
 await registerModelsRoute(app);
