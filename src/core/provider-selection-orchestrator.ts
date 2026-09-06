@@ -351,9 +351,6 @@ export function buildProviderCandidates(
 
 // ─── Orchestration (TGP-17D.2 / 17D.3) ────────────────────────────────────────
 
-import { appendEvidenceRecord } from "../runtime/evidence/execution-evidence-store.js";
-import { hashTraceId } from "../runtime/evidence/execution-hash.js";
-
 /**
  * Emit selection.planned evidence (non-blocking, fire-and-forget).
  */
