@@ -2,6 +2,7 @@ export type ActionRouteKind =
   | "direct_answer"
   | "sigma_forge"
   | "provider_bridge"
+  | "forge_bridge"
   | "browser_agent"
   | "voice_runtime"
   | "mission_control"
