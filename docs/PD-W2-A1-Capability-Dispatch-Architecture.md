@@ -266,3 +266,33 @@ Availability + Capability + Dispatch + Provider authorities.
 
 **PD-W2/A2** — implement the Availability model + compatibility shim (additive, baseline-green),
 leaving CapabilityRegistry vNext for A3 and Dispatch vNext for A4.
+
+---
+
+## 14. A7 Acceptance Lock Record (executed)
+
+Repair program executed end-to-end on `integration/runtime-recovery-index`.
+
+| Gate | Commit | Result |
+|---|---|---|
+| A2 Availability + compat shim | `88887b8` | 16/16 availability; shim kept legacy exports green |
+| A3 CapabilityRegistry vNext | `720269a` | 21/21 capability-vnext |
+| A4 Dispatch vNext planning | `5a9ea7d` | 17/17 dispatch-planner |
+| A5 Safe execution + migration | `c5ea51a` `f49d82e` | 16/16 safe-execution + LIVE E2E PASS (real outcome, real evidence chain) |
+| A6 Legacy retirement | `5172cc6` | legacy `runtime/capability` + tsconfig exclude deleted; 0 importers remain |
+
+**Final verification (A7):**
+- Full server tsc (0 errors), scoped strict tsc over dispatch/capability domain clean.
+- Isolated boot: `/health` 200, `/ready` 200; legacy dispatch HTTP surface 404; no legacy residue in boot log.
+- Program-arc suites: availability 9/9, capability-vnext 21/21, dispatch-planner 17/17,
+  safe-execution 16/16 (repeated runs, pid-unique traces), live E2E PASS.
+- Authz negative matrix (no capability→permission, unverified/self-asserted denied):
+  actor 25/25, guard 13/13, modes 20/20, permissionResolver 12/12, permissions 17/17,
+  profiles 24/24, providerTool 26/26.
+- Gateway boot: gateway 20/20, gatewayStartup 5/5, providerHealthDiagnostics 14/14.
+- Guarded authorities (availability, capability-vnext, provider, authz, auth, router, evidence,
+  health, ops semantics) unmodified beyond sanctioned consumer re-pointing.
+
+**Lock tag:** `runtime-recovery-baseline-v2` at `5172cc6`.
+**Explicit non-goals honored:** no HTTP/Adapter/UI contract; no Telegram/Kilo migration; no archive
+recovery; no provider scoring inside Dispatch; no capability→permission shortcut.
