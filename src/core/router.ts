@@ -297,7 +297,7 @@ async function executeWithOrchestrator(
   for (const providerId of attemptOrder) {
     try {
       const base = await executeProvider(providerId, resolvedModel, req, request_id, t0);
-      // Success — record evidence with selection plan metadata
+      // Success — record evidence with selection result
       collectEvidence({
         provider: providerId as any,
         model: resolvedModel || providerId,
@@ -305,15 +305,6 @@ async function executeWithOrchestrator(
         latencyMs: Date.now() - t0,
         success: true,
         fallbackUsed: providerId !== selectedProviderId,
-        selectionPlan: {
-          mode: plan.intent.mode,
-          requestedProviderId: plan.intent.requestedProviderId,
-          requiredCapabilities: plan.requiredCapabilities,
-          consideredProviderIds: plan.consideredProviders,
-          selectedProviderId: plan.selectedProviderId,
-          fallbackOrder: plan.fallbackOrder,
-          rejectionReasonCodes: [...plan.capabilityRejected.map((r: any) => r.reason), ...plan.healthRejected.map((r: any) => r.reason)],
-        },
       });
       
       // TGP-18A — Quality evaluation (non-fatal side channel)
@@ -491,10 +482,6 @@ async function executeProvider(
         });
         recordProviderFailure("zyloo_api", model, decision);
         healthRecordFailure("zyloo_api", decision, zylooLatencyMs, Date.now());
-        try {
-          const { recordScoringOutcome } = await import("./provider-scoring-engine.js");
-          recordScoringOutcome("zyloo_api", false, zylooLatencyMs, decision);
-        } catch { /* non-fatal */ }
         const err = new Error(decision.safeMessage);
         (err as any).code = decision.type === "quota_exhausted" ? "QUOTA_EXHAUSTED" : "PROVIDER_UNAVAILABLE";
         (err as any).statusCode = decision.type === "auth" ? 401 : decision.type === "rate_limit" ? 429 : decision.type === "quota_exhausted" ? 402 : 502;
@@ -506,10 +493,6 @@ async function executeProvider(
       const choice = data?.choices?.[0];
       const text = choice?.message?.content || "";
       healthRecordSuccess("zyloo_api", zylooLatencyMs, Date.now());
-      try {
-        const { recordScoringOutcome } = await import("./provider-scoring-engine.js");
-        recordScoringOutcome("zyloo_api", true, zylooLatencyMs, null);
-      } catch { /* non-fatal */ }
       return { id: `zyloo-${Date.now()}`, model, output: text, meta: { provider: "zyloo_api" as const, model } } as ChatResponse;
     }
     case "local": {
@@ -643,7 +626,6 @@ export async function routeChat(req: ChatRequest): Promise<ChatResponse> {
 
     const decision = await autoRoute(req.message || "", {
       selectedProvider: (activeProviderId as any) || (plan.selected as any),
-      candidateProviders: capableCandidates as any,
     });
     console.log("[auto_router:v2] selected", {
       provider: decision.selectedProvider,
