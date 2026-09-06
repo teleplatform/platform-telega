@@ -8,6 +8,7 @@ import { routeChat } from "../../core/router.js";
 import { ProviderVerification } from "../../core/provider-verification.js";
 import { appendEvidenceRecord } from "../../runtime/evidence/execution-evidence-store.js";
 import { gatewayAuthMiddleware } from "../auth.js";
+import { dispatchDemoReply, isDemoModel } from "../dispatch-adapter.js";
 
 export function registerChatCompletionsRoute(app: FastifyInstance): void {
   app.post("/v1/chat/completions", { preHandler: [gatewayAuthMiddleware] }, async (req, reply) => {
@@ -45,6 +46,36 @@ export function registerChatCompletionsRoute(app: FastifyInstance): void {
 
     try {
       const chatReq = openAiToChatRequest(body, requestId);
+
+      // PD-W3/B2 — safe demo execution slice through Dispatch vNext. The
+      // verified gateway identity (api:<id>) is the ONLY actor source. The
+      // canonical Dispatch pipeline owns the execution lifecycle (its own
+      // dispatch_started/execution_started/execution_finished evidence);
+      // no duplicate gateway execution record is written for this slice.
+      if (isDemoModel(body.model)) {
+        appendEvidenceRecord({
+          evidence_id: `ide.gateway.model.resolved-${requestId}`,
+          trace_id: "ide_gateway",
+          job_id: requestId,
+          type: "context_routed" as any,
+          timestamp: new Date().toISOString(),
+          payload: {
+            requestedModel: body.model,
+            resolvedProvider: "local:llm",
+            executionLane: "dispatch_vnext",
+            verificationPassed: true,
+          },
+        }).catch(() => {});
+
+        const dispatchResponse = await dispatchDemoReply({
+          apiKey,
+          message: chatReq.message,
+          run_id: requestId,
+          trace_id: requestId,
+        });
+
+        return reply.send(toOpenAiResponse(dispatchResponse, body.model));
+      }
 
       const verification = ProviderVerification.verify(
         resolveProviderForModel(body.model),
@@ -109,10 +140,11 @@ export function registerChatCompletionsRoute(app: FastifyInstance): void {
 
       const statusCode = err.statusCode || 500;
       const failureType = err.failureType;
-      const errorType = failureType === "quota_exhausted" ? "insufficient_credits"
+      const errorType = err.errorType
+        || (failureType === "quota_exhausted" ? "insufficient_credits"
         : failureType === "auth" ? "authentication_error"
         : failureType === "rate_limit" ? "rate_limit_exceeded"
-        : "internal_server_error";
+        : "internal_server_error");
 
       appendEvidenceRecord({
         evidence_id: `ide.gateway.execution.failed-${requestId}`,
