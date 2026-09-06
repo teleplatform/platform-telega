@@ -1,10 +1,8 @@
-// PD-W2/A2 — Runtime Availability model + legacy capability compatibility.
+// PD-W2/A2 — Runtime Availability model.
 // Run with: npx tsx tests/unit/availability/availability.test.ts
 //
 // Asserts:
 //  A. Availability registry/defaults are the single truth (baseline semantics).
-//  B. The legacy runtime/capability API is an exact compat shim delegating to
-//     Availability (same profiles, same online filtering, same RuntimeTarget).
 
 import assert from "node:assert/strict";
 import { DEFAULT_TARGETS } from "../../../src/runtime/availability/availability-defaults.js";
@@ -16,12 +14,6 @@ import {
   getOnlineProfiles,
 } from "../../../src/runtime/availability/availability-registry.js";
 import type { RuntimeTarget } from "../../../src/runtime/availability/availability.types.js";
-import {
-  listCapabilityProfiles as legacyList,
-  getOnlineProfiles as legacyOnline,
-} from "../../../src/runtime/capability/capability-registry.js";
-import type { RuntimeTarget as LegacyRuntimeTarget } from "../../../src/runtime/capability/capability.types.js";
-import * as legacyBarrel from "../../../src/runtime/capability/index.js";
 
 let passed = 0;
 let failed = 0;
@@ -107,51 +99,6 @@ test("RuntimeTarget accepts literals and arbitrary targets", () => {
   const b: RuntimeTarget = "some_custom_target";
   assert.equal(a, "kilo_mcp");
   assert.equal(b, "some_custom_target");
-});
-
-console.log("\nB. Legacy capability compatibility shim:");
-
-test("listCapabilityProfiles identical to baseline snapshot", () => {
-  assert.deepEqual(legacyList(), BASELINE_LIST);
-});
-
-test("getOnlineProfiles keeps baseline online-filtering semantics", () => {
-  assert.deepEqual(legacyOnline(), BASELINE_ONLINE);
-});
-
-test("legacy shim delegates to Availability (single authority)", () => {
-  assert.deepEqual(legacyList(), listTargetProfiles());
-  assert.deepEqual(legacyOnline(), getOnlineProfiles());
-});
-
-test("legacy shim returns fresh copies (no duplicate store)", () => {
-  const copy = legacyList();
-  copy.splice(0, copy.length);
-  assert.deepEqual(legacyList(), BASELINE_LIST);
-});
-
-test("legacy CapabilityProfile stays structurally compatible", () => {
-  const profiles = legacyList();
-  for (const p of profiles) {
-    assert.ok(typeof p.target === "string");
-    assert.ok(["online", "degraded", "offline"].includes(p.status));
-    assert.ok(typeof p.local === "boolean");
-    assert.ok(Array.isArray(p.capabilities));
-  }
-});
-
-test("legacy RuntimeTarget type is preserved", () => {
-  const a: LegacyRuntimeTarget = "forge_http";
-  const b: LegacyRuntimeTarget = "telegram";
-  const c: LegacyRuntimeTarget = "custom_target";
-  assert.equal(a, "forge_http");
-  assert.equal(b, "telegram");
-  assert.equal(c, "custom_target");
-});
-
-test("legacy barrel index still exports the compatibility surface", () => {
-  assert.equal(typeof legacyBarrel.getOnlineProfiles, "function");
-  assert.equal(typeof legacyBarrel.listCapabilityProfiles, "function");
 });
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

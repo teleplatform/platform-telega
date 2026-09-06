@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
-import { getOnlineProfiles } from "../capability/capability-registry.js";
+import { getOnlineProfiles } from "../availability/availability-registry.js";
 import { getEvidenceCount } from "../evidence/execution-evidence-store.js";
 import { readAllRequestsForSweeper } from "../evidence/replay-approval-queue.js";
 import { readAllExecutionRequests, listPendingExecutionApprovals } from "../policy/execution-approval-queue.js";

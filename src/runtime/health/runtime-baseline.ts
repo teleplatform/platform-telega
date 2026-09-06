@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { getOnlineProfiles } from "../capability/capability-registry.js";
+import { getOnlineProfiles } from "../availability/availability-registry.js";
 import { getEvidenceCount, readEvidenceRecords } from "../evidence/execution-evidence-store.js";
 import { readAllRequestsForSweeper } from "../evidence/replay-approval-queue.js";
 import { loadReplayPolicy, getReplayPolicyHash } from "../evidence/replay-policy-loader.js";

@@ -75,7 +75,8 @@ async function runTests() {
 
 function nextRun(): { run_id: string; trace_id: string } {
   counter++;
-  return { run_id: `run-${counter}`, trace_id: `trace-${counter}` };
+  const tag = `${process.pid}-${counter}`;
+  return { run_id: `run-${tag}`, trace_id: `trace-${tag}` };
 }
 
 function fixedIntent(): IntentResult {

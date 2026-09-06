@@ -57,7 +57,6 @@
     "src/runtime/knowledge/**/*.ts",
     "src/runtime/economy/**/*.ts",
     "src/runtime/audit/**/*.ts",
-    "src/runtime/capability/**/*.ts",
     "src/runtime/providers/**/*.ts",
     "src/runtime/regulation/**/*.ts",
     "src/runtime/self/**/*.ts",

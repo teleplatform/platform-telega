@@ -1,4 +1,4 @@
-import { getOnlineProfiles } from "../capability/capability-registry.js";
+import { getOnlineProfiles } from "../availability/availability-registry.js";
 import { getEvidenceCount } from "../evidence/execution-evidence-store.js";
 import { listPendingApprovals, readAllRequestsForSweeper } from "../evidence/replay-approval-queue.js";
 import { getReplayApprovalSweeperStatus } from "../evidence/replay-approval-sweeper.js";
