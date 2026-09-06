@@ -1,0 +1,43 @@
+=== PD-W3/B2 isolated capillary run ===
+verified apiKey.id : key_1788692447540_356490e0
+provisioned operator: opencode, allowedModels=["local-demo"]
+
+--- Run 1: authenticated demo request (model=local-demo) ---
+HTTP 200
+{
+  "id": "local-demo",
+  "object": "chat.completion",
+  "created": 1788692447,
+  "model": "local-demo",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Tele•GPT говорит: Capstone authenticated dispatch"
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}
+
+--- evidence chain (trace_id=req_10b7a6cc-ecf) ---
+execution_finished     lifecycle=completed {"run_id":"req_10b7a6cc-ecf","status":"completed"}
+execution_started      lifecycle=n/a {"run_id":"req_10b7a6cc-ecf"}
+dispatch_started       lifecycle=n/a {"run_id":"req_10b7a6cc-ecf","route":"provider_bridge","target":"kilo_mcp","provider":"local:llm"}
+provider_decision_created lifecycle=n/a {"run_id":"req_10b7a6cc-ecf","provider_id":"local:llm","score":106,"fallbacks":[],"reason":"Local LLM selected (score: 106) for reasoning task"}
+provider_candidates_scored lifecycle=n/a {"run_id":"req_10b7a6cc-ecf","candidates":[{"provider_id":"local:llm","score":106}],"blocked":[]}
+provider_policy_checked lifecycle=n/a {"provider_id":"local:llm","allowed":true,"risk_level":"low","runtime_mode":"public"}
+intent_classified      lifecycle=n/a {"input_id":"req_10b7a6cc-ecf","intent":"answer","confidence":0.5,"risk_level":"low","goal":"Capstone authenticated dispatch","route":"direct_answer"}
+
+--- duplicate-lifecycle audit (ide.gateway.execution.*) ---
+ide.gateway.execution.* for this request: 0 (must be 0)
+
+--- Run 2: missing credential (must be 401, no dispatch) ---
+HTTP 401
+dispatch_started count unchanged after unauthenticated attempt: 1
+
+--- Run 3: non-demo model stays on untouched legacy routeChat seam ---
+HTTP 200
+output.preview: "Привет! Я здесь. Сейчас я работаю через локальный режим. Нап"
+dispatch_started count after non-demo request: 1 (legacy seam untouched)

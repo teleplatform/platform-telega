@@ -1,0 +1,26 @@
+=== tsc (server) ===
+0 errors
+
+=== B2 gatewayDispatch ===
+7 passed, 0 failed
+
+
+=== gateway ===
+20 passed, 0 failed
+
+
+=== gatewayStartup ===
+5 passed, 0 failed
+
+
+=== providerHealthDiagnostics ===
+14 passed, 0 failed
+
+
+=== dispatch safe-execution ===
+16 passed, 0 failed
+
+
+=== dispatch vNext E2E ===
+
+[dispatch-vnext-e2e] E2E PASS
