@@ -1,24 +1,15 @@
+import {
+  getOnlineProfiles as getOnlineAvailabilityProfiles,
+  listTargetProfiles,
+} from "../availability/availability-registry.js";
 import type { CapabilityProfile } from "./capability.types.js";
 
-const DEFAULT_PROFILES: CapabilityProfile[] = [
-  {
-    target: "kilo_mcp",
-    status: "online",
-    local: true,
-    capabilities: ["build_task", "replay", "local_execution"],
-  },
-  {
-    target: "forge_http",
-    status: "degraded",
-    local: false,
-    capabilities: ["remote_execution"],
-  },
-];
-
+/** @deprecated Compatibility shim — runtime availability now lives in runtime/availability. Kept until A5/A6 migration. */
 export function getOnlineProfiles(): CapabilityProfile[] {
-  return DEFAULT_PROFILES.filter((profile) => profile.status === "online");
+  return getOnlineAvailabilityProfiles();
 }
 
+/** @deprecated Compatibility shim — runtime availability now lives in runtime/availability. Kept until A5/A6 migration. */
 export function listCapabilityProfiles(): CapabilityProfile[] {
-  return [...DEFAULT_PROFILES];
+  return listTargetProfiles();
 }

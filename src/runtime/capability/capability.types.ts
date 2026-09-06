@@ -1,14 +1,7 @@
-export type RuntimeTarget =
-  | "kilo_mcp"
-  | "forge_http"
-  | "local"
-  | "openai"
-  | "telegram"
-  | string;
+import type {
+  RuntimeTarget as CanonicalRuntimeTarget,
+  TargetProfile,
+} from "../availability/availability.types.js";
 
-export interface CapabilityProfile {
-  target: RuntimeTarget;
-  status: "online" | "degraded" | "offline";
-  local?: boolean;
-  capabilities?: string[];
-}
+export type RuntimeTarget = CanonicalRuntimeTarget;
+export type CapabilityProfile = TargetProfile;
