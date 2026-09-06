@@ -16,7 +16,8 @@ export type ProviderCapability =
   | "creative"
   | "web_bridge"
   | "api"
-  | "experimental";
+  | "experimental"
+  | "technical_debug";
 
 export type ProviderId =
   | "openai_api" | "openai_web"
