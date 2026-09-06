@@ -1,0 +1,10 @@
+=== full server/index.ts boot (closes B2 NOT-EXERCISED for B3) ===
+$ TELEGPT_PORT=8791 npx tsx src/server/index.ts &
+$ curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8791/health
+200
+$ curl -s http://127.0.0.1:8791/health
+{"ok":true,"service":"tele-gpt","env":"dev","uptime_s":8,"ts":"2026-09-06T15:17:06.436Z"}
+$ curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8791/ready
+200
+$ curl -s http://127.0.0.1:8791/ready
+{"ready":true,"service":"tele-gpt","env":"dev","ts":"2026-09-06T15:17:06.486Z"}

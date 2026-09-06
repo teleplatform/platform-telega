@@ -1,0 +1,13 @@
+=== tsc (server) ===
+0 errors
+
+=== B3-A forgeExecution ===
+7 passed, 0 failed
+
+=== regression (must stay green) ===
+gateway 20 passed / gatewayStartup 5 / providerHealthDiagnostics 14 / gatewayDispatch 7
+safe-execution 16 passed / dispatch-vnext-e2e PASS
+
+=== full server/index.ts boot (closes B2 NOT-EXERCISED for B3) ===
+/health 200 {ok:true, service:tele-gpt, env:dev}
+/ready  200 {ready:true, service:tele-gpt, env:dev}

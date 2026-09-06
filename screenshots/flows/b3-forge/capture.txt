@@ -1,0 +1,39 @@
+=== PD-W3/B3-A isolated capstone: real Forge execution through Dispatch ===
+subject            : maker:267246987 (owner_creator_primary, forge_access)
+run_id             : capstone_forge_1788695480241
+route              : kilo_mcp
+execution_state    : completed
+mock kilo_mcp hits : 1 (must be exactly 1 — no parallel legacy executor)
+
+--- dispatch output preserves full domain ForgeResult (domain evidence) ---
+{
+  "taskId": "forge_1788695480245_z2ybct",
+  "target": "kilo_mcp",
+  "status": "done",
+  "summary": "mock kilo_mcp: execute_kilocode_task completed",
+  "output": {
+    "ok": true,
+    "message": "capstone forge build executed by real kilo_mcp transport"
+  },
+  "artifacts": [
+    {
+      "artifact_id": "art_capstone_1",
+      "kind": "report",
+      "artifact_type": "report",
+      "name": "capstone-report",
+      "source_executor": "kilo_mcp",
+      "created_at": "2026-09-06T11:51:20.281Z"
+    }
+  ],
+  "traceId": "trace_1788695480281"
+}
+
+--- canonical dispatch lifecycle (trace_id=capstone_forge_1788695480241) ---
+intent_classified            lifecycle=n/a {"input_id":"capstone_forge_1788695480241","intent":"build_project","confidence":0.76,"risk_level":"medium","goal":"The capstone service","route":"sigma_forge"}
+dispatch_started             lifecycle=n/a {"run_id":"capstone_forge_1788695480241","route":"forge_bridge","target":"kilo_mcp","provider":null}
+execution_started            lifecycle=n/a {"run_id":"capstone_forge_1788695480241"}
+execution_finished           lifecycle=completed {"run_id":"capstone_forge_1788695480241","status":"completed"}
+
+--- duplicate-lifecycle audit ---
+dispatch_started=1 execution_started=1 execution_finished=1 (each must be 1)
+sigma_forge routing : build_project → sigma_forge (untouched, deferred/fail-closed; no remap)
