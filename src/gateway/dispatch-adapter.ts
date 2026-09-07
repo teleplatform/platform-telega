@@ -1,8 +1,12 @@
 // PD-W3/B2 — Authenticated gateway → Dispatch vNext adapter.
+// PD-W3/B4-A — identity construction now flows through the canonical
+// trusted-context boundary (src/core/trusted-context).
 //
 // Trust boundary: the ONLY identity this module accepts is the server-verified
 // API key record produced by gatewayAuthMiddleware (validateApiKey). The
-// canonical actor is derived from it (api:<id>), never from request payload.
+// canonical actor is derived from it (api:<id>) via the canonical
+// TrustedExecutionContext factory, never from request payload or meta.
+// Raw tokens never enter the context.
 //
 // The safe demo execution slice (model "local-demo") is routed through the
 // canonical Dispatch pipeline (Plan → Authorize → Availability → Execute →
@@ -12,11 +16,16 @@
 
 import type { TeleGptApiKey } from "../api-keys/store.js";
 import { resolveActor } from "../core/authz/actor.js";
-import type { Actor } from "../types/authz.js";
+import {
+  createTrustedExecutionContext,
+  type TrustedExecutionContext,
+} from "../core/trusted-context/index.js";
 import type { ChatResponse } from "../types/chat.js";
 import { runDemoReply } from "../runtime/dispatch-vnext/runtime.js";
 import type { DispatchAuthzContext } from "../runtime/dispatch-vnext/dispatch.types.js";
 import type { DispatchResult } from "../runtime/dispatch-vnext/dispatch-execution.types.js";
+
+export type { TrustedExecutionContext } from "../core/trusted-context/index.js";
 
 export const DEMO_MODEL = "local-demo";
 
@@ -26,20 +35,15 @@ export function isDemoModel(model: string | null | undefined): boolean {
 
 // Canonical trusted execution context. Constructed ONLY from the verified API
 // key; `actor` is the canonical resolveActor interpretation (kind "api",
-// role "public"), never a self-asserted identity.
-export interface TrustedExecutionContext {
-  readonly subject: string;
-  readonly actor: Actor | null;
-  readonly source: "gateway.authentication.verified_api_key";
-}
-
+// role "public"), never a self-asserted identity. Raw tokens never enter the
+// context — only the derived canonical subject `api:<id>`.
 export function resolveGatewayActor(apiKey: TeleGptApiKey): TrustedExecutionContext {
   const subject = `api:${apiKey.id}`;
-  return {
+  return createTrustedExecutionContext({
     subject,
     actor: resolveActor(subject),
     source: "gateway.authentication.verified_api_key",
-  };
+  });
 }
 
 export class GatewayDispatchError extends Error {

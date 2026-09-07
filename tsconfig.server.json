@@ -41,6 +41,7 @@
     "src/server/routes/mission-control.route.ts",
     "src/core/auth/runtime-access.ts",
     "src/core/models.ts",
+    "src/core/trusted-context/**/*.ts",
     "src/types/telecore.ts"
   ],
   "exclude": [
