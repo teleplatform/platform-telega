@@ -1,5 +1,6 @@
 export type CapabilityKind =
   | "model"
+  | "provider_chat"
   | "web_provider"
   | "sigma_forge"
   | "forge_bridge"

@@ -8,7 +8,7 @@ import { routeChat } from "../../core/router.js";
 import { ProviderVerification } from "../../core/provider-verification.js";
 import { appendEvidenceRecord } from "../../runtime/evidence/execution-evidence-store.js";
 import { gatewayAuthMiddleware } from "../auth.js";
-import { dispatchDemoReply, isDemoModel } from "../dispatch-adapter.js";
+import { dispatchDemoReply, dispatchProviderChat, isDemoModel, isProviderChatModel } from "../dispatch-adapter.js";
 
 export function registerChatCompletionsRoute(app: FastifyInstance): void {
   app.post("/v1/chat/completions", { preHandler: [gatewayAuthMiddleware] }, async (req, reply) => {
@@ -75,6 +75,38 @@ export function registerChatCompletionsRoute(app: FastifyInstance): void {
         });
 
         return reply.send(toOpenAiResponse(dispatchResponse, body.model));
+      }
+
+      // PD-W3/B4-B — Authenticated local chat slice through Dispatch vNext.
+      // EXACT model "local:local-chat" only; never a blanket local:* prefix.
+      // Same canonical lifecycle as the demo slice: gateway writes only the
+      // surface request/model-resolution events, Dispatch owns the execution
+      // lifecycle, and routeChat is never reached for this model.
+      if (isProviderChatModel(body.model)) {
+        appendEvidenceRecord({
+          evidence_id: `ide.gateway.model.resolved-${requestId}`,
+          trace_id: "ide_gateway",
+          job_id: requestId,
+          type: "context_routed" as any,
+          timestamp: new Date().toISOString(),
+          payload: {
+            requestedModel: body.model,
+            resolvedProvider: "local:llm",
+            executionLane: "dispatch_vnext",
+            verificationPassed: true,
+          },
+        }).catch(() => {});
+
+        const providerChatResponse = await dispatchProviderChat({
+          apiKey,
+          message: chatReq.message,
+          model: body.model,
+          system: chatReq.system,
+          run_id: requestId,
+          trace_id: requestId,
+        });
+
+        return reply.send(toOpenAiResponse(providerChatResponse, body.model));
       }
 
       const verification = ProviderVerification.verify(
