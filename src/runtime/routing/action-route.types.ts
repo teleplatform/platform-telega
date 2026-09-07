@@ -3,6 +3,7 @@ export type ActionRouteKind =
   | "sigma_forge"
   | "provider_bridge"
   | "forge_bridge"
+  | "worker_runtime"
   | "browser_agent"
   | "voice_runtime"
   | "mission_control"

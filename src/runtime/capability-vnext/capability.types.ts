@@ -3,6 +3,7 @@ export type CapabilityKind =
   | "web_provider"
   | "sigma_forge"
   | "forge_bridge"
+  | "worker_runtime"
   | "browser_agent"
   | "voice_runtime"
   | "mission_control"
