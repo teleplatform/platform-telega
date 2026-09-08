@@ -506,6 +506,22 @@ app.post("/v1/chat", async (req, reply) => {
           statusCode: 503,
         };
       }
+      if (code === "LOCAL_AUTO_UNAVAILABLE") {
+        const message =
+          typeof (e as any)?.message === "string" && (e as any).message.length
+            ? (e as any).message
+            : "Local automatic model selection is unavailable";
+        reply.header("x-error-code", code);
+        return {
+          body: {
+            error: code,
+            message,
+            request_id: requestId,
+            ts: new Date().toISOString(),
+          },
+          statusCode: 503,
+        };
+      }
       if (code === "PROVIDER_UNAVAILABLE" || code === "PROVIDER_ERROR") {
         const provider =
           typeof (e as any)?.provider === "string" ? (e as any).provider : undefined;

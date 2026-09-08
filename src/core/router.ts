@@ -196,6 +196,29 @@ function providerUnavailable(provider: "local" | "openai" | "deepseek" | "qwen" 
   throw err;
 }
 
+function localAutoUnavailable(diagnostics?: {
+  requested_model?: string;
+  available_providers?: string[];
+  disabled_providers?: string[];
+}): never {
+  const err = new Error("Local automatic model selection is unavailable");
+  (err as any).code = "LOCAL_AUTO_UNAVAILABLE";
+  (err as any).statusCode = 503;
+  (err as any).failureType = "invalid_request";
+  (err as any).shouldFallback = false;
+  (err as any).errorType = "server_error";
+  (err as any).hint =
+    "model \"local:auto\" is not supported; use an explicit model (e.g. local-demo, local:local-chat, or a concrete local model)";
+  (err as any).diagnostics = {
+    requested_model: diagnostics?.requested_model ?? "local:auto",
+    available_providers:
+      diagnostics?.available_providers ?? listAvailableProviders(),
+    disabled_providers:
+      diagnostics?.disabled_providers ?? listDisabledProviders(),
+  };
+  throw err;
+}
+
 function makeRequestId(req: ChatRequest): string {
   const anyReq = req as any;
   return (
@@ -496,9 +519,11 @@ async function executeProvider(
       return { id: `zyloo-${Date.now()}`, model, output: text, meta: { provider: "zyloo_api" as const, model } } as ChatResponse;
     }
     case "local": {
-      // local:auto handled via routeWithProvider
+      // local:auto is a recursive self-routing seam (routeChat →
+      // executeWithOrchestrator → executeProvider → routeWithProvider →
+      // routeChat). Fail closed instead of recursing.
       if (model === "auto") {
-        return await routeWithProvider(req, "local:auto");
+        return localAutoUnavailable({ requested_model: `${providerId}:auto` });
       }
       const knownLocalModel = getLocalModel(model);
       if (knownLocalModel) {
