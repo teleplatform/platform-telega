@@ -10,6 +10,15 @@ import type {
   DispatcherRoutingFacts,
   DispatcherRoutingObserver,
 } from "../../core/provider-selection-orchestrator.js";
+import type { ProviderId } from "../../core/provider-resolution.js";
+import {
+  applyPolicyHintToRanking,
+  POLICY_HINT_BONUS,
+} from "../../core/policy-hint.js";
+import type {
+  PolicyAdjustedRanking,
+  PolicyHint,
+} from "../../core/policy-hint.js";
 import {
   appendAuditEvent,
 } from "../../runtime/audit/audit-store.js";
@@ -48,6 +57,53 @@ function resolveDivergence(
   return { kind: "different_target", actualValue: actual, dispatcherValue: dispatcher };
 }
 
+/**
+ * Phase 6C.3A — derive hypothetical policy evidence from the exact base
+ * ranking that production used for actual selection. Evidence only; never
+ * feeds back into the production plan.
+ */
+function buildPolicyEvidence(
+  facts: DispatcherRoutingFacts,
+  hint: PolicyHint,
+  adjusted: PolicyAdjustedRanking,
+): Record<string, unknown> {
+  const actualProvider = facts.selectedProviderId;
+  const hypotheticalProvider = adjusted.ranked[0]?.providerId;
+  const preferredEntry = adjusted.ranked.find(
+    (e) => e.providerId === hint.preferredProviderId,
+  );
+
+  const baseWinnerProvider = facts.rankedProviders[0]?.providerId;
+  const baseWinnerScore = facts.rankedProviders[0]?.score ?? null;
+
+  const decisionChanged = hypotheticalProvider !== actualProvider;
+  const rankingChanged = hypotheticalProvider !== baseWinnerProvider;
+  const preferenceDefeated =
+    adjusted.hintApplied && hypotheticalProvider !== hint.preferredProviderId;
+
+  return {
+    hint_applied: adjusted.hintApplied,
+    preferred_provider_id: hint.preferredProviderId,
+    strength: hint.strength,
+    rule_id: hint.ruleId,
+    rule_name: hint.ruleName ?? null,
+    actual_provider: actualProvider,
+    hypothetical_provider: hypotheticalProvider,
+    base_score: preferredEntry?.baseScore ?? null,
+    policy_bonus: preferredEntry ? POLICY_HINT_BONUS[hint.strength] ?? 0 : 0,
+    adjusted_score: preferredEntry?.adjustedScore ?? null,
+    base_rank: preferredEntry?.baseRank ?? null,
+    adjusted_rank: preferredEntry?.adjustedRank ?? null,
+    base_winner_provider: baseWinnerProvider,
+    base_winner_score: baseWinnerScore,
+    base_score_gap: preferredEntry ? (baseWinnerScore ?? 0) - preferredEntry.baseScore : null,
+    decision_changed: decisionChanged,
+    ranking_changed: rankingChanged,
+    preference_defeated: preferenceDefeated,
+    eligible_provider_count: facts.rankedProviders.length,
+  };
+}
+
 export function createDispatcherShadowObserver(
   opts: DispatcherShadowObserverOptions,
 ): DispatcherRoutingObserver {
@@ -73,6 +129,19 @@ export function createDispatcherShadowObserver(
         const converged = gotWin && actual === dispatcherTarget;
         const divergence = resolveDivergence(result.outcome, actual, dispatcherTarget);
 
+        // Phase 6C.3A — hypothetical soft-policy influence (evidence only).
+        let policy: Record<string, unknown> | null = null;
+        if (gotWin && winner && dispatcherTarget) {
+          const hint: PolicyHint = {
+            preferredProviderId: dispatcherTarget as ProviderId,
+            strength: "low",
+            ruleId: winner.ruleId,
+            ruleName: winner.ruleName,
+          };
+          const adjusted = applyPolicyHintToRanking(facts.rankedProviders, hint);
+          policy = buildPolicyEvidence(facts, hint, adjusted);
+        }
+
         appendAuditEvent({
           kind: "routing.dispatcher.shadow_decision",
           severity: "info",
@@ -96,6 +165,7 @@ export function createDispatcherShadowObserver(
             },
             converged,
             divergence,
+            policy,
             timestamp: facts.timestamp,
           },
         });

@@ -57,6 +57,126 @@ export interface DivergenceReport {
   matchedRuleBreakdown: Array<{ ruleId: string; ruleName?: string; count: number }>;
   divergent: ShadowDecisionRecord[];
   errorEvents: string[];
+  policy: PolicyStats;
+}
+
+/**
+ * Phase 6C.3A — hypothetical soft-policy influence metrics. Replaces
+ * convergence as the principal validation signal: measures whether the
+ * approved bounded hint WOULD have changed the executable provider choice
+ * using the exact base ranking production actually used.
+ */
+export interface PolicyStats {
+  hintsGenerated: number;
+  hintsEligible: number;
+  hintsIneligible: number;
+  decisionImpacted: number;
+  targetWins: number;
+  preferenceDefeated: number;
+  decisionImpactRate: number;
+  hintTargetWinRate: number;
+  preferenceDefeatedRate: number;
+  averageRankDelta: number;
+  maxRankDelta: number;
+  averageBaseScoreGap: number;
+  averageFlippedScoreGap: number;
+  maxFlippedScoreGap: number;
+  averagePolicyBonus: number;
+  maxPolicyBonus: number;
+}
+
+export function emptyPolicyStats(): PolicyStats {
+  return {
+    hintsGenerated: 0,
+    hintsEligible: 0,
+    hintsIneligible: 0,
+    decisionImpacted: 0,
+    targetWins: 0,
+    preferenceDefeated: 0,
+    decisionImpactRate: 0,
+    hintTargetWinRate: 0,
+    preferenceDefeatedRate: 0,
+    averageRankDelta: 0,
+    maxRankDelta: 0,
+    averageBaseScoreGap: 0,
+    averageFlippedScoreGap: 0,
+    maxFlippedScoreGap: 0,
+    averagePolicyBonus: 0,
+    maxPolicyBonus: 0,
+  };
+}
+
+function num(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+export function buildPolicyStats(events: AuditEvent[]): PolicyStats {
+  const stats = emptyPolicyStats();
+  const rankDeltas: number[] = [];
+  const baseScoreGaps: number[] = [];
+  const flippedScoreGaps: number[] = [];
+  const bonuses: number[] = [];
+
+  for (const event of events) {
+    if (event.kind !== "routing.dispatcher.shadow_decision") continue;
+    const payload = (event.payload ?? {}) as Record<string, unknown>;
+    const policy = payload.policy as Record<string, unknown> | null | undefined;
+    if (!policy) continue;
+
+    stats.hintsGenerated += 1;
+    const hitApplied = policy.hint_applied === true;
+    const adjustedRank = num(policy.adjusted_rank);
+    const baseRank = num(policy.base_rank);
+    const gap = num(policy.base_score_gap);
+    const changed = policy.decision_changed === true;
+    const rankingChanged = policy.ranking_changed === true;
+    const defeated = policy.preference_defeated === true;
+    const bonus = num(policy.policy_bonus);
+
+    if (!hitApplied) {
+      stats.hintsIneligible += 1;
+      continue;
+    }
+    stats.hintsEligible += 1;
+
+    if (bonus !== null) {
+      bonuses.push(bonus);
+      stats.maxPolicyBonus = Math.max(stats.maxPolicyBonus, bonus);
+    }
+    if (baseRank !== null && adjustedRank !== null) {
+      rankDeltas.push(Math.abs(adjustedRank - baseRank));
+      stats.maxRankDelta = Math.max(stats.maxRankDelta, Math.abs(adjustedRank - baseRank));
+    }
+    if (gap !== null) {
+      baseScoreGaps.push(gap);
+    }
+    if (rankingChanged && gap !== null) {
+      flippedScoreGaps.push(gap);
+      stats.maxFlippedScoreGap = Math.max(stats.maxFlippedScoreGap, gap);
+    }
+    if (changed) {
+      stats.decisionImpacted += 1;
+    }
+    if (defeated) {
+      stats.preferenceDefeated += 1;
+    } else {
+      stats.targetWins += 1;
+    }
+  }
+
+  const mean = (arr: number[]) =>
+    arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+  stats.averageRankDelta = mean(rankDeltas);
+  stats.averageBaseScoreGap = mean(baseScoreGaps);
+  stats.averageFlippedScoreGap = mean(flippedScoreGaps);
+  stats.averagePolicyBonus = mean(bonuses);
+  stats.decisionImpactRate =
+    stats.hintsEligible > 0 ? (stats.decisionImpacted / stats.hintsEligible) * 100 : 0;
+  stats.hintTargetWinRate =
+    stats.hintsEligible > 0 ? (stats.targetWins / stats.hintsEligible) * 100 : 0;
+  stats.preferenceDefeatedRate =
+    stats.hintsEligible > 0 ? (stats.preferenceDefeated / stats.hintsEligible) * 100 : 0;
+  return stats;
 }
 
 export function parseShadowDecision(
@@ -139,10 +259,30 @@ export function buildDivergenceReport(
     matchedRuleBreakdown,
     divergent,
     errorEvents,
+    policy: buildPolicyStats(events),
   };
 }
 
 const pct = (v: number) => `${v.toFixed(2)}%`;
+
+function formatPolicyAscii(p: PolicyStats): string[] {
+  if (p.hintsGenerated === 0) {
+    return [`policy influence (6C.3A): no hints generated`];
+  }
+  return [
+    `policy influence (6C.3A):`,
+    `  ${String(p.hintsGenerated).padStart(6)} hints generated     (winner rule matched)`,
+    `  ${String(p.hintsEligible).padStart(6)} hints eligible      (target present in base ranking)`,
+    `  ${String(p.hintsIneligible).padStart(6)} hints ineligible    (target absent)`,
+    `  ${String(p.decisionImpacted).padStart(6)} decisions impacted  ${pct(p.decisionImpactRate)}`,
+    `  ${String(p.targetWins).padStart(6)} hint targets won     ${pct(p.hintTargetWinRate)}`,
+    `  ${String(p.preferenceDefeated).padStart(6)} preference defeated ${pct(p.preferenceDefeatedRate)}`,
+    `  avg/max rank delta: ${p.averageRankDelta.toFixed(3)} / ${p.maxRankDelta.toFixed(3)}`,
+    `  avg base score gap: ${p.averageBaseScoreGap.toFixed(4)}`,
+    `  avg/max flipped gap: ${p.averageFlippedScoreGap.toFixed(4)} / ${p.maxFlippedScoreGap.toFixed(4)}`,
+    `  avg/max policy bonus: ${p.averagePolicyBonus.toFixed(4)} / ${p.maxPolicyBonus.toFixed(4)}`,
+  ];
+}
 
 export function formatAsciiSummary(report: DivergenceReport): string {
   const t = report.totals;
@@ -164,11 +304,46 @@ export function formatAsciiSummary(report: DivergenceReport): string {
       ? report.matchedRuleBreakdown.map((r) => `  ${r.ruleId.padEnd(24)} ${r.count}`)
       : ["  (none)"]),
     ``,
+    ...formatPolicyAscii(report.policy),
+    ``,
     report.errorEvents.length
       ? `shadow evaluation errors:\n${report.errorEvents.map((e) => `  ${e}`).join("\n")}`
       : "shadow evaluation errors: none",
   ];
   return lines.join("\n");
+}
+
+function formatPolicyMarkdown(p: PolicyStats): string[] {
+  if (p.hintsGenerated === 0) {
+    return [`## Policy influence (6C.3A)`, ``, `_No hints generated across this window._`, ``];
+  }
+  return [
+    `## Policy influence (6C.3A) — hypothetical soft-policy ranking`,
+    ``,
+    `> Computed against the EXACT base ranking production used for actual`,
+    `> selection. No second scoring pass. Evidence-only.`,
+    ``,
+    `| metric | value |`,
+    `|---|---:|`,
+    `| hints generated | ${p.hintsGenerated} |`,
+    `| hints eligible | ${p.hintsEligible} |`,
+    `| hints ineligible | ${p.hintsIneligible} |`,
+    `| decisions impacted | ${p.decisionImpacted} (${pct(p.decisionImpactRate)}) |`,
+    `| hint-target win rate | ${p.hintTargetWinRate}% |`,
+    `| preference defeated rate | ${p.preferenceDefeatedRate}% |`,
+    `| average rank delta | ${p.averageRankDelta.toFixed(3)} |`,
+    `| max rank delta | ${p.maxRankDelta.toFixed(3)} |`,
+    `| average base score gap | ${p.averageBaseScoreGap.toFixed(4)} |`,
+    `| average flipped score gap | ${p.averageFlippedScoreGap.toFixed(4)} |`,
+    `| max flipped score gap | ${p.maxFlippedScoreGap.toFixed(4)} |`,
+    `| average policy bonus | ${p.averagePolicyBonus.toFixed(4)} |`,
+    `| max policy bonus | ${p.maxPolicyBonus.toFixed(4)} |`,
+    ``,
+    `> A low hint-target win rate and non-zero preference-defeated rate are the`,
+    `> CORRECT outcome: the hint is bounded and production health facts can still`,
+    `> defeat it.`,
+    ``,
+  ];
 }
 
 export function formatMarkdownReport(report: DivergenceReport): string {
@@ -213,6 +388,7 @@ export function formatMarkdownReport(report: DivergenceReport): string {
         ].join("\n")
       : "_No divergent decisions in this window._",
     ``,
+    ...formatPolicyMarkdown(report.policy),
     report.errorEvents.length
       ? [`## Shadow evaluation errors`, ``, ...report.errorEvents.map((e) => `- ${e}`), ``].join("\n")
       : "",
