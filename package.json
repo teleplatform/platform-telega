@@ -75,6 +75,8 @@
     "mission:control:rc5": "TSX_DISABLE_IPC=1 node --import tsx scripts/runtime/mission-control-rc5.ts",
     "mission:control:rc6": "TSX_DISABLE_IPC=1 node --import tsx scripts/runtime/mission-control-rc6.ts",
     "test:response-delivery": "node --import tsx --test src/telegram/utils/telegram-long-response-collapse.test.ts src/telegram/utils/telegram-answer-parity.test.ts",
+    "test:dispatcher-core": "pnpm --filter @tele-gpt/dispatcher-core test",
+    "test:dispatcher-api": "node --import tsx --test tests/dispatcher/dispatcher-api.test.ts",
     "test:memory-context-attachment": "node --import tsx --test src/runtime/memory/memory-context-attachment.test.ts",
     "test:memory-writeback": "node --import tsx --test src/runtime/memory/memory-writeback.test.ts",
     "test:memory-store-adapter": "node --import tsx --test src/runtime/memory/memory-store-adapter.test.ts",
@@ -184,6 +186,7 @@
     "governance:promote-canon": "node --import tsx src/governance/cli.ts promote-canon"
   },
   "keywords": [],
+  "private": true,
   "author": "",
   "license": "ISC",
   "description": "",
@@ -199,6 +202,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@tele-gpt/dispatcher-core": "workspace:*",
     "better-sqlite3": "^12.4.1",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",

@@ -1,0 +1,11 @@
+packages:
+  - "apps/*"
+  - "packages/dispatcher-core"
+  # ⚠️ TEMPORARY QUARANTINE (Phase 3):
+  #   packages/sigmaforge-freenim-adapter is intentionally ABSENT from this
+  #   workspace. It declares a broken dependency "@tele-gpt/core@workspace:*" —
+  #   no package named @tele-gpt/core exists in the workspace, so pnpm install
+  #   fails with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND.
+  #
+  #   The package itself is NOT modified. Re-include it (add "- packages/*")
+  #   only after that dependency is fixed or removed.
