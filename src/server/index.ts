@@ -17,6 +17,8 @@ import { registerForgeRoute } from "./routes/forge.route.js";
 import { registerPatchRoute } from "./routes/patch.route.js";
 import { registerForgeActionRoute } from "./routes/forge-action.route.js";
 import { registerMissionControlRoute } from "./routes/mission-control.route.js";
+import { registerDispatcherRoute } from "./routes/dispatcher.route.js";
+import { getSqliteConnection } from "../core/db.js";
 import { startTelegramBotIfEnabled } from "../telegram/bot.js";
 import { initializeFacts } from "../runtime/identity/index.js";
 import { initializeIdentityMemory, recordRuntimeEvent } from "../runtime/memory/index.js";
@@ -116,6 +118,7 @@ await registerForgeRoute(app);
 await registerPatchRoute(app);
 await registerForgeActionRoute(app);
 await registerMissionControlRoute(app);
+await registerDispatcherRoute(app, getSqliteConnection());
 
 const MAX_CONCURRENCY = Math.max(
   1,

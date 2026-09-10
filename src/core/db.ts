@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { initSqlite } from "../server/storage/sqlite.ts";
 
 let store: ReturnType<typeof initSqlite> | null = null;
@@ -11,6 +12,13 @@ function getStore() {
     store = initSqlite(dbPath);
   }
   return store;
+}
+
+// Single owner of the SQLite connection lifecycle. Consumers (e.g. the
+// Dispatcher API route) must reuse this handle via dependency injection
+// rather than opening their own connections to tele-gpt.sqlite.
+export function getSqliteConnection(): Database.Database {
+  return getStore().connection;
 }
 
 export const db = {
