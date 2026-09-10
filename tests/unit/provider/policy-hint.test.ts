@@ -168,4 +168,45 @@ describe("Phase 6C.3A — applyPolicyHintToRanking", () => {
     assert.equal(adjusted.ranked[0].providerId, "kimi_api");
     approx(adjusted.ranked[0].adjustedScore, 0.53);
   });
+
+  it("hard flip boundary: flip only when gap < bonus (gap=0.03 exactly → tie → base rank preserved)", () => {
+    const bonus = POLICY_HINT_BONUS.low; // 0.03
+
+    // gap = 0.029999 → bonus > gap → flip
+    const below = [
+      { providerId: "openai_api", score: 0.96 },
+      { providerId: "kimi_api", score: 0.96 - (bonus - 0.000001) },
+    ];
+    const adjBelow = applyPolicyHintToRanking(below, {
+      preferredProviderId: "kimi_api",
+      strength: "low",
+      ruleId: "r1",
+    });
+    assert.equal(adjBelow.ranked[0].providerId, "kimi_api", "gap < bonus → flip");
+
+    // gap = 0.030000 exactly → adjusted tie → base rank preserved → NO flip
+    const exact = [
+      { providerId: "openai_api", score: 0.96 },
+      { providerId: "kimi_api", score: 0.96 - bonus },
+    ];
+    const adjExact = applyPolicyHintToRanking(exact, {
+      preferredProviderId: "kimi_api",
+      strength: "low",
+      ruleId: "r1",
+    });
+    assert.equal(adjExact.ranked[0].providerId, "openai_api", "gap == bonus → tie → base rank wins");
+    assert.equal(adjExact.ranked[1].providerId, "kimi_api");
+
+    // gap = 0.030001 → gap > bonus → no flip
+    const above = [
+      { providerId: "openai_api", score: 0.96 },
+      { providerId: "kimi_api", score: 0.96 - (bonus + 0.000001) },
+    ];
+    const adjAbove = applyPolicyHintToRanking(above, {
+      preferredProviderId: "kimi_api",
+      strength: "low",
+      ruleId: "r1",
+    });
+    assert.equal(adjAbove.ranked[0].providerId, "openai_api", "gap > bonus → no flip");
+  });
 });
