@@ -29,7 +29,10 @@ export type AuditEventKind =
   | 'control.resumed'
   | 'control.cancelled'
   | 'evidence.recorded'
-  | 'evidence.verified';
+  | 'evidence.verified'
+  | 'routing.dispatcher.shadow_decision'
+  | 'routing.dispatcher.divergence'
+  | 'routing.dispatcher.error';
 
 export type AuditSeverity = 'low' | 'info' | 'medium' | 'high' | 'critical';
 

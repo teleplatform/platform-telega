@@ -43,6 +43,17 @@ import type {
   RuntimeConfig,
   RuntimeRegistry,
 } from "@tele-gpt/dispatcher-core";
+import { setDispatcherRoutingObserver } from "../../core/provider-selection-orchestrator.js";
+import {
+  createDispatcherShadowObserver,
+} from "../dispatcher/dispatcher-shadow-observer.js";
+import {
+  getDispatcher6CState,
+  isDispatcherShadowEnabled,
+  loadDispatcher6CState,
+  setDispatcherRouterKillSwitch,
+} from "../dispatcher/dispatcher-mode.js";
+import { authMiddleware, getAuthContext } from "../middleware/auth.js";
 
 const MODEL_FORMATS = new Set([
   "gguf",
@@ -539,6 +550,9 @@ function parseExplainInput(body: unknown): ParseResult<RoutingExplainInput> {
 export async function registerDispatcherRoute(server: any, db: Database.Database) {
   const { models, providers, runtimes, routing, devices } = getRegistries(db);
 
+  await loadDispatcher6CState();
+  setDispatcherRoutingObserver(createDispatcherShadowObserver({ routing }));
+
   // ── Models ──────────────────────────────────────────────
   server.get("/dispatcher/models", async (_req: any, reply: any) => {
     try {
@@ -735,6 +749,37 @@ export async function registerDispatcherRoute(server: any, db: Database.Database
       const item = routing.getById(req.params.id);
       if (!item) return notFound(reply, "routing rule", req.params.id);
       return reply.send(item);
+    } catch (e: any) {
+      return reply.status(500).send({ error: "internal", message: messageOf(e) });
+    }
+  });
+
+  // ── Phase 6C.1 Status (read-only) ───────────────────────────
+  server.get("/dispatcher/routing/status", async (_req: any, reply: any) => {
+    try {
+      const state = getDispatcher6CState();
+      return reply.send({
+        mode: state.mode,
+        killSwitch: state.killSwitch,
+        shadowEnabled: isDispatcherShadowEnabled(),
+        observerInstalled: true,
+      });
+    } catch (e: any) {
+      return reply.status(500).send({ error: "internal", message: messageOf(e) });
+    }
+  });
+
+  // Maker-only kill switch toggle (Phase 6C.1). Engaged ⇒ the shadow
+  // observer is bypassed: routing returns to baseline immediately.
+  server.post("/dispatcher/routing/kill-switch", { preHandler: [authMiddleware] }, async (req: any, reply: any) => {
+    try {
+      const auth = getAuthContext(req);
+      if (!auth?.isMaker) {
+        return reply.status(403).send({ error: "forbidden", message: "maker required" });
+      }
+      const enabled = Boolean((req.body as any)?.enabled);
+      const state = setDispatcherRouterKillSwitch(enabled);
+      return reply.send({ ok: true, killSwitch: state.killSwitch });
     } catch (e: any) {
       return reply.status(500).send({ error: "internal", message: messageOf(e) });
     }

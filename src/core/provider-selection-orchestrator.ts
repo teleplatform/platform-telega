@@ -102,6 +102,54 @@ export interface ProviderSelectionPlan {
   timestamp: number;
 }
 
+// ─── Dispatcher observer port (Phase 6C) ──────────────────────────────────────
+//
+// The routing core never imports @tele-gpt/dispatcher-core. The composition
+// root (src/server) implements this port and injects it via
+// setDispatcherRoutingObserver. When absent, planProviderSelectionV2 behaves
+// exactly as before 6C.
+
+export type DispatcherOverrideKind = "none" | "prefer";
+
+export interface DispatcherOverridePrefer {
+  providerId: ProviderId;
+  model?: string;
+  ruleId?: string;
+}
+
+export type DispatcherOverride =
+  | { kind: "none" }
+  | { kind: "prefer"; prefer: DispatcherOverridePrefer };
+
+export interface DispatcherRoutingFacts {
+  requestId?: string;
+  intent: ProviderRouteIntent;
+  requiredCapabilities: Capability[];
+  consideredProviders: ProviderId[];
+  eligibleProviders: ProviderId[];
+  rankedProviders: Array<{ providerId: ProviderId; score: number }>;
+  selectedProviderId?: ProviderId;
+  selectedModel?: string;
+  fallbackOrder: ProviderId[];
+  timestamp: number;
+}
+
+export interface DispatcherRoutingObserver {
+  observe(facts: DispatcherRoutingFacts): DispatcherOverride;
+}
+
+let dispatcherRoutingObserver: DispatcherRoutingObserver | undefined;
+
+export function setDispatcherRoutingObserver(
+  observer: DispatcherRoutingObserver | undefined,
+): void {
+  dispatcherRoutingObserver = observer;
+}
+
+export function getDispatcherRoutingObserver(): DispatcherRoutingObserver | undefined {
+  return dispatcherRoutingObserver;
+}
+
 // ─── Canonical selection errors (sanitized) ───────────────────────────────────
 
 export type SelectionErrorCode =
@@ -559,6 +607,25 @@ export function planProviderSelectionV2(
     terminalReason,
     timestamp,
   };
+  const dispatcherObserver = getDispatcherRoutingObserver();
+  if (dispatcherObserver) {
+    try {
+      dispatcherObserver.observe({
+        requestId,
+        intent,
+        requiredCapabilities: intent.requiredCapabilities,
+        consideredProviders: candidates,
+        eligibleProviders: eligible,
+        rankedProviders,
+        selectedProviderId,
+        selectedModel: intent.requestedModel,
+        fallbackOrder,
+        timestamp,
+      });
+    } catch {
+      // fail-open: observation is advisory only
+    }
+  }
   emitSelectionPlanned(plan).catch(() => {});
   return plan;
 }
