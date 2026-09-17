@@ -38,6 +38,7 @@ The Tele•GPT core currently includes:
 9. `WORKSPACE_ENGINE_CANON_v1.md`
 10. `EVIDENCE_BUNDLE_CANON_v1.md`
 11. `MULTI_AGENT_ORCHESTRATION_CANON_v1.md`
+12. `AI_MUTATION_SAFETY_CANON_v1.md`
 
 These documents define the active canonical spine of Tele•GPT core.
 
@@ -165,12 +166,30 @@ Defines role-bound decomposition, handoff contracts, and verifier checkpoints.
 
 ---
 
+### 3.12 AI_MUTATION_SAFETY_CANON_v1.md
+
+Role:
+Defines the mandatory safety contract for AI-generated changes to live commerce state.
+
+Covers:
+- draft-by-default proposals
+- deterministic before/after preview
+- risk classification and least-privilege authorization
+- bounded, idempotent execution
+- audit receipts, rollback, and compensating actions
+- fail-closed controls for financial and other sensitive mutations
+
+This is the canonical owner-control boundary for Merchant Copilot, AI Commerce OS, Tele•GPT tools, external MCP clients, services, CRM, and Marketbase operations.
+
+---
+
 ## 4. Relationship Between Documents
 
 Canonical dependency direction:
 
 Controlled Capability  
 → Permission System  
+→ AI Mutation Safety  
 → Runtime Architecture  
 → Workspace Engine  
 → Skill Engine  
@@ -185,15 +204,16 @@ Operational reading order for implementation teams:
 
 1. `CONTROLLED_AGENT_CAPABILITY_CANON_v1.md`
 2. `AGENT_PERMISSION_SYSTEM_CANON_v1.md`
-3. `PACK_AGENT_RUNTIME_ARCHITECTURE_v1.md`
-4. `WORKSPACE_ENGINE_CANON_v1.md`
-5. `SKILL_ENGINE_CANON_v1.md`
-6. `TOOL_GATEWAY_CANON_v1.md`
-7. `MODEL_ROUTER_CANON_v1.md`
-8. `MEMORY_SYSTEM_CANON_v1.md`
-9. `EVIDENCE_BUNDLE_CANON_v1.md`
-10. `MULTI_AGENT_ORCHESTRATION_CANON_v1.md`
-11. `TELE_GPT_CORE_STACK_v1.md`
+3. `AI_MUTATION_SAFETY_CANON_v1.md`
+4. `PACK_AGENT_RUNTIME_ARCHITECTURE_v1.md`
+5. `WORKSPACE_ENGINE_CANON_v1.md`
+6. `SKILL_ENGINE_CANON_v1.md`
+7. `TOOL_GATEWAY_CANON_v1.md`
+8. `MODEL_ROUTER_CANON_v1.md`
+9. `MEMORY_SYSTEM_CANON_v1.md`
+10. `EVIDENCE_BUNDLE_CANON_v1.md`
+11. `MULTI_AGENT_ORCHESTRATION_CANON_v1.md`
+12. `TELE_GPT_CORE_STACK_v1.md`
 
 ---
 
@@ -204,12 +224,16 @@ The current Tele•GPT agent core is defined by:
 Intent  
 → Policy  
 → Permission  
-→ Runtime  
+→ Proposal  
+→ Preview  
+→ Authorization  
+→ Bounded Execution  
 → Workspace  
 → Skill  
 → Tool  
 → Memory  
 → Evidence  
+→ Audit / Recovery  
 → Result
 
 This formula must be interpreted using all listed core canons.
@@ -224,6 +248,7 @@ It now has a canonical spine covering:
 - execution architecture
 - capability control
 - permission enforcement
+- owner-controlled AI mutation safety
 - reusable skill logic
 - model routing
 - workspace isolation
@@ -265,6 +290,7 @@ The Tele•GPT core agent system is founded on a governed canon spine across:
 
 - capability philosophy
 - permissions
+- AI mutation safety
 - runtime
 - workspace
 - skills
