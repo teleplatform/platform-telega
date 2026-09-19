@@ -38,6 +38,7 @@ The Tele•GPT core currently includes:
 9. `WORKSPACE_ENGINE_CANON_v1.md`
 10. `EVIDENCE_BUNDLE_CANON_v1.md`
 11. `MULTI_AGENT_ORCHESTRATION_CANON_v1.md`
+12. `TELEGRAM_SERVERLESS_EDGE_CANON_v1.md`
 
 These documents define the active canonical spine of Tele•GPT core.
 
@@ -165,6 +166,21 @@ Defines role-bound decomposition, handoff contracts, and verifier checkpoints.
 
 ---
 
+### 3.12 TELEGRAM_SERVERLESS_EDGE_CANON_v1.md
+
+Role:
+Defines Telegram Serverless as a channel-specific execution edge while preserving Tele•Ga Core authority and multi-channel portability.
+
+Covers:
+- Telegram handler and Mini App edge responsibilities
+- SQLite edge-state boundaries
+- capability forwarding into Tele•Ga Core
+- heavy AI/media exclusions
+- OpenCode/tgcloud deployment discipline
+- migration and portability rules
+
+---
+
 ## 4. Relationship Between Documents
 
 Canonical dependency direction:
@@ -179,6 +195,7 @@ Controlled Capability
 → Memory System  
 → Evidence Bundle  
 → Multi-Agent Orchestration  
+→ Telegram Serverless Edge (channel adapter)  
 → Tele•GPT Core Stack
 
 Operational reading order for implementation teams:
@@ -193,7 +210,8 @@ Operational reading order for implementation teams:
 8. `MEMORY_SYSTEM_CANON_v1.md`
 9. `EVIDENCE_BUNDLE_CANON_v1.md`
 10. `MULTI_AGENT_ORCHESTRATION_CANON_v1.md`
-11. `TELE_GPT_CORE_STACK_v1.md`
+11. `TELEGRAM_SERVERLESS_EDGE_CANON_v1.md`
+12. `TELE_GPT_CORE_STACK_v1.md`
 
 ---
 
