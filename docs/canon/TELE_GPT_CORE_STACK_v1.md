@@ -49,6 +49,7 @@ Possible interfaces include:
 - Tele•GPT chat interface
 - Tele•Ga UI
 - Telegram bridge
+- Telegram Serverless Edge (optional Telegram-native channel adapter)
 - API endpoints
 - CLI interface
 
@@ -58,6 +59,8 @@ Responsibilities:
 - authenticate user
 - attach context
 - pass task to orchestrator
+
+Telegram-specific execution may use `TELEGRAM_SERVERLESS_EDGE_CANON_v1.md`. The edge remains non-authoritative: provider/model selection, permanent memory, business data, Tele•Forge and heavy workers stay in Tele•Ga Core.
 
 ---
 
