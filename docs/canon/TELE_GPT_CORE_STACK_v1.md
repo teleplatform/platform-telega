@@ -27,13 +27,16 @@ User Intent
 → Orchestrator  
 → Policy System  
 → Permission System  
+→ Proposal / Preview / Authorization  
 → Agent Runtime  
 → Workspace Engine  
 → Skill Engine  
 → Tool Gateway  
+→ Agent Commerce Gateway (commerce operations only)  
+→ Canonical Commerce / Orders / Payment Authorities  
 → Model Router  
 → Memory System  
-→ Evidence & Trace  
+→ Evidence & Trace / Recovery  
 → Result
 
 Each layer exists to ensure safe, deterministic, and auditable agent execution.
@@ -124,6 +127,24 @@ AGENT_PERMISSION_SYSTEM_CANON_v1.md
 
 ---
 
+## 6A. AI Mutation Safety
+
+Any AI-generated change to commerce, services, CRM, Marketbase, configuration, or communications must use the shared safety flow:
+
+Proposal  
+→ deterministic preview  
+→ explicit authorization  
+→ bounded execution  
+→ audit / recovery
+
+A model recommendation or tool call is never authorization.
+
+Primary canon:
+
+AI_MUTATION_SAFETY_CANON_v1.md
+
+---
+
 # 7. Agent Runtime
 
 The runtime executes tasks and manages execution state.
@@ -209,6 +230,28 @@ Adapters may connect to:
 Primary canon:
 
 TOOL_GATEWAY_CANON_v1.md
+
+---
+
+## 10A. Agent Commerce Gateway
+
+AI agents that discover products, prepare checkout, or initiate orders/payments must pass through the permissioned Agent Commerce Gateway.
+
+Canonical commerce flow:
+
+Declared agent identity  
+→ merchant consent and scoped catalog  
+→ typed checkout proposal  
+→ buyer confirmation  
+→ bounded Payment Intent Capsule  
+→ canonical order/payment services  
+→ signed receipt and audit
+
+The gateway is not a catalog, cart, order, inventory, customer, or payment source of truth. Tele•Fishka and external agents remain clients of this boundary. Telegram Serverless and other channel edges only forward normalized requests.
+
+Primary canon:
+
+AGENT_COMMERCE_GATEWAY_CANON_v1.md
 
 ---
 
@@ -319,7 +362,7 @@ AUTOMATION_ENGINE_CANON_v1.md
 
 ---
 
-# 16. Strategic Summary
+# 17. Strategic Summary
 
 Tele•GPT architecture is designed as a governed agent operating system.
 
@@ -327,8 +370,10 @@ Core pillars:
 
 Runtime  
 Permissions  
+AI Mutation Safety  
 Skills  
 Tools  
+Agent Commerce Gateway  
 Memory  
 Evidence
 
@@ -336,7 +381,7 @@ This stack enables Tele•GPT to operate safely across the Tele•Ga ecosystem.
 
 ---
 
-# 17. Canonical Stack Overview
+# 18. Canonical Stack Overview
 
 High-level architecture:
 
@@ -346,19 +391,19 @@ Orchestrator
 ↓  
 Policy / Permission  
 ↓  
-Runtime  
+Proposal / Preview / Authorization  
 ↓  
-Workspace  
-↓  
-Skills  
+Runtime / Workspace / Skills  
 ↓  
 Tool Gateway  
 ↓  
-Model Router  
+Agent Commerce Gateway (when commerce is requested)  
 ↓  
-Memory  
+Canonical Commerce / Orders / Payment Authorities  
 ↓  
-Evidence  
+Model Router / Memory  
+↓  
+Evidence / Audit / Recovery  
 ↓  
 Result
 
